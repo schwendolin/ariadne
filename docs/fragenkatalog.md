@@ -4,6 +4,8 @@ Brainstorming zur Vision von Ariadne, einem Hilfstool für Pentests unter Linux.
 
 Jede Frage hat Antwortmöglichkeiten und eine Empfehlung aus Sicht eines erfahrenen Pentesters. Die Empfehlungen sind aufeinander abgestimmt und ergeben zusammen ein Gesamtbild, das eine Person neben Job und Studium bauen kann. Abschnitt 11 enthält Fragen, die im ersten Entwurf fehlten.
 
+> Die Antworten des Nutzers sind in die [Vision](../VISION.md) und das [Entscheidungsprotokoll](entscheide.md) eingeflossen. Dieser Katalog bleibt als Brainstorming-Stand erhalten.
+
 **So antworten:** «Empfehlungen passen, ausser 2.2: …, 9.1: …». Die Fragen, die nur du beantworten kannst, stehen am Ende.
 
 ## Leitbild

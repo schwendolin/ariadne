@@ -1,0 +1,1156 @@
+# Ariadne: Lösungsarchitektur
+
+> Entwurf v1, Stand 2026-10-08. Erarbeitet mit KI-Unterstützung (Claude): sechs Teilsystem-Entwürfe, geprüft auf Konsistenz, Sicherheit und technische Fakten. Grundlage sind die [Vision](../VISION.md) und das [Entscheidungsprotokoll](entscheide.md). Wo etwas noch nicht gesichert ist, steht «zu verifizieren». Die Liste dieser Punkte steht in [Abschnitt 13](#13-zu-verifizieren).
+
+## Inhalt
+
+1. [Überblick](#1-überblick)
+2. [Begriffe](#2-begriffe)
+3. [Terminal-Erfassung](#3-terminal-erfassung)
+4. [Weitere Quellen](#4-weitere-quellen)
+5. [Daten und Auswertung](#5-daten-und-auswertung)
+6. [KI und Denkanstösse](#6-ki-und-denkanstösse)
+7. [Web-Oberfläche und Karte](#7-web-oberfläche-und-karte)
+8. [Projekte, Speicher und Betrieb](#8-projekte-speicher-und-betrieb)
+9. [Sicherheitsarchitektur](#9-sicherheitsarchitektur)
+10. [Repo und Qualität](#10-repo-und-qualität)
+11. [Roadmap](#11-roadmap)
+12. [Risiken](#12-risiken)
+13. [Zu verifizieren](#13-zu-verifizieren)
+14. [Offene Fragen](#14-offene-fragen)
+
+## 1 Überblick
+
+```mermaid
+flowchart LR
+  subgraph Kali["Kali, Benutzer des Operators"]
+    T1["Terminal mit ariadne-shim"]
+    T2["Terminal mit ariadne-shim"]
+    CLI["ariadne (CLI)"]
+    D["ariadned (Daemon-Kern)"]
+    W["Worker: Parser, Bilder, OCR"]
+    UI["Firefox, eigenes Profil: Web-UI"]
+    WS["~/ariadne/projekt/: Arbeitsbereich"]
+    V[".vault/: journal.db, derived.db, state.db, Blobs"]
+  end
+  Z["Ziele"]
+  LLM["Claude API oder Ollama lokal"]
+  T1 -- "term.sock" --> D
+  T2 -- "term.sock" --> D
+  CLI -- "ctl.sock" --> D
+  UI -- "HTTP 127.0.0.1, Token" --> D
+  WS -- "Watcher" --> D
+  D -- "Pipe, ohne Schlüssel" --> W
+  D --> V
+  D -- "Gateway mit Policy" --> LLM
+  T1 -. "deine Befehle" .-> Z
+```
+
+**Prozesse**
+
+| Prozess | Aufgabe | Technik |
+|---|---|---|
+| `ariadne-shim` | einer pro Terminal; reicht Ein- und Ausgabe durch, nimmt den Output auf, erkennt den Hotkey | Python, nur Standardbibliothek |
+| `ariadned` | Kern: REC-Zustand, Journal, Ingest, Projektion, Regeln, KI-Gateway, HTTP-API; hält als einziger Prozess die Schlüssel | Python, asyncio, FastAPI auf uvicorn |
+| Worker | parsen feindliche Daten (Tool-Outputs, Dateien, Bilder, PCAPs) ohne Schlüssel, ohne Netz, ohne Home | Subprozesse des Daemons |
+| `ariadne` | CLI für Projekte, REC, Kontext, Import, Export, Setup | Python |
+| Web-UI | Cockpit: REC-Knopf, Terminals, Inbox, Karte, Belege | Svelte 5, TypeScript, Cytoscape.js |
+
+**Datenfluss in einem Satz:** Shim und Quellen liefern Rohereignisse, der Daemon schwärzt eigene Secrets, hängt die Ereignisse an das verschlüsselte Journal, zerlegt sie in Einheiten, lässt Worker sie parsen, berechnet daraus Behauptungen und Entitäten und zeigt das Ergebnis in Inbox und Karte. Deine Entscheide gehen als eigene Ereignisse zurück ins Journal.
+
+## 2 Begriffe
+
+Diese Begriffe gelten verbindlich in Code, UI und Doku.
+
+| Begriff | Bedeutung |
+|---|---|
+| Rohereignis | unveränderlicher Eintrag in Schicht 1 des Journals, z. B. ein Output-Chunk oder eine beobachtete Datei |
+| Entscheid | Eintrag in Schicht 3: etwas, das der Nutzer festgelegt hat (bestätigen, Kontext setzen, Status, Notiz). Übersteht jeden Reparse |
+| Einheit | was ein Parser auf einmal liest: ein lokaler Befehl, ein Remote-Segment, eine Datei, ein Bild |
+| Segment | Abschnitt eines Remote-Kontexts ohne verlässliche Befehlsgrenzen |
+| Beobachtung | Aussage eines Parsers mit Fundstelle, z. B. «10.10.10.5 Port 21 Produkt vsftpd» |
+| Mention | erkannter Wert ohne Aussagekraft für die Karte (z. B. eine IP in einem Log), durchsuchbar und per Klick übernehmbar |
+| Claim | aggregierte Behauptung über eine Kennung, mit Konfidenz, Zustand und allen Belegen |
+| Kennung | konkrete Adresse oder Name: `ip:default/10.10.10.5`, `mac:...`, `fqdn:...`, `sshkey:...` |
+| Entität | Host, Service, Identität, Secret usw., zusammengesetzt aus Kennungen |
+| Kontextspanne | Abschnitt eines Terminal-Stroms, der einem Host und Benutzer zugeordnet ist |
+| Inbox | Liste neuer Kandidaten, Konflikte und Vorschläge, die auf eine Entscheidung warten |
+| Hinweis | verdichteter Fund mit Schwere, z. B. ein Privesc-Kandidat aus linpeas |
+| Finding | bewertete Schwachstelle mit betroffenen Assets, Belegen und Massnahme; entsteht nur durch den Nutzer |
+| Loot | vom Ziel geholte Datei, mit Herkunftshost und Hash |
+| Artefakt | Spur auf einem Ziel, die beim Cleanup entfernt werden muss (hochgeladene Datei, angelegter Benutzer) |
+| Schlüsselschritt | vom Nutzer markierter Moment: foothold, privesc, pivot, loot |
+| Faden | Folge der Schlüsselschritte, auf der Karte als Linie |
+| Prüfziel | was an einem Dienst geprüft werden sollte, unabhängig vom Tool (z. B. anonymer Zugriff) |
+| Lagebild | kompakte, deterministisch erzeugte Textzusammenfassung des Projektstands für die KI |
+
+## 3 Terminal-Erfassung
+
+Vier Invarianten gelten für den Shim:
+
+1. Die Shell geht nie kaputt. Jeder Fehler endet in der nackten Shell oder in einem Relay ohne Aufnahme.
+2. Der Shim schreibt nie in die Eingabe des inneren Programms, ausser den Tasten des Nutzers und Fenstergrössen.
+3. Gespeichert wird nur der Output-Strom, nie Tastendrücke.
+4. Befehle, Segmente und Kontextzuordnung sind abgeleitet und jederzeit neu berechenbar.
+
+### 3.1 Start und Fallback
+
+`ariadne setup` schreibt eine Zeile zwischen Markern (`# >>> ariadne >>>`) ganz oben in `.zshrc` bzw. `.bashrc`. Sie liest `~/.local/share/ariadne/shell/init.<shell>` nur, wenn die Datei existiert.
+
+Die Init-Datei startet den Shim nur, wenn alles zutrifft: interaktive Shell, stdin und stdout sind ein TTY, `TERM` ist nicht `dumb`, weder `ARIADNE_DISABLE` noch `~/.config/ariadne/disable` existiert, und der Shim läuft noch nicht für dieses TTY. Dann folgt `exec` auf einen `/bin/sh`-Launcher.
+
+- **zsh hat kein `execfail`.** Ein gescheitertes `exec` in der `.zshrc` beendet die Shell. `init.zsh` prüft deshalb vor dem `exec`, ob der Launcher ausführbar ist. bash setzt zusätzlich `shopt -s execfail`.
+- Der Launcher prüft, ob der Python-Interpreter des pipx-venv existiert. Ein Kali-Update kann ihn entfernen. Fehlt er, startet die Shell mit `ARIADNE_SHIM_FAILED=interpreter`, und der Fenstertitel zeigt `[ariadne inaktiv]`.
+- Der Shim startet mit `python3 -I -S`. Der Launcher übergibt den Pfad zu `site-packages/ariadne/_shim/`, und der Shim setzt ihn explizit in `sys.path`. Startzeit nach dieser Änderung neu messen (Ziel unter 50 ms).
+- **Doppel-Wrapping:** Der Shim nennt sich per `prctl(PR_SET_NAME)` `ariadne-shim` und prüft die Vorfahren über `/proc`. Liegt bereits ein Shim in der Kette und kein Multiplexer (`tmux`, `screen`, `zellij`, `dtach`) dazwischen, startet er ohne Aufnahme. tmux-Panes bekommen also eigene Shims, `sudo -i` und Unter-Shells nicht.
+
+### 3.2 PTY-Relay
+
+- `os.openpty()`, termios und Fenstergrösse auf den Slave kopieren, `fork`. Im Kind `os.login_tty()` (ab Python 3.11) und alle Signale auf `SIG_DFL`, vor allem `SIGPIPE` und `SIGXFSZ`, die Python sonst ignoriert vererbt.
+- Äusseres Terminal im Raw-Mode, Wiederherstellung bei jedem Ausstieg.
+- Eine `selectors`-Schleife ohne Threads. Kommt das Terminal nicht nach, liest der Shim den Master nicht weiter, stdin aber schon, damit Ctrl-C sofort durchgeht.
+- `SIGWINCH` wird an den Master weitergegeben und als `term.resize` mit Offset vermerkt.
+- Fehler im Aufnahmecode schalten nur die Aufnahme ab, das Relay läuft weiter.
+- Der Elternprozess setzt `RLIMIT_CORE=0` und `PR_SET_DUMPABLE 0` (nicht für die Shell).
+- Ziele: unter 1 ms Zusatzlatenz pro Taste, mindestens 50 MB/s Durchsatz (zu messen). Sonst später ein nativer Relay-Kern mit gleichem Protokoll.
+
+### 3.3 Shell-Integration und Marker
+
+Die Hooks senden die Standard-Marker `OSC 133` (A: Prompt, B: Eingabe, C: Befehl startet, D: Befehl endet mit Exit-Code) ans Terminal. Zusätzlich senden sie einen privaten Marker:
+
+```
+ESC ] 7701 ; ariadne ; v1 ; <nonce> ; <zähler> ; <typ> ; <felder> BEL
+```
+
+Die Felder sind percent-kodiert: Befehl (getippt und alias-expandiert), `cwd`, Exit-Code, `pipestatus`, Shell-PID, `SHLVL`, Benutzer. Der Shim entfernt alle `OSC 7701`-Sequenzen aus dem Anzeige-Strom und reicht gültige als Ereignis `term.mark` weiter.
+
+**Fälschungsschutz.** Jedes Ziel kann beliebige Bytes ausgeben, auch einen `OSC 133;D`, und so eine Rückkehr nach Kali vortäuschen. Darum gilt:
+
+- Nur Marker mit gültiger Nonce zählen. Die Nonce (128 Bit) wird bei jedem Shell-Start neu erzeugt, ein Zähler verhindert Wiederholungen.
+- `D`- und `A`-Marker zählen zusätzlich nur, wenn `tcgetpgrp(master)` gerade die Prozessgruppe der Shell meldet. Solange ssh oder nc im Vordergrund läuft, ist das nie der Fall, auch wenn die Nonce geleakt ist.
+- Ungültige Marker speichert Ariadne als `term.marker_forged`. Das ist ein starkes Indiz für ein Ziel, das Pentester-Tools angreift.
+- Fremde `OSC 133`-Marker im Strom sind nie Befehlsgrenzen.
+
+**Shell-Details**
+
+- **zsh:** `add-zsh-hook preexec` und `precmd`. zsh stellt `$?` und `pipestatus` vor jedem Hook wieder her, die Reihenfolge der Hooks ist daher egal. `$3` in preexec ist nur alias-expandiert, Variablen bleiben wörtlich (`ssh user@$IP`). Der Hook löst einfache Referenzen `$NAME` und `${NAME}` ohne `eval` auf und schickt die Werte mit. `$(...)` wird nie ausgeführt.
+- **bash:** `PS0` für C, `PROMPT_COMMAND` an erster Stelle für D und A, kein DEBUG-Trap. Ab bash 5.3 holt `${ builtin history 1; }` den Befehlstext ohne Fork. Bei bash 4.4 bis 5.2 kommt der Text erst mit dem D-Marker. Ob ein Befehl in der History landet, hängt an `HISTCONTROL`, fehlt er, heisst der Text «unbekannt».
+- **fish (v0.2):** fish ab 4.0 sendet `OSC 133` selbst. `init.fish` sendet nur den Nonce-Marker.
+- **Andere Shells:** Aufnahme ohne Befehlsgrenzen.
+
+Der Bereich zwischen A und C (Prompt und Eingabe-Echo) wird gespeichert, geht aber nie an Parser, KI oder die Standardsuche. Unter Kali zeigt `zsh-autosuggestions` dort Einträge aus der History.
+
+### 3.4 Hotkey und Mini-Prompt
+
+Präfix `Ctrl-]` (0x1D), dann eine Taste. Zweimal `Ctrl-]` sendet das Zeichen selbst, wichtig für telnet. Erkannt werden auch die Kodierungen `CSI 93;5u` (Kitty-Protokoll) und `CSI 27;5;93~` (modifyOtherKeys). Der Präfix ist konfigurierbar, `ariadne hotkey test` zeigt, was ankommt. Auf dem Schweizer Layout ist `Ctrl-]` schwer erreichbar (offene Frage).
+
+| Taste | Wirkung | Version |
+|---|---|---|
+| `r` | REC umschalten | v0.1 |
+| `h` | Host für die oberste Stufe setzen oder neue Stufe darüber, mit Tab-Ergänzung | v0.1 |
+| `b` | oberste Stufe schliessen | v0.1 |
+| `k` | Schlüsselschritt markieren (foothold, privesc, pivot, loot), optional mit Screenshot | v0.1 |
+| `s` | Screenshot anfordern | v0.1 |
+| `?` | Hilfe | v0.1 |
+| `u` | Benutzerwechsel als neue Stufe auf demselben Host | v0.2 |
+| `y` | Kontext-Vorschlag annehmen | v0.2 |
+
+**Schutz des Eingabekanals.** Auf stdin kommen nicht nur Tastendrücke an, sondern auch eingefügter Text und Antworten des Terminal-Emulators. Ein Ziel kann den Emulator dazu bringen, Bytes zurückzuspiegeln (Titel-Report, OSC-52-Abfrage). Deshalb:
+
+- Ein Hotkey zählt nur, wenn Präfix und Taste jeweils allein in einem eigenen `read()` ankommen. Bursts reicht der Shim unverändert durch.
+- Antwortsequenzen (`ESC P ... ST`, `ESC ] ... BEL`, `CSI ... R/c/t/y`) werden vollständig erkannt, darin wertet der Shim nie Hotkeys aus.
+- Der Shim verfolgt Bracketed Paste selbst und sperrt Hotkeys kurz nach jedem Paste-Ende.
+- REC aus per Hotkey ist im Titel und in der Web-UI sichtbar und wird als `rec.set{source=hotkey}` vermerkt.
+
+**Mini-Prompt.** Im normalen Bildschirm schreibt der Shim wie ssh `~C` eine eigene Zeile `ariadne>`. Im Alternate Screen (vim, less, htop) gibt es in v0.1 nur eine Rückmeldung im Titel. Ariadne fragt im Terminal **nie** nach Passphrasen oder Secrets, der Mini-Prompt verlangt nur Host, Benutzer und Tastenwahl. Ein Ziel könnte sonst eine gefälschte Ariadne-Zeile ausgeben und das Passwort abgreifen.
+
+### 3.5 Kontext-Stapel
+
+Pro Terminal (`terminal_id`, UUIDv7) gibt es einen Stapel, unten immer Kali. Eine Stufe hat `kind` (local, su, ssh, winrm, revshell, msf, meterpreter, db, unknown), die eingegebene Host-Kennung oder leer, `user`, Start-Offset, Zustand (aktiv, angehalten) und Herkunft (auto, hotkey, webui, suggestion).
+
+Die Regeln liegen in einem reinen Modul `ariadne.ctxrules` (nur Standardbibliothek), das Shim und Daemon gemeinsam nutzen:
+
+| Ereignis | Wirkung |
+|---|---|
+| C-Marker mit Session-Starter laut argv-Regel (`ssh` ohne `-N`, `evil-winrm`, `nc -l`, `pwncat-cs`, `msfconsole`, interaktive impacket-Tools wie `psexec`, `wmiexec`, `mssqlclient`, `mysql` ohne `-e`, `smbclient` ohne `-L`) | Stufe `unknown` mit Typ und Kandidat aus argv |
+| C-Marker `sudo -i`, `su` | Stufe `su` auf Kali |
+| D-Marker mit Exit-Code 148 (Ctrl-Z) | Stufen über Kali angehalten |
+| C-Marker `fg`, `%n` (z. B. nach `stty raw -echo`) | jüngste angehaltene Stufe wieder aktiv |
+| jeder andere gültige D-Marker | Stufen darüber schliessen, Kontext Kali |
+| Hotkey, Web-UI | Nutzerentscheid `d.ctx.*` |
+| Heuristik (ab v0.2) | nur Vorschlag `ctx.suggest`, im Titel mit `?` |
+
+Die argv-Regeln sind pro Tool definiert und golden-getestet, denn viele impacket-Skripte sind nicht interaktiv (`secretsdump`, `GetNPUsers`). Entscheide speichern die eingegebene Kennung (`ip:default/10.10.10.5`, `name:web01`), nie eine Host-UUID. Aufgelöst wird erst in der Projektion. Beim Einschalten von REC sendet der Shim `term.ctx_snapshot`, damit der Kontext auch stimmt, wenn REC mitten in einer Session beginnt.
+
+### 3.6 REC, Projektbindung und Anzeige
+
+REC ist ein Zustand im Daemon. Umschalten per Web-UI, `ariadne rec on|off|toggle` und Hotkey.
+
+| Zustand | Titel | Bedeutung |
+|---|---|---|
+| aus | `[-- lame]` | nichts verlässt den Shim, nur ein Offset-Zähler läuft, damit Lücken exakt sind |
+| an | `[REC lame] web01 root \| <innerer Titel>` | Aufnahme läuft |
+| wartet | `[REC! gesperrt]` | REC an, aber das Projekt ist gesperrt. Der Shim puffert im RAM, die Web-UI zeigt ein rotes Banner und den Hinweis `ariadne unlock` |
+| offline | `[ariadne offline]` | Daemon nicht erreichbar, RAM-Puffer läuft |
+
+Der Shim fängt `OSC 0/2` ab, auch vom Ziel, und setzt den Titel selbst zusammen. Ein Ziel kann den REC-Indikator so nicht fälschen. Alle Strings im Titel laufen durch `term_safe()` (Abschnitt 9.2).
+
+**Projektbindung.** Beim ersten REC bindet Ariadne das Terminal an das aktive Projekt (`term.bind`). Wechselt das aktive Projekt, nehmen gebundene Terminals des alten Projekts nicht mehr auf (`term.gap` mit Grund `project_switch`, Titel `[REC pausiert: lame]`). Sind noch Remote-Stufen offen, verlangt der Wechsel eine Bestätigung. Puffer tragen die `project_id` vom Zeitpunkt der Bindung. So landet der Output einer evil-winrm-Session zu Projekt A nie in Projekt B.
+
+Startet eine Remote-Session bei REC aus, erinnern Titel und Web-UI daran. REC schaltet sich nicht von selbst ein.
+
+### 3.7 Transport
+
+Unix-Socket `$XDG_RUNTIME_DIR/ariadne/term.sock`, Ordner 0700. Fehlt `XDG_RUNTIME_DIR`, gilt `~/.local/state/ariadne/run/` nach Prüfung von Eigentümer, Rechten und Symlinks; nie `/tmp`. Beide Seiten prüfen per `SO_PEERCRED` die UID der Gegenseite.
+
+Rahmen: `u32 Länge | u8 Typ | Nutzlast`, höchstens 1 MiB.
+
+- Shim an Daemon: `HELLO` (Protokollversion, `terminal_id`, TTY, Shell, Grösse, `TMUX_PANE`, `WINDOWID`, Display-Umgebung), `OUT` (Sequenz, Offset, Wall- und Monotonic-Zeit, Bytes, gebündelt bis 64 KiB oder 50 ms), `EVENT` (JSON), `BYE`.
+- Daemon an Shim: `STATE` (REC, Projekt, Profil, Stapel, Host-Liste für Tab-Ergänzung), `ACK`.
+
+Fällt der Daemon aus oder ist das Projekt gesperrt, puffert der Shim im RAM (Ringpuffer, `mmap` mit `MADV_DONTDUMP`, Grösse konfigurierbar) und verbindet sich jede Sekunde neu. Nie auf die Platte. Überlauf verwirft die ältesten Bytes und erzeugt `term.gap`. Massgeblich ist die Empfangszeit im Daemon, die Shim-Zeit bleibt als Attribut.
+
+### 3.8 Ausgabefilter im Shim
+
+Der Shim reicht den Output unverändert durch, mit wenigen Ausnahmen:
+
+- `OSC 52` (Zwischenablage schreiben) wird standardmässig entfernt und als `term.osc52_blocked` vermerkt. Sonst kann ein Ziel einen Befehl in die Zwischenablage legen, den der Operator später lokal einfügt. Freigabe nur pro Terminal und nur, solange Kali oben im Stapel steht.
+- Anfragen, deren Antwort Ziel-Bytes zurückspiegelt, werden entfernt: `CSI 20 t`, `CSI 21 t`, `OSC 52` mit `?`, `DECRQSS`, Resize `CSI 8 t`. Harmlose Abfragen (Gerätattribute, Cursorposition, Farben) bleiben, damit vim und tmux funktionieren.
+- Zustände für OSC, DCS und APC halten höchstens 8 KiB bzw. 100 ms. Danach gibt der Shim die Sequenz als normale Bytes weiter.
+
+### 3.9 Sonderfälle
+
+- **tmux, screen:** Der äussere Shim pausiert die Speicherung, solange ein Multiplexer-Client im Vordergrund läuft. Die Panes haben eigene Shims.
+- **Root-Shell nach `sudo -i`:** Die Umgebung ist gelöscht, es gibt keine Marker. v0.1 zeigt einen Hinweis («`sudo nmap ...` statt Root-Shell, sonst keine Befehlsgrenzen»), `-oA`-Dateien fängt der Watcher trotzdem. Ab v0.2 trägt `ariadne setup --root` nur die Hooks in `/root/.zshrc` ein. Die Nonce liest der Hook aus der Umgebung der äusseren Shell (zu verifizieren).
+- **linpeas über eine instabile Reverse Shell:** Der Shim nimmt byte-genau ab, bevor er anzeigt. Die Farben bleiben im Rohstrom. Stirbt die Shell, wird das Segment als `truncated` markiert. Die Regel-Engine schlägt vor, auf dem Ziel mit `| tee /dev/shm/lp.txt` zu schreiben, die Datei zu holen und als Artefakt zu vermerken. Ariadne holt sie nie selbst.
+
+## 4 Weitere Quellen
+
+Alle Quellen ausser dem Terminal sind `SourceAdapter` im Daemon. Sie schreiben nur Rohereignisse und Blobs. Fakten erzeugen nur Parser und das KI-Gateway. Automatische Erfassung speichert nur bei REC. Ausserhalb von REC merkt sich der Watcher nur Pfad, Grösse und Zeit als «wartend». Explizite Handlungen (`ariadne shot`, `ariadne import`, Klick) werden immer gespeichert und als `rec=false` markiert.
+
+### 4.1 Projektordner und Watcher
+
+```
+~/ariadne/<slug>/          # 0700, sichtbar, hier arbeitest du
+  scans/                   # Tool-Outputs (nmap -oA, ffuf -o), überwacht
+  loot/                    # vom Ziel geholte Dateien, überwacht, Klasse high
+  imports/                 # Burp-XML, HAR, PCAP, überwacht, Klasse high
+  screenshots/             # nur für manuell abgelegte Bilder
+  exports/                 # Berichte
+  .vault/                  # verschlüsselt, siehe Abschnitt 5.1
+```
+
+Der Arbeitsbereich ist im Profil lab Klartext. Für Kundenaufträge kommt in v0.3 ein verschlüsseltes Arbeitsverzeichnis (Abschnitt 8.4).
+
+**Watcher:** `watchdog` mit einer rekursiven Watch auf den Projektordner, `.vault/` per Filter ausgeschlossen. Ausgewertet werden `FileCreatedEvent`, `FileModifiedEvent`, `FileClosedEvent` und `FileMovedEvent`, denn Dateien, die von aussen hineinverschoben werden, melden nur «created». Danach folgt immer die Settle-Logik: 1,5 s Ruhe, Grösse und `mtime` erneut prüfen. Auf Shared Folders (`vboxsf`, `9p`, `nfs`, `cifs`, `fuse.vmhgfs-fuse`, `fuse.sshfs`) läuft Polling, mit Warnung.
+
+**Sicher öffnen.** Loot ist feindliche Eingabe, und `tar`, `git clone`, `wget -r` oder `smbclient mget` legen Symlinks mit absolutem Ziel an. Deshalb:
+
+1. Jede Datei wird relativ zum geöffneten Verzeichnis-fd des Projekts geöffnet, per `openat2` mit `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS` (ctypes, ab Kernel 5.6) oder Komponente für Komponente mit `O_NOFOLLOW`, jeweils mit `O_NONBLOCK | O_NOCTTY`.
+2. `fstat` auf dem fd: nur reguläre Dateien, `st_nlink == 1`, gleiches Dateisystem, Eigentümer Operator oder root. Sonst Warteliste mit Grund. Gelesen wird nur über dieses fd.
+3. Nie importiert wird aus einer Sperrliste (`~/.ssh`, `~/.gnupg`, `~/.config`, `~/.local/share/ariadne`, Browser-Profile, Keyrings).
+
+**Pipeline pro Datei:** Filter (Temp- und Editor-Dateien), Settle, SHA-256, Sniff (Magic-Bytes, XML-Wurzel, JSON-Schlüssel, Textmuster), Kopie in den Blob-Store bis 100 MiB (darüber nur Referenz mit Hinweis «nicht verschlüsselt»), Rohereignis `file.observed`, Einreihen in den Ingest. Bei Daemon-Start und Projektwechsel gleicht Ariadne den Ordner ab, Unbekanntes landet in der Warteliste.
+
+Binäre Geheimnisse (NTDS.dit, SAM/SYSTEM, kdbx, lsass-Dumps) erkennt der Sniffer und speichert sie, parst sie aber nicht. Die Regel-Engine schlägt das passende Werkzeug vor (`impacket-secretsdump`, `keepass2john`). Archive zeigen nur ihre Mitgliederliste, Entpacken gibt es nur per Klick im Worker, mit `tarfile`-Filter `data` und Grenzen für Anzahl, Grösse und Kompressionsrate.
+
+### 4.2 Datei mit Befehl verknüpfen
+
+Es gibt genau einen Mechanismus: Parser nennen über `companions(argv, cwd)` die Dateien, die ein Befehl schreibt (`nmap -oX F`, `-oA B` ergibt `B.xml`, `B.nmap`, `B.gnmap`, `ffuf -o F`). Der Daemon ruft die Funktion beim C-Marker für die Settle-Logik und beim D-Marker zum Einlesen auf. Das gilt nur, wenn oben im Stapel Kali steht, denn in einer Remote-Shell liegt `-oA` auf dem Ziel.
+
+Dateien ausserhalb des Projekts erscheinen nur als Vorschlag in der Warteliste, nie automatisch. Sonst zieht `nmap -oN ~/privat/notizen.txt` private Dateien ins Projekt. Unangekündigte Dateien, die erscheinen, während genau ein Befehl mit passendem `cwd` läuft, bekommen die Verknüpfung als Vorschlag. Downloads (evil-winrm `download`, Meterpreter, `scp`) erkennt ab v0.2 ein Parser `transfer.download`, der die Herkunft als Beobachtung liefert.
+
+### 4.3 Screenshots
+
+Aufgenommen wird immer im Daemon. Shim-Hotkey `s`, Web-Knopf und `ariadne shot` (CLI, Desktop-Kürzel) senden nur eine Anfrage. Die Display-Umgebung (`DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`) kommt aus dem `HELLO` des Shims bzw. von der CLI, denn ein systemd-User-Dienst kennt sie unter Xfce nicht zuverlässig.
+
+| Sitzung | Monitor, Fenster | Bereich | Version |
+|---|---|---|---|
+| Xfce/X11 (Kali-Standard) | `mss`, Fenstergeometrie per `python-xlib` | `flameshot gui --raw` oder `xfce4-screenshooter -r` | v0.1 |
+| KDE/Wayland | `spectacle` im Hintergrundmodus (Flags zu verifizieren) | `spectacle -r` | v0.3 |
+| GNOME/Wayland | xdg-desktop-portal `Screenshot` | Portal | v0.3 |
+| wlroots | `grim` | `slurp` plus `grim` | v0.3 |
+
+- Bilder gehen nur als Bytes in den Blob-Store, nie als Datei. Braucht ein Werkzeug einen Pfad, schreibt es nach `WorkDir` (tmpfs, 0700) und die Datei wird sofort gelöscht.
+- Bilder werden im Worker dekodiert und als kanonisches PNG ohne Metadaten neu kodiert, bevor OCR, KI, UI oder Export sie sehen. Pillow nur mit Formatliste PNG, JPEG, WebP.
+- Der Web-Knopf zählt 3 s herunter, sonst landet die UI selbst im Bild. Standard ist das aktive Fenster, nicht der ganze Monitor.
+- Metadaten: UTC-Zeit, Auslöser, Modus, Fenstertitel und `WM_CLASS`, zuletzt aktives Terminal mit Stream-Offset, Kontextstapel, letzter Befehl, SHA-256, dHash für Beinahe-Duplikate.
+- Der Stream-Offset ist der Textzwilling eines Terminal-Screenshots: Export und UI zeigen den exakten Log-Ausschnitt ohne OCR. Damit prüft eine Regel Proof-Screenshots: Fehlen `hostname`, `whoami` oder `ip a` in den sichtbaren Zeilen, kommt der Hinweis «Beleg ohne Host-Identifikation».
+- `ariadne hotkeys install` trägt unter Xfce Desktop-Kürzel ein (`xfconf-query`, Kanal `xfce4-keyboard-shortcuts`), die `ariadne shot window|region|monitor` aufrufen. Ariadne greift keine globalen Tasten selbst ab. Unter GNOME und KDE kommt später das Portal `GlobalShortcuts` in Frage.
+
+### 4.4 Webseiten-Screenshots (v0.3)
+
+Das ist die einzige Funktion, mit der Ariadne selbst Pakete an ein Ziel schickt. Sie läuft nur auf ausdrücklichen Klick auf einen URL-Fakt.
+
+1. **Scope-Prüfung** der URL nach WHATWG-Regeln, dazu eine strenge Prüfung (Backslash, Userinfo, Steuerzeichen ergeben `unknown`). Aufgelöst wird nur über bekannte Kennungen und `/etc/hosts`. DNS erst nach Bestätigung im Dialog und mit Eintrag im Aktivitätsprotokoll.
+2. **Chromium im eigenen Netz-Namespace**, dessen einziger Ausgang ein scope-prüfender Proxy im Daemon ist (`--proxy-server`, `--proxy-bypass-list=<-loopback>`). Der Proxy prüft jede Verbindung, auch Redirect-Ziele, die Playwrights `route` nicht abfängt.
+3. Immer blockiert: `0.0.0.0/8`, `::`, IPv4-mapped-Adressen, Link-Local, die Ports von Ariadne und Ollama. Loopback-Ziele nur als Paar aus Adresse und Port eines erfassten Tunnels.
+4. Nur `GET` und `HEAD`. WebRTC aus (`--force-webrtc-ip-handling-policy=disable_non_proxied_udp`, zu verifizieren), WebSockets abgewiesen, Service Worker blockiert, Downloads aus.
+5. Sandbox Pflicht, eigenes leeres Home in `WorkDir`. Ist der gebündelte Chromium älter als 60 Tage, verweigert Ariadne den Webshot.
+6. Jeder Webshot steht im Aktivitätsprotokoll mit Quell-IP und allen Anfragen.
+
+Kali ist für Playwright kein offiziell unterstütztes System, der Install-Test muss das klären. Für Seiten, die ohnehin offen sind, ist ein Fensterbild besser: Es erzeugt keine Anfrage.
+
+### 4.5 Weitere Quellen (ab v0.2)
+
+| Quelle | Version | Wichtigste Schutzmassnahme |
+|---|---|---|
+| Burp-XML («Save items»), HAR | v0.2 | Scope-Filter vor dem Speichern, HAR gestreamt (`ijson`), Bodies nie dekomprimiert |
+| Zwischenablage (X11, XFixes) | v0.3 | nur `CLIPBOARD`, nur bei REC, opt-in; Passwortmanager-Hinweis `x-kde-passwordManagerHint` respektieren; Besitzer-Sperrliste; Herkunft «Programm im Terminal» wird nie automatisch übernommen; eigene Kopien von Ariadne werden erkannt; 10 s Quarantäne |
+| Browser-Verlauf | v0.3 | nur aus einem dem Projekt zugewiesenen Testprofil, nur Scope, nur bei REC; Kopie read-only im Worker |
+| PCAP | v0.3 | `tshark -n` im Worker ohne Netz, mit leerem Konfigurationsordner; Credentials von Clients ausserhalb des Scopes im Kundenprofil nur als Zählung |
+| Metasploit-DB, Responder-Logs | v0.3 | nur Einträge, deren Host oder Hash im Projekt schon bekannt ist |
+
+## 5 Daten und Auswertung
+
+### 5.1 Speicherlayout
+
+Pro Projekt liegen unter `~/ariadne/<slug>/.vault/`:
+
+| Datei | Inhalt | Eigenschaften |
+|---|---|---|
+| `manifest.json` | Format, Projekt-ID, Profil, Schema-Version, Krypto-Parameter, Slot-Liste | Klartext, ohne Kundendaten; im Profil customer ist der Slug ein Codename |
+| `slots/*.age` | Schlüsselslots | Abschnitt 8.4 |
+| `journal.db` | Schicht 1 (Rohereignisse) und Schicht 3 (Entscheide), Hash-Kette | SQLCipher, append-only |
+| `derived.db` | Schicht 2: Einheiten, Zeilen, FTS5, Beobachtungen, Claims, Entitäten, Sichten | SQLCipher, jederzeit neu berechenbar |
+| `state.db` | Betriebszustand ausserhalb der Kette: Job-Queue, Budget, UI-Zustand, Wasserstände, Warteliste, Pseudonyme | SQLCipher |
+| `blobs/<xx>/<uuid>.age` | Dateien, Screenshots, Payloads von KI-Aufrufen, OCR-Ergebnisse | age, zufällige Namen; der SHA-256 steht nur verschlüsselt in `journal.db` |
+
+Alle drei Datenbanken öffnet nur `open_db()` mit demselben Schlüssel und `temp_store=MEMORY`. Ein Test öffnet jede Datei im `.vault/` mit einfachem `sqlite3` und `file` und erwartet Chiffrat, auch für WAL- und SHM-Dateien. Die API adressiert Blobs nur über ihre ID, nie über den Hash, denn ein Hash im Pfad verrät, ob eine bekannte Datei vorliegt.
+
+### 5.2 Journal und Hash-Kette
+
+```sql
+CREATE TABLE event (
+  seq         INTEGER PRIMARY KEY,
+  id          TEXT NOT NULL UNIQUE,       -- UUIDv7 (eigene Funktion bis Python 3.14)
+  layer       TEXT NOT NULL CHECK (layer IN ('raw','decision','system')),
+  kind        TEXT NOT NULL,              -- aus events.py
+  ts_utc_ns   INTEGER NOT NULL,           -- Empfangszeit im Daemon
+  mono_ns     INTEGER, boot_id TEXT,      -- Erkennung von Zeitsprüngen
+  operator_id TEXT NOT NULL,
+  origin      TEXT NOT NULL,              -- shim, webui, cli, watcher, gateway
+  terminal_id TEXT, stream_off INTEGER,   -- nur term.out
+  header      TEXT NOT NULL,              -- kanonisches JSON, keine Floats
+  body        BLOB,                       -- beginnt mit 16 Byte Zufalls-Salt
+  body_commit BLOB,                       -- sha256(salt || body)
+  prev_hash   BLOB NOT NULL,
+  hash        BLOB NOT NULL,
+  UNIQUE (terminal_id, stream_off)        -- Idempotenz bei Wiederholung
+);
+```
+
+- `hash` läuft über eine kanonische, längenpräfixierte Serialisierung aller Spalten ausser `hash`, mit Domänentrennung `ariadne-event-v1`. So lassen sich auch Zeitstempel, Operator und Art nicht unbemerkt ändern.
+- Trigger verbieten `UPDATE` und `DELETE`. Einzige Ausnahme: `ariadne redact` setzt `body` auf NULL und schreibt ein `system.redaction`-Event mit Verweis und Ersatzfassung. Der Salt verschwindet mit dem Body, damit lässt sich ein kurzer Klartext nicht aus dem Commitment zurückrechnen. Danach wird `derived.db` neu berechnet, denn FTS enthielt den Klartext, und die Datenbank wird mit `wal_checkpoint(TRUNCATE)` und `VACUUM` bereinigt.
+- `ariadne verify` prüft Kette, Commitments und Blobs.
+- Bei REC-Stopp und Projektabschluss schreibt Ariadne einen Checkpoint. Ab v0.3 signiert der Operator Checkpoints mit `ssh-keygen -Y sign` und legt den Kettenkopf ausserhalb ab (Export, Mail an den Kunden). Ohne externen Anker belegt die Kette nur Unversehrtheit gegenüber Dritten, nicht gegenüber dem Operator selbst. Das steht so auch in der Doku.
+- Bei REC-Start schreibt Ariadne `clock.check` mit dem Status aus `timedatectl` inklusive NTP-Quelle. Liegt die NTP-Quelle im Zielnetz oder wechselt sie, warnt Ariadne. Weichen Wanduhr und Monotonic-Zeit im selben Boot um mehr als 2 s voneinander ab, entsteht `system.clock_jump`. Ein typischer Fall: `ntpdate` auf den DC wegen Kerberos. Besser ist `faketime` pro Befehl.
+
+### 5.3 Event- und Entscheid-Katalog
+
+Vor dem ersten Code entsteht `ariadne/events.py` (Pydantic-Modelle, Version pro Art) als einzige Quelle. Doku und JSON-Schema werden daraus erzeugt.
+
+**Regeln:**
+
+- Schicht 1 enthält nur, was sich nicht neu berechnen lässt.
+- Befehle (`cmd_block`), Segmente und automatische Kontextspannen sind ausschliesslich Schicht 2.
+- `command.started` und `command.finished` sind flüchtige Bus-Ereignisse, die der Segmenter aus `term.mark` ableitet. Sie gehen nie ins Journal.
+- Überall genau ein Bezeichner `terminal_id`.
+- Die Operator-ID setzt der Daemon, nicht der Shim.
+
+| Präfix | Rohereignisse (Schicht 1) |
+|---|---|
+| `term.` | `open`, `bind`, `out`, `mark`, `resize`, `ctx_snapshot`, `gap`, `close`, `osc52_blocked`, `marker_forged` |
+| `rec.` | `set` (mit Quelle) |
+| `file.` | `observed` |
+| `shot.` | `captured` |
+| `net.` | `route` (Ergebnis von `ip route get`) |
+| `clock.` | `check` |
+| `ai.` | `call` (Metadaten im Header, Payload und Antwort als Blob) |
+| `system.` | `checkpoint`, `redaction`, `clock_jump`, `migration` |
+
+| Entscheide (Schicht 3, Präfix `d.`) |
+|---|
+| `d.claim.confirm`, `d.claim.reject`, `d.claim.edit` |
+| `d.entity.merge`, `d.entity.split` |
+| `d.ctx.set`, `d.ctx.push`, `d.ctx.pop`, `d.ctx.accept` |
+| `d.keystep.mark` |
+| `d.status.work`, `d.status.access` |
+| `d.note.set`, `d.tag.add`, `d.tag.remove` |
+| `d.finding.*`, `d.artifact.*`, `d.hypothesis.*`, `d.goal.status` |
+| `d.suggestion.done`, `d.suggestion.dismiss` |
+| `d.scope.update` (vollständiger TOML-Snapshot) |
+| `d.automode.set` (`enabled`, `parsers`, `auto_ctx`) |
+| `d.conflict.resolve`, `d.terminal.label`, `d.revoke` |
+
+Entscheide verweisen nie auf Zeilen-IDs in `derived.db`, sondern nur auf natürliche Schlüssel (`claim_key`, Kennungen, `cmd_id`). `cmd_id` ist deterministisch: `<terminal_id>@<stream_off des C-Markers>`.
+
+### 5.4 Ingest-Pipeline
+
+```
+Quellen ─► Writer (1 Task, Redaktor) ─► journal.db
+        ─► Segmenter ─► Normalizer ─► unit / unit_line / FTS5      (derived.db)
+        ─► Worker-Pool (Parser, ohne Schlüssel) ─► Beobachtung / Mention
+        ─► Projektion (inkrementell pro Einheit) ─► Claims, Entitäten, Inbox
+        ─► projection.updated ─► Regel-Engine, SSE an die Web-UI
+```
+
+- Der Writer bündelt Commits alle 200 ms oder 256 KiB. Der Redaktor (Abschnitt 8.5) läuft hier, vor Hash und Persistenz.
+- Der Segmenter bildet lokal Befehle (C bis D) und remote Segmente zwischen zwei Kontextwechseln. Befehlsgrenzen entstehen ausschliesslich aus gültigen `term.mark`-Events. Flags: `partial` (REC mitten im Befehl), `truncated`, `altscreen`, `gap`.
+- Eine Einheit ist mit dem D-Marker fertig. Offene Befehle werden nach 10 min Stille vorläufig geparst.
+- Worker bekommen die Daten über eine Pipe, nie einen Schlüssel. Werkzeuge, die einen Pfad brauchen, lesen aus `WorkDir`.
+- Ergebnisse von (Einheit, Parser, Version) ersetzen frühere in einer Transaktion. Stürzt ein Parser ab, entsteht ein sichtbarer `parse_failure`.
+
+### 5.5 Normalizer und Provenienz
+
+Es gibt genau einen Normalizer, zeilenbasiert, mit einer Offset-Karte von jeder Textzeile zurück auf die Roh-Bytes.
+
+- UTF-8 wird inkrementell dekodiert, mit Zuordnung zu den Bytes.
+- SGR-Farben werden zuerst als Spannen pro Zeile ausgewertet und dann entfernt. Die roten und gelben Zeilen von linpeas sind Signal.
+- `\r` überschreibt ab Spalte 0 (`\r\n` ist ein Zeilenende), dazu `\b`, `ESC[K` und horizontale Cursorbewegungen.
+- Abschnitte im Alternate Screen gehen an `pyte` und liefern nur ein Schlussbild, das nicht geparst wird.
+- Der Bereich A bis C wird als `prompt_echo` markiert und geht nie an Parser, KI oder die Standardsuche.
+- **Mensch und Maschine sehen dasselbe:** Verdeckter Text (SGR 8, gleiche Vorder- und Hintergrundfarbe) und überschriebener Text werden als `concealed` bzw. `overwritten` markiert. Parser und KI bekommen ihn nur markiert, und jeder Wert daraus erzeugt einen Injection-Verdacht.
+
+**Provenienz** eines Fakts ist einer dieser Zeiger:
+
+```json
+{"t": "stream", "terminal": "...", "off": [a, b], "unit": "...", "lines": [l1, l2]}
+{"t": "file",   "blob": "...", "lines": [l1, l2], "path": "/nmaprun/host[3]"}
+{"t": "image",  "blob": "...", "bbox": [x, y, w, h]}
+{"t": "ai",     "call": "...", "quote_in": {"t": "stream", ...}}
+{"t": "user",   "decision": "..."}
+```
+
+Golden-Tests mit echten Bytes sind für den Normalizer Pflicht (CR-Fortschrittsbalken, CRLF von winPEAS, zerhacktes UTF-8), dazu metamorphe Tests mit zufälligen Chunk-Grenzen.
+
+### 5.6 Parser-Schnittstelle
+
+```python
+# ariadne/parsers/api.py
+Trust = Literal["structured", "tool_text", "heuristic", "ai", "ocr"]
+
+@dataclass(frozen=True)
+class Span:
+    line_start: int
+    line_end: int
+    col_start: int | None = None
+    col_end: int | None = None
+    path: str | None = None            # XPath oder JSONPath bei Dateien
+
+@dataclass(frozen=True)
+class Obs:
+    subject: Ref                       # Ref.ip("10.10.10.5"), Ref.ctx_host(), Ref.service(h, "tcp", 445)
+    predicate: str                     # aus der Ontologie, z. B. "service.product"
+    value: str | int | bool | Ref
+    span: Span
+    confidence: float | None = None    # None = Basiswert der Vertrauensklasse
+    attrs: Mapping[str, str] = field(default_factory=dict)
+
+class Parser(Protocol):
+    id: ClassVar[str]                  # "nmap.xml"
+    version: ClassVar[str]             # Änderung -> Reparse-Angebot
+    trust: ClassVar[Trust]
+    auto_eligible: ClassVar[bool]      # darf der Automodus direkt übernehmen?
+    def match(self, unit: UnitView) -> int: ...                  # 0 = nein, billig
+    def parse(self, unit: UnitView) -> Iterator[Obs | Mention]: ...
+    def companions(self, argv: list[str], cwd: str) -> list[str]: ...
+```
+
+- `UnitView` ist nur lesbar: Art, argv, Exit-Code, Zeilen mit Farbspannen und Markierungen, `open_bytes()`, MIME, Kontext, Zeiten. Parser greifen nie auf die Datenbank zu und lösen keine Identitäten auf.
+- XML nur über `safe_xml_parse()` (defusedxml mit `forbid_dtd`, `forbid_entities`, `forbid_external`). Ein Import-Hook verbietet `xml.etree`, `xml.dom` und `lxml` in Parsern. Ob Burp-XML mit `forbid_dtd` lesbar ist, ist zu verifizieren.
+- Regex nur über `google-re2`, Zeilen über 16 KiB nur gekürzt.
+- Registriert über die Entry-Point-Gruppe `ariadne.parsers`, aber nur aus einer Allowlist in der Konfiguration (Name, Version, Hash des Wheels). Plugins laufen im selben Worker-Profil wie eingebaute Parser.
+
+**Erste Parser:**
+
+| Version | Parser |
+|---|---|
+| v0.1 | `nmap.xml` (Hosts, MAC, Namen, OS, Ports, Service mit `conf`, CPE, NSE `ssh-hostkey`, `smb-os-discovery`, `ssl-cert`), `nmap.text`, `regex.net`, `listener.callback` |
+| v0.2 | `shell.context` (whoami, id, hostname, ip a), `hydra`, `ffuf.json`, `gobuster`/`feroxbuster`, `nxc` (inklusive Fehlschläge, `Pwn3d!`, `--pass-pol`), `smbclient`/`smbmap`, `enum4linux-ng` (JSON), `passwd`/`shadow`, `john --show`/Potfile, `secretsdump`, `linpeas`/`winpeas`, `transfer.download`, `llm.extract` |
+| v0.3 | nuclei-JSONL, Config-Dateien, Burp/HAR, PCAP, Metasploit-DB, BloodHound CE (Kernfakten) |
+
+`listener.callback` erzeugt eine Foothold-Kante nur aus dem ersten Treffer nach dem Start eines lokalen Listener-Befehls (`nc -l`, `exploit/multi/handler`). Spätere Treffer sind nur Hinweise, denn ein Ziel kann «Meterpreter session 2 opened» auch selbst ausgeben.
+
+**Regex-Netz:** IPv4/IPv6 (validiert), CIDR, URL, E-Mail, CVE, `$krb5asrep$`, `$krb5tgs$`, NetNTLMv2, crypt (`$1$ $5$ $6$ $y$`), 32 Hex-Zeichen (als «hash32»), Private-Key-Blöcke, JWT, AWS-Keys. Das Netz liefert Mentions. Kandidat wird ein Wert nur über Regeln: IP im Scope, Secret-artiger Wert oder CVE zu einem bekannten Service.
+
+### 5.7 Claims, Konfidenz, Konflikte, Inbox
+
+- `claim_key = sha256(kanon([kennung, prädikat, normalisierter_wert]))`. Für Secrets und alles, was aus Geheimnissen abgeleitet ist, gilt stattdessen `HMAC-SHA256(projektschlüssel, art || wert)`, denn ein ungesalzener Hash eines schwachen Passworts ist in Sekunden umkehrbar.
+- Das Subjekt ist die beobachtete Kennung, nicht die Host-UUID. Merges und Splits lassen Claims und Entscheide deshalb unverändert.
+- Basiskonfidenz je Vertrauensklasse: `user` 1.0, `structured` 0.95, `tool_text` 0.85, `ai` und `ocr` 0.5, `heuristic` 0.4. Parser dürfen senken (nmap `method="table"` auf 0.3). Über Einheiten hinweg wird per noisy-OR kombiniert, höchstens 0.99. Die UI zeigt drei Stufen.
+- **Zustände:** `candidate`, `auto` (Automodus), `confirmed`, `rejected`.
+- **Konflikte:** zwei nicht verworfene Werte bei einem Prädikat mit Kardinalität `one`, oder zwei starke Kennungen derselben Art an einem Host. Ariadne löst nie selbst auf. `d.conflict.resolve` speichert die Wahl oder «bewusst offen». Widersprüche sind oft selbst wertvoll: anderer vHost, Reverse Proxy oder Backport-Patch. «Apache 2.4.29» auf Debian oder Ubuntu kann gepatcht sein.
+- **Inbox:** gruppiert nach auslösender Einheit («nmap 14:02: 3 Hosts, 21 Services»), Sammelbestätigung mit einer Taste. Die Sammelbestätigung zeigt separat, wie viele Werte ausserhalb des Scopes liegen oder niedrige Konfidenz haben. Ab 256 neuen Hosts pro Einheit entsteht eine Gruppe «Massenfund» mit dem Hinweis «möglicher Honeypot oder Tarpit».
+- **Automodus:** `d.automode.set {enabled, parsers, auto_ctx}` ist die einzige Quelle. Ein Claim wird `auto`, wenn seine erste Beobachtung in eine Automodus-Phase fällt, der Parser `auto_eligible` ist und kein Wert ausserhalb des Scopes zum Ziel wird. Vertrauenswürdig ist dabei nur das Parsing, nicht der Inhalt. KI-Werte fallen nie unter den Automodus.
+- **Nebel:** Kandidaten im Scope aus `structured`- und `tool_text`-Parsern erscheinen standardmässig grau und gepunktet auf der Karte. Das ist die erste Übersicht nach dem ersten nmap. Bestätigen färbt ein.
+
+### 5.8 Identität und Scope
+
+Kennungen werden per Union-Find zu Entitäten zusammengefasst.
+
+- **Automatisch verbunden** werden nur gleiche starke Kennungen: IP im selben Adressraum, MAC, SSH-Hostkey, Maschinen-SID. Und das nur, wenn alle beteiligten Kennungen dasselbe Scope-Urteil haben. Sonst entsteht ein Merge-Vorschlag mit Begründung, z. B. «gleicher SSH-Hostkey auf 10.10.10.5 (in) und 192.168.1.9 (out)». Ein Honeypot kann jeden dieser Werte fälschen.
+- Gleiche FQDNs verbinden zwei Hosts nie automatisch (Round-Robin, Load Balancer).
+- Beobachtungen in einer Kontextspanne gehören zu deren Host. Ist der Kontext «unbekannt», landen sie bei einem Platzhalter `ctx:<spanne>`, und die Inbox meldet «Kontext klären».
+- Ein Adressraum ist ab Tag 1 Teil der Kennung, v0.1 kennt nur `default`. Überlappende Netze hinter Pivots kommen in v0.3.
+
+**Scope gehört zur Kennung, nicht zur Entität.** Befehle, Webshots, Vorschläge und Lockout-Zählung verwenden immer die konkrete Kennung mit eigenem Urteil. Einschluss wird nie vererbt, Ausschluss darf konservativ auf die ganze Entität wirken. Namen aus PTR, TLS-Zertifikaten und NetBIOS verleihen nie Scope.
+
+`ScopeMatcher.check(kennung, zeit) -> {verdict: in|out|excluded|outside_window|unknown, rule, scope_version}` ist die einzige Scope-Funktion im System. Davor normalisiert `ariadne.scope.normalize`:
+
+- Hostnamen: Kleinschreibung, Punkt am Ende entfernen, IDNA zu A-Labels. Gemischte Schriften ergeben `unknown` mit Warnung. Wildcards gelten nur an Label-Grenzen (`*.lame.htb` trifft nicht `xlame.htb`).
+- IPv4 auch in Kurz-, Dezimal-, Hex- und Oktalform (`10.1`, `167772165`), das strengste Ergebnis gilt. IPv4-mapped IPv6 wird auf IPv4 abgebildet. `0.0.0.0/8`, `::`, Loopback und Link-Local sind nie implizit `in`.
+- URLs nach WHATWG-Regeln (Bibliothek zu wählen, z. B. `ada-url`) plus strenge Prüfung.
+
+Ariadne löst Zielnamen nie per DNS auf. Bekannt ist nur, was Kennungen, `/etc/hosts` und Tool-Outputs liefern.
+
+### 5.9 Statusmodell
+
+Drei unabhängige Achsen pro Host:
+
+| Achse | Werte | Herkunft |
+|---|---|---|
+| `knowledge` | entdeckt, gescannt, Versionen bekannt | abgeleitet |
+| `access` | keiner, user, admin/root | abgeleitet aus Foothold-Kanten und gültigen CredentialTests, per `d.status.access` übersteuerbar |
+| `work` | offen, in Arbeit, Sackgasse (mit Grund), erledigt, out of scope | nur durch den Nutzer |
+
+`progress` (0 bis 5) ist eine reine Funktion aus `knowledge` und `access` und wird nie direkt überschrieben. Die Füllfarbe auf der Karte kommt aus `progress`, Rand und Symbol aus `work`. Sackgassen werden wieder vorgeschlagen, sobald neue Credentials oder Benutzer auftauchen. Prüfziele (Testabdeckung) sind eigene Objekte, kein Host-Status.
+
+### 5.10 Projektion, Reparse, Änderungsfeed
+
+- Im Normalbetrieb wird pro Einheit inkrementell geparst und in einer Transaktion in `derived.db` projiziert. Jede Projektion schreibt eine `generation` und eine Tabelle `projection_delta(generation, entity_key, change)`.
+- `ariadne reparse [--parser id]` baut eine neue `derived.db`: neu segmentieren, alle Einheiten parsen (dabei `ai.call` wiederverwenden, nie das Modell neu fragen), projizieren, Entscheide in Reihenfolge anwenden, Datei atomar tauschen. Danach zeigt ein Diff neue, fehlende und geänderte Claims sowie **verwaiste Entscheide**. Verwaiste Entscheide landen in der Inbox, nie verschwinden sie still.
+- Regel-Engine und KI-Auslöser hängen an `projection.updated`. Die Web-UI holt `/changes?since=<generation>`. Nach einem Reparse sendet SSE `reset`.
+
+### 5.11 Grosse Outputs: alles relevant, Karte lesbar
+
+1. **Rohstrom mit FTS5:** Jede Zeile ist gespeichert, durchsuchbar und verlinkbar.
+2. **Mentions:** Jeder erkannte Wert mit Fundstelle ist abfragbar («wo kam `svc_backup` vor?») und speist Regeln und KI.
+3. **Hinweise:** Spezialparser verdichten Markierungen zu Hinweisen mit Schwere. Auf der Karte erscheint ein Badge «12 Hinweise (3 hoch)».
+4. **Karte:** nur Prädikate mit Kartenebene im Zustand `auto` oder `confirmed`, dazu der Nebel.
+
+Einheiten über 500 Zeilen bekommen in der Zeitachse einen Digest: Abschnittstitel, markierte Zeilen und optional eine KI-Zusammenfassung mit Zeilenbelegen.
+
+### 5.12 Abfragen
+
+Ein Modul `ariadne.query` mit einer DSL (`from`, `where`, `select`, `order`, `limit`), einem Compiler zu parametrisiertem SQL und einem Executor. Die Web-UI nutzt es für die Filterleiste, die KI erzeugt nur DSL-JSON. Ausführbar ist nur die DSL, «SQL anzeigen» ist rein informativ.
+
+Der Executor öffnet eine Verbindung mit `mode=ro` und `PRAGMA query_only=ON`. Ein `set_authorizer` erlaubt nur `SELECT`, Lesen aus den freigegebenen Sichten (`v_host`, `v_service`, `v_endpoint`, `v_identity`, `v_credential` maskiert, `v_cred_test`, `v_hint`, `v_activity`, `v_mention`, `v_finding`, `v_goal`) und Funktionen aus einer Allowlist. `ATTACH` und `PRAGMA` sind gesperrt, ein Zeitlimit läuft über `set_progress_handler`. Ob `sqlcipher3` beides wie `sqlite3` unterstützt, ist zu verifizieren.
+
+Beispiel Credential-Matrix:
+
+```sql
+WITH last AS (
+  SELECT t.*, ROW_NUMBER() OVER w AS rn, COUNT(*) OVER w AS n
+  FROM v_cred_test t WHERE t.state <> 'rejected'
+  WINDOW w AS (PARTITION BY identity_id, secret_id, service_id ORDER BY ts_utc_ns DESC))
+SELECT c.identity, c.secret_kind, c.secret_masked, s.host, s.proto, s.port,
+       COALESCE(l.result, 'untested') AS result, l.n, l.evidence
+FROM v_credential c CROSS JOIN v_service s
+LEFT JOIN last l ON l.identity_id = c.identity_id AND l.secret_id = c.secret_id
+                AND l.service_id = s.id AND l.rn = 1
+WHERE s.auth_capable AND s.scope = 'in';
+```
+
+### 5.13 Aktivitätsprotokoll
+
+Eine Zeile pro Befehl oder Segment: UTC-Zeit, Operator, Kontext-Host und -Benutzer, Tool, Ziele aus argv, Quell-IP, Exit-Code, Beleg. Ziele werden gegen Kennungen und `/etc/hosts` aufgelöst, nie per DNS. Die Quell-IP liefert `ip route get <ziel>` beim C-Marker; die Abfrage sendet kein Paket.
+
+Drei Herkunftsstufen, im Export gekennzeichnet:
+
+| Stufe | Bedeutung |
+|---|---|
+| lokal | Befehl mit gültigem Marker |
+| remote, bestätigt | ab v0.2: Der Shim vergleicht die getippten druckbaren Zeichen (nach Backspace und Ctrl-U) bei Enter mit der Echo-Zeile im Output. Gespeichert wird nur das Flag `input_confirmed` mit dem Offset-Bereich, kein Inhalt. Bei Passworteingaben ohne Echo passt nichts, und es entsteht kein Eintrag |
+| remote, rekonstruiert | nur aus Prompt-Mustern im Ziel-Output. Wird nie als «ausgeführt» formuliert |
+
+Der Grund für die Stufen: Ein Ziel kann jederzeit `root@db01:~# rm -rf /var/lib/mysql` samt Prompt ausgeben. Ohne Unterscheidung stünde im Protokoll ein Befehl, den der Pentester nie getippt hat. Prompt-artige Zeilen ohne vorausgehende Eingabe zählt Ariadne als `prompt.unsolicited` und zeigt sie als Indiz für Manipulation.
+
+## 6 KI und Denkanstösse
+
+Vorschläge kommen aus zwei Quellen: der Regel-Engine (immer aktiv, offline, erklärbar) und dem LLM-Gateway (optional, durch Policy gesteuert). Beide erzeugen nur Vorschläge, nie bestätigte Fakten. Kein Modellaufruf bekommt Werkzeuge. Ein Modell kann nichts auslösen, es liefert nur strukturierte Daten, die Ariadne prüft. Ohne Netz und ohne Budget bleibt Ariadne voll nutzbar.
+
+### 6.1 Regel-Engine, Prüfziele, Befehlsbibliothek
+
+- **Prüfziele** beschreiben, was geprüft werden sollte, unabhängig vom Tool: `PZ-AUTH-ANON`, `PZ-VULN-RECHERCHE`, `PZ-CRED-REUSE`, `PZ-WEB-INHALT`. Erkenner (Befehls- und Output-Muster) schlagen vor, ein Prüfziel als abgedeckt zu markieren. Status: offen, abgedeckt mit positivem oder negativem Ergebnis, bewusst ausgelassen. Das ergibt die Testabdeckung für den Bericht.
+- **Regeln:** eine Bedingung über den Graphen führt zu einem Prüfziel oder einer Hypothese. In v0.1 rund 10 Regeln als Python-Funktionen mit Golden-Tests. Ab v0.2 ein YAML-Format mit kleiner Bedingungssprache (feste Operatoren, kein `eval`), geladen nur per `yaml.safe_load` und geprüft per JSON-Schema.
+- **Befehlsbibliothek:** Vorlagen pro Prüfziel und Dienstklasse, nur zum Anzeigen und Kopieren. Tool-Wissen steckt nur hier und in den Erkennern, nie in Regeln.
+
+Ein Vorschlag ist über `regel_id` plus sortierte natürliche Schlüssel eindeutig. Verworfen bleibt verworfen, auch nach Reparse und Merge.
+
+**Befehlsvorlagen sind die gefährlichste Senke im ganzen System.** Ihre Platzhalter werden aus Zieldaten gefüllt, und der Operator kopiert das Ergebnis in die Shell. Ein Honeypot liefert zum Beispiel einen Share-Namen `'; !sh -c '...'`. Deshalb:
+
+1. Platzhalter sind typisiert und werden validiert: `ip` über `ipaddress`, `port` als Ganzzahl, `hostname` nach IDNA nur `[A-Za-z0-9.-]{1,253}`, `cidr`, `url` (nur http(s), neu serialisiert).
+2. Freie Strings (Benutzer, Share, Pfad, Domäne) nur mit einem in der Vorlage deklarierten Kontext-Encoder (`{share|sh}`, `{user|ps}`, `{cmd|msf}`). Enthält der Wert Steuerzeichen, Zeilenumbrüche, Nicht-ASCII oder Shell-Metazeichen, rendert Ariadne den Befehl nicht. Die UI zeigt «Wert enthält Sonderzeichen» und ein separates Kopierfeld nur für den Wert.
+3. Dateipfade immer absolut oder hinter `--`.
+4. Ein Lint beim Laden prüft jede Vorlage. Golden-Tests mit feindlichem Korpus (`'`, `$( )`, LF, ESC, U+202E, Homoglyphen) prüfen, dass `shlex.split` exakt die erwarteten argv ergibt.
+5. Platzhalter wie `{host.ip}` wählen nur Adressen mit Scope-Urteil `in`.
+6. Die UI markiert die Anteile aus Zieldaten im Befehl, und beim Kopieren wird nie ein Zeilenumbruch angehängt. `ariadne doctor` prüft, ob Bracketed Paste in zsh und bash aktiv ist.
+
+Beispiel einer Regel (Format ab v0.2):
+
+```yaml
+- id: R-ANON-ZUGRIFF
+  pruefziel: PZ-AUTH-ANON
+  wenn: [{bind: s, typ: service, klasse: {in: [datei, verzeichnis, datenbank]}, scope: in}]
+  nicht_abgedeckt: [PZ-AUTH-ANON, s]
+  vorschlag:
+    titel: "Unauthentisierten Zugriff auf {s.host.label}:{s.port} prüfen"
+    stufen:
+      - "Welche Daten gibt dieser Dienst ohne Anmeldung preis?"
+      - "Viele {s.produkt}-Installationen erlauben Gast- oder anonyme Logins."
+```
+
+### 6.2 LLM-Gateway
+
+Das Modul `ariadne.ai` im Daemon ist der einzige Modellzugang. Ablauf pro Aufruf:
+
+```
+Policy ─► Secret-Scan ─► (Pseudonymisierung) ─► Budget ─► Datenhüllen und Prompt
+       ─► Provider ─► ai.call ins Journal ─► stop_reason prüfen ─► Schema prüfen ─► Vorschläge
+```
+
+Aufrufe sind Jobs in einer persistenten Queue (`state.db`). Manuelle Jobs gehen vor automatischen. Ist ein Provider nicht erreichbar, wartet der Job.
+
+**Provider**
+
+- `ClaudeProvider`: Python-SDK `anthropic`, Default-Modell `claude-opus-5-5`. Ein günstigeres Modell (`claude-sonnet-5-5`, `claude-haiku-5-5`) nur, wenn der Nutzer es pro Funktion wählt. Adaptive Thinking (`thinking={"type": "adaptive"}`), Effort pro Funktion explizit gesetzt (Extraktion und Zusammenfassung `low`, Vision und Fragen `medium`, Denkanstösse `high`), denn der Default bei Opus 5.5 ist `medium`. Strukturierte Ausgaben über `output_config.format`, ohne Tools und ohne Prefill. Die Schemas bleiben in der unterstützten JSON-Schema-Teilmenge (`additionalProperties: false` überall, keine `minimum`, `maxLength` usw.). Grenzen prüft die eigene Validierung.
+- Das SDK bekommt einen eigenen `http_client` (`DefaultHttpxClient`), der die Proxy-Variablen der Umgebung nicht übernimmt. Sonst laufen API-Key und Payloads durch Burp, falls `HTTPS_PROXY` in der Shell gesetzt ist. Den genauen Parameter prüfen (zu verifizieren).
+- `OllamaProvider`: `POST /api/chat` mit `format` (JSON-Schema), `images` und `stream: false`. Als «lokal» gelten nur `127.0.0.1` und `::1`. Ein Ollama auf einem anderen Rechner nur über SSH-Tunnel, als eigene Policy-Klasse «eigenes Netz». Ollama-Antworten sind nicht vertrauenswürdig, der Modell-Digest wird mitprotokolliert.
+
+**Policy pro Profil**
+
+| | lab | customer (v0.3) |
+|---|---|---|
+| Cloud | an, mit Leitplanken (Abschnitt 8.1) | aus; nur mit Freigabe-Entscheid pro Projekt und Funktion |
+| vor Cloud-Aufrufen | Secret-Scan | Secret-Scan und Pseudonymisierung, Payload-Vorschau |
+| Bilder in die Cloud | nur Fenster- oder Bereichsbilder, nie der ganze Bildschirm | nie |
+| automatische Aufrufe | nur für Segmente mit Remote-Kontext oder Scope-Ziel in argv, im Budget | nur lokal |
+
+Rein lokale Segmente (`cat ~/.ssh/config`, `env`) gehen nur per Klick und mit Payload-Vorschau hinaus.
+
+**Ablehnungen.** Jeder Claude-Aufruf läuft mit `betas=["server-side-fallback-2026-07-01"]` und `fallbacks="default"`. Pentest-Inhalte können den Cyber-Klassifikator auslösen. `stop_reason` wird vor `content` geprüft. Bei `refusal` wird Teil-Output verworfen und `stop_details.category` geloggt. Ist ein lokales Modell da, geht der Job dorthin, gekennzeichnet. Ariadne fordert nie Exploit-Code oder Payloads an und formuliert abgelehnte Anfragen nicht um, bis sie durchgehen. Für die spätere professionelle Nutzung kommt Anthropics Cyber Verification Program in Frage.
+
+**Kosten.** Preistabelle in der Konfiguration, nicht im Code. Reservierung gegen Monats- und Projektbudget vor dem Aufruf. Bei 80 % Warnung, bei 100 % stoppen automatische Jobs, manuelle fragen nach. Obergrenze pro Aufruf (Default 150k Eingabe-Tokens), damit nie versehentlich ein ganzes Rohlog hinausgeht.
+
+**Prompt-Caching.** Eingefrorener System-Prompt pro Funktion und Version, dann stabiler Projektkontext mit `cache_control: {"type": "ephemeral"}`, danach die volatilen Teile. Keine Zeitstempel im Präfix. Ob der Cache greift, zeigt `usage.cache_read_input_tokens`.
+
+### 6.3 Funktionen
+
+**Extraktion (v0.2).** Für Segmente ohne Parser-Treffer und auf Klick. Das Gateway journalisiert nur die Rohantwort als `ai.call`. Die Prüfung macht ein Pseudo-Parser `llm.extract@<prompt-version>` im Worker-Pool: Das Zitat muss wörtlich in der aktuellen Einheit stehen, jeder Wert wörtlich im Zitat, dazu Typprüfung. Weil die Prüfung im Parser-Pfad liegt, übersteht sie jeden Reparse. Schlussfolgerungen («vermutlich Windows») sind verboten, sie gehören zu den Hypothesen.
+
+**Screenshot-Verständnis.** Stufe 1 (v0.2): lokale OCR mit Tesseract (TSV mit Wortboxen), darauf Regex-Netz und Parser. Stufe 2 (v0.3): Vision-Modell mit Bild und OCR-Text. Fakt-Kandidat wird nur, was im OCR-Text steht, alles andere bleibt eine gekennzeichnete Bildbeschreibung. OCR-Wörter mit sehr kleiner Schrift oder geringem Kontrast gelten als «schwer sichtbar» und kommen nur mit Hinweis in die Inbox. Lokale Vision-Kandidaten über Ollama (zu verifizieren, je nach Hardware): `qwen3-vl` in kleinen Grössen, `qwen2.5vl:7b`, `gemma3:12b`, `minicpm-v`.
+
+**Denkanstösse (v0.1, auf Knopfdruck).** Das Modell sieht keinen Rohtext, sondern ein deterministisch erzeugtes Lagebild (Ziel unter 8k Tokens bei 10 Hosts):
+
+```
+SCOPE in: 10.10.10.0/24  out: 10.10.10.1
+H1 [10.10.10.5] access=user work=offen os=linux
+  S3 21/tcp ftp vsftpd 2.3.4   PZ-AUTH-ANON=offen PZ-VULN-RECHERCHE=offen
+  S4 80/tcp http Apache 2.2.8  PZ-WEB-INHALT=abgedeckt
+C2 user=msfadmin typ=passwort wert=*** gueltig_auf=S5
+HYP1 «H1 nutzt Standard-Credentials» offen
+T41 2026-10-08T10:02Z nmap -sV 10.10.10.5 -> 12 Fakten   (letzte 15 Einträge)
+OFFENE REGELVORSCHLÄGE: R-ANON-ZUGRIFF(S3), R-VERSION-RECHERCHE(S3)
+```
+
+- Zielstrings sind typisiert kodiert: Produkt und Version nur als `[A-Za-z0-9 ._+-]{1,40}`, alles andere als `<gekürzt>`. Credential-Werte immer maskiert.
+- Ausgabe: höchstens vier Anstösse mit Art (Frage, Hypothese, Prüfziel, Hinweis), kurzer Begründung, Belegen (IDs aus dem Lagebild), Kriterien für «bestätigt» und «widerlegt» und bis zu drei Stufen.
+- Jede ID muss existieren, jedes Prüfziel im Katalog stehen, jeder betroffene Host im Scope liegen. Freitext darf keine URLs, keine IPs oder Hostnamen ausser denen aus dem Lagebild und keine Folgen von Shell-Metazeichen enthalten. Verstösse werden verworfen und als Injection-Verdacht gezählt.
+- **Lernmodus** (im Lab Standard): Stufe 1 ist eine Frage, Stufe 2 eine Richtung, Stufe 3 die passenden Einträge der Befehlsbibliothek, jeweils erst auf Klick. Das Modell erzeugt keine freien Befehle. Immer mehrere Alternativen, nie «die nächste Aktion». Das Ergebnis trägt der Nutzer als Prüfziel-Status ein.
+
+**Fragen an die Karte (v0.2).** Das Modell sieht nur Frage und Schema, keine Daten, und liefert DSL-JSON. Die UI zeigt die Abfrage an und führt sie erst nach Klick aus.
+
+**Zusammenfassen (v0.2).** Für grosse Outputs abschnittsweise, jeder Punkt mit Zeilenbereich und Zitat, das in diesen Zeilen stehen muss. Die Zusammenfassung ist ein Index in den Rohtext, kein Ersatz.
+
+### 6.4 Prompt-Injection
+
+Zieldaten gelten als feindlich, auch nach der Verarbeitung.
+
+1. Keine Werkzeuge, keine Ausführung. Im schlimmsten Fall entstehen falsche Vorschläge, nie Aktionen.
+2. Anweisungen stehen nur im System-Prompt und in Mid-Conversation-System-Messages. Zieldaten stehen nur im User-Content, in Hüllen `<daten id="D1" quelle="terminal" grenze="NONCE">` mit Zufalls-Nonce pro Aufruf. Hüllen-Tags im Text werden escaped.
+3. Unicode-Tag-Zeichen, Bidi- und Zero-Width-Zeichen werden entfernt und markiert.
+4. Strikte Schemas mit Enums, Belegprüfung nur für wörtlich vorhandene Werte.
+5. Zweistufig: Rohdaten sehen nur Extraktion, Zusammenfassung und Vision. Denkanstösse sehen nur das Lagebild.
+6. Die UI rendert KI-Text als Klartext ohne externe Ressourcen.
+7. Jedes Schema hat ein Feld `injection_verdacht`. Belegte Treffer werden Finding-Kandidaten, denn eine Injection in Kundendaten ist selbst ein Befund.
+8. Credential-Kandidaten aus Bannern, HTML-Kommentaren und KI-Extraktion tragen die Herkunft «vom Ziel angeboten». Regeln, die Login-Versuche nahelegen, verlangen dafür eine Bestätigung und zeigen den Lockout-Zähler.
+9. Ein Golden-Korpus mit präparierten Bannern, HTML-Kommentaren, Lagebildern und Bildern läuft als Regressionstest.
+
+### 6.5 Gateway-Skizze
+
+```python
+# ariadne/ai/claude.py (Skizze, Parameter laut claude-api-Referenz)
+import anthropic
+
+class ClaudeProvider:
+    cloud = True
+
+    def __init__(self, api_key: str, modell: str = "claude-opus-5-5"):
+        self.client = anthropic.Anthropic(
+            api_key=api_key,  # aus dem Operator-Tresor
+            http_client=anthropic.DefaultHttpxClient(),  # ohne Umgebungs-Proxy, zu verifizieren
+        )
+        self.modell = modell
+
+    def ausfuehren(self, system: str, messages: list, schema: dict,
+                   effort: str, max_tokens: int) -> "Antwort":
+        r = self.client.beta.messages.create(
+            model=self.modell,
+            max_tokens=max_tokens,
+            system=[{"type": "text", "text": system,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=messages,
+            thinking={"type": "adaptive"},
+            output_config={"effort": effort,
+                           "format": {"type": "json_schema", "schema": schema}},
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+        )
+        if r.stop_reason == "refusal":          # immer vor content prüfen
+            kat = r.stop_details.category if r.stop_details else None
+            return Antwort("abgelehnt", None, r.model, kat, r.usage)
+        if r.stop_reason == "max_tokens":
+            return Antwort("gekuerzt", None, r.model, None, r.usage)
+        text = "".join(b.text for b in r.content if b.type == "text")
+        return Antwort("ok", text, r.model, None, r.usage)
+```
+
+Lange Antworten laufen über `.stream()` mit `get_final_message()`. Ohne Streaming bleibt `max_tokens` bei etwa 16k.
+
+## 7 Web-Oberfläche und Karte
+
+Die Web-UI ist das Cockpit: REC-Knopf, Kontext pro Terminal, Inbox, Karte und Belege an einem Ort. Sie liest über die API, schreibt nur Entscheide und sendet nie selbst etwas an Ziele.
+
+### 7.1 Technik
+
+| Thema | Entscheid | Grund |
+|---|---|---|
+| HTTP | FastAPI auf uvicorn im asyncio-Loop von `ariadned` | asyncio wie Socket und Watcher; Pydantic-Modelle sind zugleich der API-Vertrag. uvicorn als Unterklasse ohne eigene Signal-Handler, Shutdown über `should_exit` |
+| Typen | Pydantic, OpenAPI, `openapi-typescript`, `openapi-fetch` | keine doppelt gepflegten Typen |
+| Live | SSE nur als Invalidierung, Daten per REST | Secrets laufen nie über den Strom |
+| Frontend | Svelte 5 mit TypeScript und Vite als SPA | kleine Laufzeit, Node nur beim Build |
+| Graph | Cytoscape.js mit `cytoscape-fcose`, ab v0.2 `cytoscape-dagre` | Canvas-Rendering, Labels werden nie als HTML interpretiert |
+| Schreibweg | nur `POST /api/v1/p/{pid}/decisions` | jede UI-Aktion ist ein Entscheid mit Operator und UTC |
+| Auslieferung | Vite-Build nach `src/ariadne/web/static/`, im Wheel | offline lauffähig |
+
+### 7.2 Sicherheitsmodell
+
+«Nur 127.0.0.1» ist keine Authentisierung: Jeder lokale Prozess erreicht den Port, und Tunnel-Server wie `chisel server` ohne `--authfile` öffnen Loopback für das Ziel.
+
+1. **Bindung** an `127.0.0.1:7330` (konfigurierbar). Vor dem Öffnen prüft `ariadne ui`, ob der lauschende Socket wirklich dem Daemon gehört. Bei jeder neuen Verbindung prüft der Daemon die UID des Clients und lehnt fremde ab.
+2. **Anmeldung ohne Cookies.** `ariadne ui` holt über `ctl.sock` einen Einmalcode (128 Bit, 60 s, einmal gültig), schreibt eine Startdatei mit Rechten 0600 nach `$XDG_RUNTIME_DIR/ariadne/` und öffnet sie per `file://`. Der Code steht nie in argv. Die SPA tauscht ihn gegen ein 256-Bit-Token in `sessionStorage`, höchstens 12 h gültig. Jeder Aufruf trägt `Authorization: Bearer`. Ohne Cookies gibt es kein CSRF. Tippcodes (`ariadne ui --code`) haben mindestens 40 Bit, nach 5 Fehlversuchen pro Minute werden alle Codes ungültig.
+3. **Middleware vor jeder Route:** `Host` exakt `127.0.0.1:7330` (gegen DNS-Rebinding), `Sec-Fetch-Site` nur `same-origin` oder `none`, `cross-site` ergibt auch für statische Assets 403, `Origin` bei schreibenden Methoden nur der eigene, kein CORS, Tokenvergleich mit `hmac.compare_digest`.
+4. **Header:** strenge CSP (`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`), `nosniff`, `no-referrer`, CORP und COOP `same-origin`, `Cache-Control: no-store`. Jede Antwort ausser der SPA-Shell bekommt `Content-Security-Policy: default-src 'none'; sandbox`. Ob Svelte 5 und Cytoscape ohne `'unsafe-inline'` für Styles auskommen, ist zu verifizieren. Eine Lockerung gilt nur für Styles, nie für Skripte.
+5. **Eigenes Firefox-Profil** mit `user.js`: Telemetrie, Safe Browsing, Prefetch, Captive-Portal-Erkennung, Updates und Studies aus, kein Proxy, `network.proxy.allow_hijacking_localhost=false`, keine Erweiterungen, kein Passwortspeicher. Sonst landen Token und Klartext-Credentials in der Burp-History.
+6. **Keine Passphrasen in der Web-UI.** Entsperrt wird nur per CLI (`ariadne unlock`, `getpass` oder pinentry). Die UI zeigt «mit `ariadne unlock` entsperren». Ein fremder Prozess auf dem Port könnte sonst eine Phishing-Seite zeigen.
+7. **Kritische Operationen** (Klartext-Export, Purge, Scope-Erweiterung, Cloud-Freigabe, REC länger als N Minuten aus, Schlüssel anzeigen) verlangen eine Bestätigung über einen Kanal, den ein Hintergrundprozess nicht bedienen kann: Passphrase per pinentry oder Bestätigung in der UI. Ariadne zeigt dabei den anfragenden Prozess an.
+
+### 7.3 API und Live-Aktualisierung
+
+Alle Pfade liegen unter `/api/v1`, projektbezogene unter `/p/{pid}`. Andere Teilsysteme hängen ihre Routen dort ein.
+
+| Pfad | Zweck |
+|---|---|
+| `GET /status`, `PUT /rec` | Version, Projekt, Profil, Sperrzustand, REC, LLM-Modus, Präsentationsmodus; REC umschalten |
+| `GET /terminals`, `POST /terminals/{tid}/context` | Terminals; Kontext setzen (schreibt intern `d.ctx.*`) |
+| `GET /p/{pid}/graph?layer=`, `GET /p/{pid}/changes?since=` | Karte nach Ebenen; Änderungen seit einer Generation |
+| `GET /p/{pid}/hosts`, `/services`, `/credentials`, `/cred-matrix`, `/timeline`, `/inbox`, `/suggestions`, `/findings` | Listen |
+| `GET /p/{pid}/facts/{fid}/sources`, `/streams/{tid}/lines`, `/blobs/{blob_id}` | Provenienz, bereinigte Logzeilen, Bilder |
+| `POST /p/{pid}/decisions` | einziger Schreibweg |
+| `POST /p/{pid}/query` | DSL, nur lesend |
+| `POST /p/{pid}/ai/denkanstoss`, `/ai/frage`, ... | KI-Funktionen |
+| `POST /p/{pid}/screenshots`, `/webshots`, `/exports` | Auslöser |
+| `GET /p/{pid}/files/pending` | Warteliste des Watchers |
+| `GET /p/{pid}/events` | SSE |
+
+SSE-Ereignisse: `changes`, `rec`, `terminal`, `inbox`, `suggestion`, `progress`, `presentation`, `project`, `reset`, Herzschlag alle 15 s. Der Server bündelt in 250-ms-Fenstern. Weil `EventSource` keine Header setzen kann, liest ein eigener `fetch`-Client den Strom. Bei `project` verwirft der Client alle Stores, damit sich Projekte im Browser nie mischen.
+
+### 7.4 Ansichten
+
+- **Kopfzeile:** Projekt mit Profilfarbe, grosser REC-Knopf mit Laufzeit (zeigt den Zustand erst nach Bestätigung per SSE), Sperrzustand, LLM-Modus, Lagebild-Streifen (Hosts entdeckt, gescannt, mit Zugriff, ungetestete Credential-Kombinationen, Inbox, Denkanstösse). Befehlspalette mit `Ctrl+K`.
+- **Leerer Zustand** für Erstnutzer: Checkliste «REC an, nmap mit `-oA`, Foothold mit `Ctrl-]` `k` markieren».
+- **Terminals:** Name, Status, letzter Befehl, Quell-IP, Kontextstapel als Brotkrumen. Die Stufe «unbekannt» ist auffällig markiert und lässt sich direkt setzen.
+- **Inbox:** gruppiert nach Befehl, Tastatur-Triage (`j`/`k`, `a`, `x`, `e`), Sammelbestätigung, Automodus-Schalter, Scope-Urteil und KI-Kennzeichen pro Wert.
+- **Karte** mit Detail-Schublade rechts (Abschnitt 7.5).
+- **Tabellen** für Hosts, Services (gruppierbar, z. B. «alle SMB») und Credentials; ab v0.2 die Credential-Matrix.
+- **Host-Detail:** Adressen, drei Status-Achsen, Tags, Services, Credentials, Fakten mit Quelle und Konflikten, Notizen, Screenshots, Befehle in diesem Kontext.
+- **Zeitachse:** Befehle, REC-Marken, Kontextwechsel, Screenshots und Entscheide, filterbar, Lokalzeit mit UTC im Tooltip.
+- **Denkanstösse:** Karten mit Begründung, verlinkten Belegen, Herkunft (Regel oder KI mit Modell), Stufen und Kopieren. Es gibt keinen Ausführen-Knopf.
+- **Findings:** Titel, Schweregrad, betroffene Assets, Belege, Massnahme, optional MITRE-ATT&CK-ID.
+- **Export:** Abschnitt 8.7.
+
+### 7.5 Karte: das Bild ausmalen
+
+Der Scope zeichnet die Umrisse, die Funde liefern die Farbe. Die leere Karte zeigt einen Knoten «Kali» als Eingang des Labyrinths und die Scope-Segmente als graue, gestrichelte Flächen.
+
+| Darstellung | Bedeutung |
+|---|---|
+| grau, gepunktet | Nebel: Kandidat, noch nicht bestätigt |
+| grau | entdeckt |
+| entsättigt | gescannt, Services bekannt |
+| Farbe mit Symbol | Zugriff; user und admin/root verschieden gefärbt und mit Symbol, nie nur über Farbe |
+| Rand und Symbol | Arbeitsstand (in Arbeit, Sackgasse, erledigt) |
+| kräftige rote Linie | der Faden: nummerierte Schlüsselschritte von Kali aus |
+| Warnbadge | Konflikt |
+| Kennzeichen «KI» | Wert aus dem Sprachmodell |
+| schraffierter Randbereich, zu einer Zahl zusammengefasst | Out-of-Scope; ausgeschlossene Ziele zusätzlich mit Schloss |
+
+Neue Elemente blenden ein und pulsieren einmal. Ein Klick auf «+3 Hosts, +1 Credential seit 14:02» hebt sie hervor.
+
+Ebenen: Topologie (Basis, Hosts in Segment-Compounds), Services, Faden, Out-of-Scope und Vorschau in v0.1; Credentials, Tunnel und Web-Baum in v0.2; AD in v0.3. Zwei Linsen: **Karte** (fcose) und ab v0.2 **Faden** (dagre, chronologisch von links nach rechts).
+
+| Grösse | Darstellung |
+|---|---|
+| 1 Host | Host im Zentrum, Services als Satelliten, Credentials als Schlüssel an den Diensten, bei denen sie gelten |
+| 10 Hosts | Segmente als Compounds, Services als Zählbadges, Ausklappen per Klick. Positionen pro Projekt und Linse gespeichert (nach der stärksten Kennung). fcose mit `fixedNodeConstraint` für bestehende Knoten, höchstens alle 2 s, nie während einer Interaktion |
+| 500 Hosts (v0.4) | semantischer Zoom mit Aggregation: Segmente mit Kuchenfüllung, darin Cluster nach Port-Profil. Hosts mit Zugriff, auf dem Faden, mit Finding oder Konflikt bleiben einzeln sichtbar. Ab 200 Knoten ohne Aggregation schaltet die Karte auf Tabelle |
+
+### 7.6 Belegansicht
+
+Ein Klick auf die Quelle eines Fakts öffnet die Belegansicht:
+
+- **Terminal:** Befehl, Terminal, Kontextstapel, Zeit, Exit-Code, Quell-IP und die bereinigten Zeilen mit markiertem Bereich, bei langen Outputs als virtuelle Liste. Verdeckte und überschriebene Teile lassen sich ein- und ausblenden.
+- **Datei:** Pfad, SHA-256, Zeilen.
+- **Bild:** Region als SVG-Rahmen, dazu der vergrösserte, kontrastverstärkte Ausschnitt.
+
+Aktionen: «Als Beleg kopieren» (Markdown-Block), «Zu Finding hinzufügen», «Ganzes Log». «Ganzes Log» liefert eine `.txt` mit sichtbar gemachten Escapes (wie `cat -v`). Rohbytes gibt es nur als `.raw` mit Warnung.
+
+### 7.7 Zieldaten in der UI
+
+- Svelte escapt automatisch. `{@html}`, `innerHTML` und `insertAdjacentHTML` sind per ESLint verboten, ebenso Bibliotheksoptionen wie `allowHTML` oder `html:` in Tooltips. Einzige Ausnahme ist `SafeMarkdown.svelte` für Notizen: `markdown-it` mit `html: false`, danach DOMPurify, Bilder nur aus `blob:`.
+- `displaySafe()` macht Steuer-, Bidi- und Zero-Width-Zeichen sichtbar und kürzt Labels. Hostnamen mit Nicht-ASCII zeigt die UI zusätzlich in Punycode.
+- Terminalausgabe kommt vom Server bereinigt als Zeilen mit Farbspannen. OSC-Sequenzen werden nie interpretiert.
+- `/blobs` liefert nur PNG, JPEG und WebP aus, alles andere als `application/octet-stream` mit `Content-Disposition: attachment`.
+- Ziel-URLs sind nicht direkt klickbar. «Öffnen» übergibt die URL nach Scope-Prüfung an den konfigurierten Testbrowser, nie an das UI-Profil.
+
+### 7.8 Präsentationsmodus
+
+Ein globales Flag im Daemon, sichtbar als Banner in allen Tabs. Maskiert wird auf dem Server: Credentials und bekannte Secret-Bereiche in Logzeilen werden zu `••••••••` mit Typhinweis, ohne Längenangabe. Rohlog und Screenshots bleiben eingeklappt bzw. unscharf, bis man sie einzeln aufdeckt. «Kopieren ohne Anzeigen» läuft über den Daemon (`xclip` mit `x-kde-passwordManagerHint=secret`), und die Zwischenablage wird nach 30 s geleert. Im Profil customer sind Secrets immer maskiert.
+
+## 8 Projekte, Speicher und Betrieb
+
+### 8.1 Profile und Leitplanken
+
+| | lab | customer (ab v0.3) |
+|---|---|---|
+| Entsperren | Operator-Tresor, einmal pro Login | eigene Projekt-Passphrase und Recovery-Code |
+| Pflicht vor dem ersten REC | Name und Ziel (IP, CIDR oder Name) | Scope, Zeitfenster, Notfallkontakt, LLM-Entscheid |
+| LLM | Cloud erlaubt, mit Leitplanken | aus oder lokal; Cloud nur mit Freigabe und Pseudonymisierung |
+| Scope-Verletzung | Warnung | Bestätigung nötig |
+| Arbeitsbereich | Klartext | verschlüsselt |
+| Klartext-Export | im Projektordner | nur RAM oder `.age` |
+| Auto-Sperre | aus | 60 min ohne REC und ohne Bedienung |
+
+**Leitplanken für lab.** Das grösste Risiko ist ein echter Auftrag in einem lab-Projekt: Cloud-LLM an, Klartext-Exporte, keine Auto-Sperre. Deshalb muss der Scope eines lab-Projekts in einer Lab-Allowlist liegen. Standard: RFC1918, die HTB-Netze `10.10.0.0/16` und `10.129.0.0/16`, die TLDs `.htb`, `.local`, `.lab`. Die Liste ist konfigurierbar. Stehen öffentliche Adressen oder Domains im Scope, sperrt Ariadne Cloud-Funktionen und Klartext-Exporte, bis der Operator «Das ist kein Kundenauftrag» bestätigt. Die Bestätigung kommt als Entscheid ins Journal. Tauchen in Zieldaten öffentliche Adressen oder Firmen-Domains auf, erscheint der Hinweis «Kundenauftrag? customer-Projekt anlegen». Ab v0.3 wandelt `ariadne project convert --to customer` ein lab-Projekt um, nur in diese Richtung. Bis v0.3 sagen Doku und Anlage-Dialog klar: nicht für Kundendaten.
+
+### 8.2 Projektdatei
+
+Die Einstellungen liegen als TOML-Snapshot im Journal (`d.scope.update` bzw. Einstellungs-Entscheide), die Ansicht ist eine Projektion davon. Bearbeiten per Web-UI oder `ariadne project edit`. Der Editor läuft nur mit Härtungsflags (`vim -n -i NONE --cmd 'set noundofile nobackup nowritebackup'`), sonst über die Web-UI.
+
+```toml
+schema = "ariadne.project/1"
+
+[project]
+name = "HTB Lame"
+profile = "lab"                 # lab | customer, nach new unveränderlich (ausser convert)
+
+[scope]
+include = ["10.10.10.3", "lame.htb", "*.lame.htb"]
+exclude = []
+windows = []                    # ab v0.3 ausgewertet
+
+[[contacts]]                    # Pflicht im Profil customer
+role = "Notfall Kunde"
+name = ""
+phone = ""
+
+[secrets]
+use_global = true               # Liste im Operator-Tresor
+
+[llm]
+mode = "cloud"                  # off | local | cloud
+monthly_budget_usd = 20
+
+[automode]
+enabled = false
+parsers = ["nmap.xml"]
+auto_ctx = false
+```
+
+### 8.3 Lebenszyklus
+
+- `ariadne project new <slug> --target <ziel>` legt Ordner, Schlüssel und Schema an.
+- `open` (Alias `use`): entsperren, `flock`, Migrationen mit Backup davor, Kettenkopf prüfen, `clock.check`. Genau ein aktives Projekt pro Daemon, REC bleibt aus.
+- `close` (Alias `lock`): REC aus, Flush, `wal_checkpoint(TRUNCATE)`, Schlüssel verwerfen, `WorkDir` löschen, Kettenkopf ausgeben.
+- `archive` und `restore` (v0.3): Abschluss-Event, `VACUUM`, danach nur lesend, optional als Einzeldatei.
+- `purge` (einfach in v0.1, vollständig in v0.3): Slug eintippen, Inventar, Slots überschreiben und löschen, Ordner und bekannte Backups löschen, Löschnachweis als Markdown und JSON. Der Nachweis nennt seine Grenzen (SSD-Restblöcke, fremde Backups, bereits an Cloud-Anbieter gesendete Daten) und listet gefundene Klartext-Orte ausserhalb (`~/.zsh_history`, `~/.msf4`, `~/.nxc`).
+
+### 8.4 Verschlüsselung und Schlüssel
+
+Keine eigene Kryptografie. Beide Formate lassen sich im Notfall mit den Kali-Paketen `sqlcipher` und `age` auch ohne Ariadne öffnen.
+
+- **Datenbanken:** `sqlcipher3>=0.6.2` (eigenständige Wheels mit FTS5; nicht das ähnlich benannte `sqlcipher3-binary`). Zufälliger 256-Bit-Schlüssel als Raw Key, dazu `journal_mode=WAL`, `secure_delete=ON`, `temp_store=MEMORY`. Nur der Daemon öffnet die Datenbanken.
+- **Dateien:** `pyrage` (`encrypt_io`/`decrypt_io` für Streams), eine age-X25519-Identität pro Projekt, Blobs atomar geschrieben.
+- **Slots:** Nutzlast `{project_id, db_key, age_identity}`, je Slot eine age-Datei. `operator` (an den Operator-Recipient) für lab. `passphrase` und `recovery` (age-scrypt) für customer, nie `operator`, damit Kundendaten nicht mit dem Alltagsschlüssel aufgehen.
+- **Operator-Tresor:** gleiches Prinzip. Enthält Operator-ID, Operator-Identität, globale Secret-Liste und API-Keys. Entsperrt einmal pro Daemon-Lauf mit `ariadne unlock`. Recovery-Code beim Setup. Wer Passphrase und Code verliert, verliert die Daten. Das sagt das Setup deutlich.
+- **Laufender Daemon:** Schlüssel nur im Speicher (in Python nur nach bestem Bemühen löschbar). `PR_SET_DUMPABLE 0`, `LimitCORE=0`, `UMask=0077`. `ariadne doctor` prüft `kernel.yama.ptrace_scope`, Festplattenverschlüsselung, verschlüsselten Swap oder zram, ausgeschalteten Ruhezustand und Vorschaubilder für den Projektpfad.
+- **Arbeitsbereich (v0.3):** Pro Projekt ein verschlüsseltes Verzeichnis, Schlüssel aus dem Projekt-Slot abgeleitet, über `gocryptfs` (FUSE) oder `fscrypt` (Wahl zu verifizieren). `open` hängt es ein, `close` aus. Damit greift das Crypto-Shredding auch für `scans/`, `loot/` und `imports/`. Im Profil customer setzt die Shell-Integration `HISTFILE` auf eine Datei darin.
+- **Gesperrtes Projekt mit REC (v0.3):** Der Daemon spoolt verschlüsselt an den öffentlichen age-Recipient, ohne privaten Schlüssel im Speicher. Bis dahin puffert nur der RAM-Puffer des Shims, und die Anzeige `[REC! gesperrt]` macht das sichtbar.
+
+### 8.5 Eigene Secrets
+
+Es gibt genau einen Redaktor, `ariadne.secrets.redactor`, im Writer des Daemons, vor Hash und Persistenz. Der Shim bekommt keine Secret-Liste.
+
+1. **Ausgabe:** Suche auf einer Sicht ohne ANSI-Sequenzen, Offsets zurückgerechnet auf die Rohbytes. Exakte Treffer (wörtlich, URL- und JSON-kodiert) aus der eigenen Liste werden **längenerhaltend** mit Füllbytes ersetzt, dazu ein Eintrag `redactions[]` mit Label und Bereich im Header. So bleiben alle Offsets und die Idempotenz stabil. Ein Rest in der Länge des längsten Secrets wartet auf den nächsten Chunk.
+2. **Eingabe-Echo** (Bereich B bis C): `zsh-syntax-highlighting` und `zsh-autosuggestions` zerstückeln das Echo. Trifft der Befehlstext oder die bereinigte Sicht, wird der ganze Echo-Bereich ersetzt.
+3. `[REDACTED:own:<label>]` erscheint nur in Anzeige und Export.
+
+Generische Muster (Private Keys, `sk-ant-`, `AKIA`) lösen nur Warnungen vor Exporten und KI-Aufrufen aus. Secrets vom Ziel sind Funde und dürfen nicht weggefiltert werden. Passworteingaben ohne Echo (sudo, ssh) erscheinen nie im Output.
+
+CLI-Befehle, die Schlüsselmaterial zeigen (`reveal-keys`, Recovery-Code), melden sich vorher mit ihrer `terminal_id`. Der Daemon pausiert die Aufnahme dieses Terminals (`term.gap` mit Grund `sensitive_output`) und nimmt den Wert in die Secret-Liste auf. Secrets nimmt die CLI nur per `getpass` oder stdin an, nie als Argument.
+
+### 8.6 Daemon-Betrieb
+
+- `ariadne setup` ist der einzige Installer: Launcher, `init.zsh` und `init.bash` (fish ab v0.2), RC-Zeile zwischen Markern, systemd-User-Units. `ariadne setup --remove` baut alles zurück.
+- Zwei Sockets mit klaren Rollen: `term.sock` (Binärrahmen für Shims) und `ctl.sock` (JSON für CLI und Einmalcodes). Ein Service `ariadned.service` mit `Type=notify`, `Restart=on-failure`, `UMask=0077`, `LimitCORE=0`, `NoNewPrivileges=yes`. Ohne systemd startet die CLI den Daemon mit `--detach` und `flock`.
+- Shim-Verbindungen nimmt der Daemon nur von Prozessen an, deren `/proc/<pid>/exe` der Interpreter des Ariadne-venv ist und deren `comm` `ariadne-shim` lautet.
+- Logs enthalten nur Metadaten, nie Inhalte. uvicorn läuft mit `access_log=False` und einem eigenen Access-Log ohne Pfadparameter und Query. Ein globaler Filter verwirft Exception-Nachrichten aus Pydantic und SQLite.
+- Nach einem Absturz startet der Daemon gesperrt neu. Die Lücke ist im Titel, in der Web-UI und als Event sichtbar.
+- Speicher-Wächter: Unter 2 GiB freiem Platz schaltet der Daemon auf «nur Metadaten», schreibt Gaps und warnt deutlich. Grosse Output-Chunks werden vor der Verschlüsselung komprimiert (zstd).
+
+### 8.7 Export
+
+Ein Exporter `ariadne.export`, ausgelöst per Web-UI oder `ariadne export`. Ziel ist standardmässig `<projekt>/exports/<UTC>/`, ein Ordner, den man in Obsidian als eigenen, nicht synchronisierten Vault öffnen kann.
+
+```
+00 Übersicht.md           # Scope, Zeitraum, Statistik, offene Prüfziele
+01 Angriffspfad.md        # der Faden: Schritte mit Befehl, Ergebnis, Beleg
+02 Writeup.md             # Gerüst nach Vorlage (siehe unten)
+Hosts/<kurz-uuid>-<slug>.md
+Credentials.md            # maskiert; Klartext nur im Profil lab und auf Wunsch
+Zeitachse.md
+Belege/<event-id>.md      # Befehl, Ausschnitt, UTC, Kontext, Hash; Bilder in Belege/img/
+_ariadne/manifest.json    # Exportzeit, Kettenkopf, Hashes aller Dateien
+```
+
+**Vorlagen für das Writeup**
+
+- `cys`: Schema aus dem Modul Cybersecurity mit den Phasen Reconnaissance, Scanning/Enumeration, Exploitation, Post-Exploitation und Reporting. Jede Phase mit Ziel, Tools, ausgeführten Befehlen, Erkenntnissen und Belegen. Findings mit Schweregrad (Critical, High, Medium, Low, Informational), MITRE-ATT&CK-ID und Massnahme. Die Zuordnung von Befehlen zu Phasen schlagen Regeln vor (nmap zu Scanning, Listener und Exploit zu Exploitation, linpeas zu Post-Exploitation), der Nutzer korrigiert per Entscheid.
+- `htb`: Enumeration, Foothold, Privilege Escalation, Pivot, Loot, Lessons Learned.
+
+**Sicherheit des Exports.** Obsidian rendert nicht passiv: Es lädt externe Bilder (Tracking beim Öffnen), löst Embeds auf, und Plugins wie Dataview können Inline-JavaScript ausführen. Deshalb:
+
+1. Dateinamen entstehen nie aus Zieldaten, sondern als `<kurz-uuid>-<slug>` mit Slug aus `[a-z0-9-]{1,40}`. Geschrieben wird per `openat` relativ zum Export-Verzeichnis mit `O_NOFOLLOW | O_EXCL`.
+2. Ein zentraler Encoder `md_text()` escaped alle Steuerzeichen von CommonMark und Obsidian (`[`, `]`, `!`, `(`, `)`, Backtick, `$`, `%%`, `==`, `^`, `#`, `<`, `>`, `|`). Zieldaten stehen nie in Inline-Code, sondern nur in Codeblöcken mit Info-String `text` und einer Fence, die länger ist als jede Backtick- oder Tilde-Folge im Inhalt.
+3. Keine externen URLs als Bild oder Link. Bilder nur als lokale Assets mit Hash-Namen.
+4. Mermaid nur mit Knoten-IDs aus UUIDs und Labels aus einer Allowlist, nie mit `click`, `%%{init}%%`, `style` oder `classDef`.
+5. C0- und C1-Zeichen, Bidi- und Zero-Width-Zeichen werden sichtbar ersetzt (`<ESC>`, `<U+202E>`).
+6. KI-Texte gelten im Export wie Zieldaten.
+7. Ein Golden-Test exportiert ein feindliches Fixture-Projekt und prüft, dass kein HTML-Element, kein externes Bild, kein Embed, kein `$=`-Inline-Code und kein Pfad ausserhalb des Exports entsteht.
+8. Liegt das Ziel in einem Obsidian-Vault oder Sync-Ordner (`.obsidian`, Nextcloud, Dropbox oberhalb), warnt Ariadne. Die Doku empfiehlt, Dataview-JavaScript im Report-Vault abzuschalten.
+
+### 8.8 Installation und Lieferkette
+
+- **Online:** `sudo apt install pipx` (bringt `python3-venv` mit), dann `pipx install` aus dem Wheel oder per `git+ssh` mit festem Commit-Hash, solange das Repo privat ist. Kali blockiert `pip install` systemweit (PEP 668), daher pipx. Danach `ariadne setup`.
+- **Paketname:** `ariadne` ist auf PyPI belegt, geplant ist `ariadne-recon`, Befehl `ariadne`. Bevor irgendeine Anleitung `pipx install ariadne-recon` nennt, wird der Name auf PyPI reserviert, sonst kann ihn jemand anderes belegen.
+- **Abhängigkeiten** mit `uv pip compile --generate-hashes` gepinnt und mit `--require-hashes` installiert, auch im Offline-Bundle.
+- **Offline-Bundle (v0.2):** `ariadne-recon-<ver>-x86_64.tar.gz` mit Wheels (inklusive gebauter Web-UI) für CPython 3.11 bis 3.14, `install.sh` und signierten `SHA256SUMS` (`ssh-keygen -Y sign`). Install-Test im Container `kalilinux/kali-rolling` mit `--network none`. Das Bundle hat ein Ablaufdatum: `ariadne doctor` warnt ab 30 Tagen, Webshot und PCAP-Analyse verweigern ab 90 Tagen.
+- **Web-UI-Build:** `npm ci --ignore-scripts` in einem isolierten Build-Container, wenige Abhängigkeiten (svelte, vite, cytoscape, cytoscape-fcose, cytoscape-dagre, markdown-it, dompurify, openapi-fetch). Ein CI-Check prüft, ob das Wheel die Assets enthält.
+- **Updates:** `pipx upgrade`, Migrationen nur vorwärts mit Backup davor. `ariadne doctor` erkennt einen pipx-venv, den ein Python-Upgrade von Kali beschädigt hat, und prüft, ob Launcher- und Paketversion zusammenpassen.
+
+### 8.9 Backups (v0.2)
+
+`ariadne backup <slug> --to <ziel>` kopiert die Datenbanken per `sqlcipher_export()` mit demselben Schlüssel, danach `PRAGMA integrity_check`. Blobs gehen inkrementell mit. Jede Kopie steht in einer Registry, damit `purge` sie findet. Ob `sqlcipher_export()` bei gleichzeitigem Schreiben konsistent ist, ist zu verifizieren. Bis dahin pausiert der Ingest während des Backups.
+
+## 9 Sicherheitsarchitektur
+
+### 9.1 Bedrohungsmodell
+
+**Schutzgüter:** Kundendaten und Loot (Credentials, Hashes, Dumps, PCAPs, Screenshots), der Kali-Rechner selbst, Schlüssel und eigene Secrets, die Integrität von Rohlog, Aktivitätsprotokoll und Belegen, die Rechtssicherheit (Scope) und die Verfügbarkeit der Aufnahme im entscheidenden Moment.
+
+**Angreifer**
+
+| | Angreifer | Möglichkeiten |
+|---|---|---|
+| A1 | feindliches Ziel (Honeypot, Blue Team, kompromittiertes System) | kontrolliert jedes Byte im Terminal-Output, Banner, Hostnamen, PTR, Zertifikate, Dateien, Webseiten, Bilder, PCAP-Inhalte; per OSC 52 die Zwischenablage; über Tunnel-Server Loopback-Dienste auf Kali |
+| A2 | feindliche Webinhalte | im Test- und im Webshot-Browser |
+| A3 | andere lokale Benutzer, Container mit Host-Netz | erreichen Loopback-Ports |
+| A4 | Code mit der UID des Operators | präparierte PoCs von GitHub, Tools mit Hintertür, bösartige Plugins, Lieferkette |
+| A5 | Verlust, Diebstahl, Backups, Sync, Swap, Logs, Coredumps | Klartext ausserhalb der Verschlüsselung |
+| A6 | Cloud-Anbieter und Netzwege | Proxy, Kundennetz |
+| A7 | Streitfall | Kunde oder Operator stellen Beweise in Frage |
+
+**Vertrauensgrenzen:** PTY-Output zum Shim, Dateien, Bilder und PCAPs zu den Parsern, Zieldaten zum Sprachmodell, Browser zur lokalen API, lokale Prozesse zu Sockets und Port, Daemon zur Cloud und zur Platte, Ariadne zurück zum Operator.
+
+**Kernerkenntnis.** Die grösste neue Angriffsfläche sind nicht die Parser, sondern die **Rückkanäle**. Ariadne nimmt Zieldaten auf und gibt sie aufbereitet und mit Vertrauensvorschuss genau dort zurück, wo der Operator ausführt: kopierte Befehle, Zwischenablage, Terminal-Titel und Mini-Prompt, CLI-Ausgaben, Obsidian-Exporte. Die zweite Erkenntnis: Ein Prozess, der alle Schlüssel hält, darf nicht gleichzeitig feindliche Daten parsen.
+
+### 9.2 Sicherheitsprinzipien
+
+1. **Zieldaten bleiben feindlich, bis sie den Bildschirm verlassen.** Auch nach Parsing, Bestätigung und Speicherung, und auch als KI-Text darüber.
+2. **Jede Senke hat genau einen Encoder, Allowlist vor Blocklist.** Terminal (`term_safe()`), Shell-Befehl (typisierte Platzhalter), Dateiname (UUID-Slug), Markdown (`md_text()`), Mermaid, HTML (Svelte, `displaySafe()`), SQL (nur DSL), Benachrichtigungen. Was sich nicht sicher kodieren lässt, wird nicht gerendert. `term_safe()` lässt nur druckbare Zeichen durch, ersetzt C0, C1, DEL, Bidi- und Zero-Width-Zeichen sichtbar und begrenzt die Länge. Ein Lint erzwingt seine Nutzung in Shim und CLI.
+3. **Der Eingabekanal des Operators ist unantastbar.** Nur echte, einzeln ankommende Tastendrücke sind Hotkeys. Reflektierende Sequenzen filtert der Shim. Ariadne fragt im Terminal nie nach Secrets.
+4. **Wer Schlüssel hält, parst nicht.** Parser, OCR, `tshark`, Bilddekodierung, Plugins und Chromium laufen in Worker-Prozessen ohne Netz, ohne Home, ohne Socket und ohne Schlüssel.
+5. **Ariadne handelt nie, auch nicht indirekt.** Keine DNS-Auflösung von Zielnamen, keine Requests ausser dem ausdrücklichen Webshot über den Scope-Proxy.
+6. **Scope gehört zur Kennung, nicht zur Entität.** Einschluss wird nie vererbt, `unknown` ist nie `in`.
+7. **Ein Projekt, ein Schlüssel, eine Bindung.** Terminals, Puffer, Watcher und Zwischenablage sind fest an ein Projekt gebunden. Klartext nur in tmpfs, keine Inhalte in Logs, keine Coredumps.
+8. **Lokal heisst nicht vertrauenswürdig.** Token auf jeder Route, Prüfung von Peer-UID und Port-Eigentum, keine Codes in argv, kritische Operationen mit erneuter Bestätigung.
+9. **Beweise ehrlich machen.** Hash über alle Felder mit gesalzenen Commitments, externer Anker, dokumentierte Zeitbasis, drei Herkunftsstufen im Aktivitätsprotokoll.
+10. **KI ist ein Vorschlagsgenerator mit Belegpflicht und minimalem Datenbedarf.** Keine Tools, Datenhüllen auch im Lagebild, validierte Freitexte, Policy vor Payload.
+11. **Sichere Voreinstellungen statt Disziplin.** lab mit Leitplanken gegen Kundendaten, customer ohne Cloud und ohne Klartext-Export, bei Unklarheit fail-closed.
+12. **Lieferkette, Alterung und Tests gehören zum Bedrohungsmodell.** Gepinnte Hashes, signierte Bundles, Plugins nur per Allowlist, Ablaufdatum für gebündelte Browser, feindliches Golden-Korpus, Fuzzing und ein Canary-Test über alle Senken.
+
+### 9.3 Worker-Isolation nach Version
+
+| Version | Isolation |
+|---|---|
+| v0.1 | Subprozesse mit leerem Environment, ohne geerbte fds ausser Eingabe und Ergebnis-Pipe, ohne Schlüssel, mit `rlimit` (Speicher, CPU, Dateigrösse), `RLIMIT_CORE=0`, `PR_SET_NO_NEW_PRIVS`. Ergebnisse als JSON-Lines mit Grössenlimit, im Kern gegen das Schema validiert |
+| v0.2 | zusätzlich seccomp-Filter (kein `socket`, `connect`, `ptrace`, `execve` ausser für genau einen Helfer), Landlock (nur Lesen der Bibliothekspfade), wo verfügbar `bwrap --unshare-all --die-with-parent` ohne Home (auf Kali zu verifizieren) |
+| v0.2 | Fuzzing (`atheris` oder `hypothesis`) für Normalizer, Marker-Parser, Escape-Scanner und jeden Parser; Absturzfälle werden Golden-Fälle |
+
+## 10 Repo und Qualität
+
+### 10.1 Layout
+
+```
+pyproject.toml            # hatchling, Paket ariadne-recon, Befehl ariadne
+src/ariadne/
+  events.py               # Event- und Entscheid-Katalog (einzige Quelle)
+  ontology.py             # Entitäten, Prädikate, Kardinalität, Kartenebenen
+  cli/  daemon/  shim/  shell/      # shell: init.zsh, init.bash, init.fish
+  ctxrules.py  scope/  secrets/  crypto/  project/
+  store/  ingest/  parsers/  query/
+  sources/  ai/  rules/  export/
+  web/                    # FastAPI-App, static/ nur im Wheel
+webui/                    # Svelte + Vite + TypeScript, package-lock.json
+tests/
+  unit/  golden/<parser>/<fall>/  e2e/  hostile/  projects/
+packaging/                # systemd/, offline/install.sh
+tools/                    # record-fixture, scrub-fixture, build-bundle
+docs/
+  adr/                    # Architekturentscheide
+```
+
+### 10.2 Teststrategie
+
+- **Golden-Tests** mit einem Format für Parser, Normalizer und Regeln: `input.*` (auch rohe PTY-Bytes), `meta.toml` (Tool, Version, Befehl, Quelle), optional `unit.json`, `expected.jsonl` (kanonisch sortiert). `pytest --update-golden` zeigt den Diff vor dem Schreiben. Fixtures nur aus eigenen Labs, zuerst Metasploitable2. Nie aus aktiven HTB-Boxen oder Kundenaufträgen. Parser mit Formatänderungen haben Fälle für mindestens zwei Tool-Versionen.
+- **Metamorphe Tests** mit `hypothesis`: Farben an oder aus, CRLF und zufällige Chunk-Grenzen ergeben dieselben Fakten.
+- **PTY-E2E** mit `pexpect`: zsh mit Kali-Plugins, bash, später fish, in isolierten `XDG_*`-Ordnern. Fallback bei kaputtem venv, Doppel-Wrapping (tmux, `sudo -i`, Unter-Shell), `yes | head`, Resize, Ctrl-Z mit `stty raw` und `fg`, Secret über Chunk-Grenze, 50 MB `cat`, vim.
+- **Feindliches Ziel** (`tests/hostile/`): ein Testprogramm, das gefälschte Marker, Titel-Reports, OSC 52, verdeckten Text, Prompt-Fälschungen, XSS-Hostnamen und Bidi-Dateinamen ausgibt. Geprüft wird in Shim, Datenmodell, Web-UI (Playwright: kein Dialog, keine Navigation, keine `securitypolicyviolation`) und Export.
+- **Canary-Test:** markierte Testwerte, einer davon als eigenes Secret eingetragen. Nach `close` steht keiner im Klartext in `$HOME`, `$XDG_RUNTIME_DIR`, `/tmp`, `/var/tmp`, `~/.cache`, `~/.viminfo`, im User- und System-Journal, in `/var/lib/systemd/coredump`, in Clipboard-Manager-Dateien oder im Firefox-Profil der UI.
+- **Sicherheits-Middleware:** pytest für falschen Host, fremden Origin, `Sec-Fetch-Site: cross-site`, fehlendes Token, `OPTIONS`.
+- **Install und Migration:** Offline-Install im Kali-Container ohne Netz, Upgrade mit Fixture-Projekten jeder früheren Version.
+
+## 11 Roadmap
+
+Die Schätzungen sind grob. Mit KI-Unterstützung sinkt vor allem die Schreibarbeit am Code. Review, Tests, Lab-Erprobung und Entscheide bleiben Handarbeit.
+
+### v0.1: Flugschreiber mit erster Karte
+
+**Ziel:** Eine Metasploitable2- oder einfache HTB-Session läuft mit REC. Nach dem ersten nmap steht die Karte im Nebel, Bestätigen, Foothold und root färben sie ein. Am Ende entsteht ein Writeup mit Belegen. **Grobe Schätzung:** 150 bis 250 Stunden, bei 20 Stunden pro Woche also etwa zwei bis drei Monate.
+
+| Block | Inhalt |
+|---|---|
+| Fundament | `events.py` mit Event- und Entscheid-Katalog, Ontologie v1 mit drei Status-Achsen, Glossar, ADRs zu Speicherlayout, Schwärzung und Segmentierung |
+| Flugschreiber | Shim für zsh und bash (Launcher mit Fallback, Doppel-Wrapping-Schutz, PTY-Relay, Marker mit Nonce und `tcgetpgrp`-Prüfung), Ausgabefilter (OSC 52, reflektierende Anfragen, Grenzen), Hotkeys `r h b k s ?` mit Burst-Schutz, Mini-Prompt im normalen Bildschirm, Kontext-Stapel mit `ariadne.ctxrules` und argv-Regeln, REC per CLI, Hotkey und Web, Projektbindung, Titel über `term_safe()`, Transport mit RAM-Puffer und Gaps |
+| Speicher | drei SQLCipher-Datenbanken, age-Blobs mit Zufallsnamen, Operator-Tresor mit Passphrase und Recovery-Code, Entsperren nur per CLI, Hash-Kette v1 mit `ariadne verify`, Projektordner mit Arbeitsbereich und `.vault/`, Profil lab mit Leitplanken, Redaktor, `ariadne redact` |
+| Auswertung | Segmenter (nur gültige Marker), Normalizer mit Offset-Karte, `prompt_echo` und Verdeckt-Markierung, FTS5, Worker-Prozesse ohne Schlüssel, Parser `nmap.xml`, `nmap.text`, `regex.net`, `listener.callback` mit Golden-Tests, `companions()`, Claims mit Konflikten, Union-Find mit Scope-Regel, Inbox mit Sammelbestätigung, Automodus-Schalter, `ariadne reparse` |
+| Scope und Protokoll | Pflichtfeld Ziel, `ScopeMatcher` mit Normalisierung, Scope-Warnung nach dem Befehlsstart (Titel und Web-UI), Aktivitätsprotokoll mit Quell-IP |
+| Quellen | Watcher mit sicherem Öffnen, `ariadne import`, Screenshots unter Xfce/X11 (Fenster, Monitor, Bereich) per Hotkey, Web-Knopf und Desktop-Kürzel, mit Terminal-Offset |
+| Web-UI | Sicherheitsmodell komplett, Kopfzeile mit REC und Sperrzustand, Terminals, Inbox, Host-Tabelle, Host-Detail mit Belegansicht, Zeitachse als Liste, Notizen, Tags, Arbeitsstand, leerer Zustand mit Checkliste |
+| Karte | fcose, Topologie mit Service-Badges, Nebel, Farbe aus `progress`, Faden aus `k`-Markierungen, Einblenden neuer Elemente, gespeicherte Positionen |
+| Denkanstösse | rund 10 Regeln als Python-Funktionen, rund 15 Befehlsvorlagen mit typisierten Platzhaltern, KI-Denkanstoss auf Knopfdruck über Claude (nur lab), Lagebild mit Validierung, `ai.call` im Journal, Budget, Ablehnungsbehandlung, HTTP-Client ohne Umgebungs-Proxy |
+| Export | ein Exporter mit Übersicht, Angriffspfad, Writeup nach Vorlage `cys` und `htb`, Hosts, Belegen, Manifest mit Kettenkopf; `md_text()` und sichere Dateinamen |
+| Betrieb und Tests | `pipx install` aus Wheel oder Git mit Commit-Hash, gepinnte Abhängigkeiten, `ariadne setup`, minimaler `ariadne doctor`, systemd-Units, Logs ohne Inhalte, Coredumps aus; PTY-E2E, Golden-Runner, feindliches Ziel, Canary-Test |
+
+**Bewusst nicht in v0.1:** Profil customer, KI-Extraktion, Ollama, OCR, Vision, Zwischenablage, Burp, PCAP, fish, Import alter Aufnahmen, Credential-Matrix, Fragen in normaler Sprache, Offline-Bundle, Backups, Webshots.
+
+### v0.2: Bild ausmalen und verstehen
+
+- Parser: `shell.context`, `hydra`, `ffuf.json`, `gobuster`/`feroxbuster`, `nxc` (mit Fehlschlägen und `--pass-pol`), `smbclient`/`smbmap`, `enum4linux-ng`, `passwd`/`shadow`, `john --show`/Potfile, `secretsdump`, `transfer.download`
+- linpeas- und winPEAS-Parser mit Farb-Hinweisen, Digest für grosse Einheiten, KI-Zusammenfassung auf Klick
+- KI-Extraktion als Pseudo-Parser `llm.extract`, Ollama-Provider (Text), lokale Ausweichroute nach Ablehnung
+- Erfassung: Kontext-Heuristiken als Vorschlag, Hotkeys `u` und `y`, Mini-Prompt im Alternate Screen, Echo-Bestätigung für Remote-Befehle, Hooks für Root-Shells, fish
+- Import alter Aufnahmen (`script` mit Timing, asciinema, tmux-Logs)
+- CredentialTest, Credential-Matrix und Credential-Ebene, Lockout-Zählung pro Identität mit Realm (`ad:<domain>` domänenweit, `local:<host>` pro Host), Warnung bei Schwelle minus zwei
+- Tunnel und Segmente (ssh -L/-R/-D, chisel, ligolo-ng), Faden-Linse, Web-Baum; Regel-Hinweis bei `chisel server` ohne `--authfile`
+- `ariadne.query` mit Filterleiste und Fragen in normaler Sprache
+- Prüfziel-Katalog, Testabdeckung, Hypothesen, YAML-Regeln, Lernmodus in drei Stufen, ausgebaute Befehlsbibliothek
+- OCR mit Tesseract und Bildregion-Provenienz
+- Scope-Wächter vor dem Ausführen als zle-Widget um `accept-line` (Warnung mit zweitem Enter)
+- Burp-XML und HAR mit Scope-Vorfilter
+- Worker-Sandbox mit seccomp und Landlock, Fuzzing
+- Offline-Bundle für x86_64, vollständiger `doctor`, Backup und Restore
+
+### v0.3: bereit für Kunden
+
+- Profil customer: Projekt-Passphrase, Recovery-Code, Pflichtfelder, Auto-Sperre, Zeitfenster, Bestätigung bei Scope-Verletzung, verschlüsselter Arbeitsbereich, `project convert`
+- Cloud-LLM nur mit Freigabe pro Projekt und Funktion, Pseudonymisierung mit Rückabbildung, Payload-Vorschau, Bilder nie in die Cloud
+- Export des Aktivitätsprotokolls, Artefakt-Liste für das Cleanup, Notfallkontakte, Stopp-Knopf mit Zugangsinventar, Incident-Export pro Host und Zeitraum, Findings mit CVSS, Reportvorlage für Kunden
+- `purge` mit vollständigem Löschnachweis, `archive` und `restore`, Exporte nur in den RAM oder als `.age`
+- Spool an den age-Recipient bei gesperrtem Projekt
+- signierte Checkpoints und externer Anker für den Kettenkopf
+- Vision (lab über Claude, customer nur lokal) und Webseiten-Screenshots über den Scope-Proxy
+- Zwischenablage, Browser-Verlauf, PCAP, Metasploit-DB, Responder-Logs
+- Wayland-Backends für Screenshots
+- Adressräume für überlappende Netze, AD über BloodHound-CE-Import und AD-Regelpaket, msfconsole- und Meterpreter-Sessions
+
+### v0.4 und später
+
+- semantischer Zoom für 500+ Hosts, Zeitreise-Regler, Terminal-Replay mit xterm.js (ohne Links, Bilder, Clipboard)
+- Burp-Erweiterung über die Montoya-API, Firefox-Erweiterung für Tab-Screenshots ohne Zusatzanfrage
+- Massen-Nachauswertung über die Batches API, Eval-Harness für Prompts, Modus «Erst du» mit sokratischem Feedback
+- Regel- und Parser-Pakete als Plugins, Export nach SysReptor, Export von Fakten als BloodHound-OpenGraph
+- Teamfunktionen über die vorhandene Operator-ID, Headless-Betrieb auf einer Jumpbox, nativer Relay-Kern falls nötig
+
+## 12 Risiken
+
+| Risiko | Auswirkung | Gegenmassnahme |
+|---|---|---|
+| Der Umfang wächst schneller als die Nutzung | v0.1 wird nie fertig | Roadmap ist verbindlich, «bewusst nicht in v0.1» wird eingehalten, ab v0.1 Eigennutzung und Backlog aus echten Ärgernissen |
+| Falsche Kontextzuordnung in Remote-Sessions | Ziel-Daten landen bei Kali, Karte falsch | Standard «unbekannt», nur gültige Marker setzen Kali, Heuristik nur als Vorschlag, rückwirkende Korrektur, Inbox-Pflicht für unbekannte Hosts |
+| Normalizer ordnet Offsets falsch zu | Provenienz verliert Vertrauen | Golden-Tests mit echten Bytes, metamorphe Tests, Rohstrom bleibt die Wahrheit |
+| Feindliche Zieldaten erreichen eine Senke | Codeausführung auf Kali, Lecks | ein Encoder pro Senke, Worker ohne Schlüssel, feindliches Test-Ziel im CI |
+| Cyber-Klassifikator lehnt KI-Aufrufe ab | Denkanstösse unzuverlässig | Regeln zuerst, Fallbacks, lokale Ausweichroute, Ablehnungsquote messen |
+| Lokale Modelle zu schwach oder zu langsam | Offline-KI und lokale Vision kaum nutzbar | Hardware klären, kleine Modelle testen, Ariadne funktioniert ohne KI |
+| Kali-Rolling-Updates zerstören den pipx-venv | keine Aufnahme | Launcher-Fallback, sichtbarer Titel, `doctor` |
+| `sqlcipher3` mit einem Maintainer | Wheels fehlen nach Python-Upgrade | Version pinnen, CI-Matrix, Notfallzugriff über `sqlcipher`-CLI |
+| UI frisst die Zeit | Animationen statt Belege | Tabellen und Belegansicht vor dem Graph, Reihenfolge einhalten |
+| Klartext ausserhalb von Ariadne (Tool-Speicher, History) | Löschnachweis irreführend | ehrlicher Löschnachweis mit Liste, verschlüsselter Arbeitsbereich ab v0.3 |
+| Wayland-Fragmentierung | Screenshots und Zwischenablage eingeschränkt | Backend-Abstraktion ab v0.1, Xfce/X11 als Referenz |
+| Diplom-Rahmen unklar (Termin, KI-Regeln) | Konflikt mit «bis perfekt» und mit Prüfungsregeln | früh mit der Schule klären, Entscheidungsprotokoll führen |
+
+## 13 Zu verifizieren
+
+Diese Punkte sind vor oder während der Umsetzung als kurze Spikes zu prüfen:
+
+- Startzeit des Shims mit explizitem `sys.path` (Ziel unter 50 ms), Latenz und Durchsatz des Python-Relays
+- QTerminal: Verhalten bei Titel-Reports, OSC 52, Bracketed Paste, ob `Ctrl+5` als 0x1D ankommt, `WINDOWID`
+- Nonce-Weitergabe in Root-Shells über `/proc/<pid>/environ` der äusseren Shell
+- `tcgetpgrp`-Prüfung für C-Marker (Wettlauf mit `fork`) per PTY-Test
+- `sqlcipher3`: `set_authorizer`, `set_progress_handler`, FTS5 an der gepinnten Version, `sqlcipher_export()` bei gleichzeitigem Schreiben
+- Svelte 5 und Cytoscape unter `style-src 'self'` ohne `'unsafe-inline'`
+- Anthropic-SDK: `http_client=DefaultHttpxClient(...)` ohne Übernahme der Umgebungs-Proxys
+- `defusedxml` mit `forbid_dtd` gegen Burp-XML
+- Playwright auf Kali, `--force-webrtc-ip-handling-policy`, Netz-Namespace per `bwrap` oder `unshare` ohne root
+- `gocryptfs` oder `fscrypt` auf Kali für den verschlüsselten Arbeitsbereich
+- seccomp, Landlock und unprivilegierte User-Namespaces auf Kali
+- Screenshot-Backends unter KDE und GNOME (Flags von `spectacle`, Portal-Verhalten)
+- lokale Vision-Modelle auf der vorhandenen Hardware
+- `tshark` ohne Lua und mit leerem Konfigurationsordner
+- systemd-coredump respektiert `RLIMIT_CORE=0`
+- Standardwert von `kernel.yama.ptrace_scope` auf Kali
+- `xfce4-clipman` auf Kali vorinstalliert, und wo speichert es seinen Verlauf
+
+## 14 Offene Fragen
+
+Diese Fragen kann nur der Nutzer beantworten. Sie stehen auch in der [Vision](../VISION.md#offene-punkte).
+
+1. Rahmen der Diplomarbeit (Start, Dauer, Abgabe) und Regeln der Schule zum KI-Einsatz.
+2. Tastaturlayout: Bleibt `Ctrl-]` als Präfix?
+3. Umgebung: Kali als VM oder nativ, welcher Hypervisor, welcher Desktop, Shared Folders, RAM, GPU, zweiter Rechner für Ollama.
+4. Claude-Budget im Profil lab (Vorschlag 20 USD pro Monat), und ob für automatische Aufrufe ab v0.2 ein günstigeres Modell gewählt werden soll.
+5. Obsidian: Export auf Wunsch direkt in den synchronisierten Vault (nur lab), oder immer im Projektordner?
+6. Tools nach nmap, und ob echte Metasploitable2-Outputs als Testmaterial bereitstehen.
+7. Sprache der UI: Deutsch mit englischen Fachbegriffen (Empfehlung, Texte ab Tag 1 über i18n-Schlüssel) oder durchgehend Englisch?
+8. Passwortmanager unter Kali (relevant für die Zwischenablage ab v0.3).
