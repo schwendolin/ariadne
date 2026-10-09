@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ariadne-recon"
+version = "0.1.0.dev0"
+description = "Flugschreiber und Kartograf für Pentests unter Linux"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Sven Cotting" }]
+dependencies = [
+  "pydantic>=2.7",
+  "sqlcipher3>=0.6.2",
+  "pyrage>=1.2",
+  "fastapi>=0.110",
+  "uvicorn>=0.30",
+  "watchdog>=4",
+  "defusedxml>=0.7",
+  "google-re2>=1.1",
+  "tomlkit>=0.12",
+  "pyte>=0.8",
+  "anthropic>=1.0",
+  "mss>=9",
+  "python-xlib>=0.33",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pexpect>=4.9",
+  "hypothesis>=6",
+  "httpx>=0.27",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+ariadne = "ariadne.cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ariadne"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -ra"
+markers = [
+  "pty: startet echte Shells in einem PTY",
+  "slow: langsame Tests",
+  "e2e: End-to-End über Shim, Daemon und Auswertung",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = ["S101", "S603", "S607"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B"]

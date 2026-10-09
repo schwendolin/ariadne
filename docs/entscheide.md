@@ -1,6 +1,6 @@
 # Entscheidungsprotokoll
 
-> Hält fest, was entschieden wurde, warum, und wer entschieden hat. Ariadne entsteht mit KI-Unterstützung (Claude). Für die Diplomarbeit muss erkennbar sein, welche Entscheide vom Nutzer stammen und welche die KI vorgeschlagen oder übernommen hat.
+> Hält fest, was entschieden wurde, warum, und wer entschieden hat. Ariadne entsteht mit KI-Unterstützung (Claude). Das Protokoll macht sichtbar, welche Entscheide vom Nutzer stammen und welche die KI vorgeschlagen oder übernommen hat.
 
 **Quelle**
 
@@ -21,8 +21,9 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 | E02 | 2026-10-08 | Kernproblem: Überblick verlieren bei vielen Infos, dazu fehlende Denkanstösse | so erlebt | Nutzer | fest | F1.2 |
 | E03 | 2026-10-08 | Vorerst Einzelnutzer. Datenmodell trägt trotzdem eine Operator-ID | Teamarbeit später ohne Neubau möglich | Nutzer + KI | fest | F1.3, A5.2 |
 | E04 | 2026-10-08 | Leitgefühl: schnell eine erste Übersicht, dann das Bild langsam ausmalen | so gewünscht | Nutzer | fest | F1.4, A7.5 |
-| E05 | 2026-10-08 | Privates Projekt, geplant als Diplomprojekt, Vorgehen nach HERMES 2022 | so geplant | Nutzer | fest | VISION |
-| E06 | 2026-10-08 | Entwicklung allein und KI-unterstützt, ca. 20 Stunden pro Woche | so geplant | Nutzer | vorläufig: «Kai» als «KI» gelesen | VISION |
+| E05 | 2026-10-09 | Privates Projekt, keine Diplomarbeit, Start sofort | so entschieden | Nutzer | fest | VISION |
+| E06 | 2026-10-08 | Entwicklung allein und KI-unterstützt, ca. 20 Stunden pro Woche | so geplant | Nutzer | fest | VISION |
+| E09 | 2026-10-09 | Zielumgebung: Kali in einer VM mit eher knapper Leistung | so vorhanden | Nutzer | fest | VISION |
 | E07 | 2026-10-08 | Keine Zertifizierung geplant, daher kein Prüfungsmodus | so geplant | Nutzer | fest | F8.4 |
 | E08 | 2026-10-08 | Repo privat, Lizenz später | so gewünscht | Nutzer | fest | F10.3 |
 
@@ -42,7 +43,8 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 | E20 | 2026-10-08 | Rohlog dauerhaft speichern, unveränderlich, verschlüsselt | Beweis und spätere Neuauswertung | Nutzer | fest | F2.1 |
 | E21 | 2026-10-08 | Erfassung über einen eigenen PTY-Wrapper um jede Shell, unabhängig von Terminal und Multiplexer. tmux optional | Nutzer arbeitet mit dem Kali-Standard ohne tmux, Ariadne muss mit anderen Setups kompatibel sein | Nutzer + KI | fest | F2.2, A3 |
 | E22 | 2026-10-08 | Record-Knopf: solange REC an ist, nimmt Ariadne alles auf. Umschalten per Web-UI, CLI und Hotkey | so gewünscht | Nutzer | fest | F2.3, A3.6 |
-| E23 | 2026-10-08 | Host-Kontext als Stapel pro Terminal, gesetzt per Hotkey `Ctrl-]` und Web-UI; Automatik nur für Session-Start und Rückkehr | Remote-Shells nehmen keine lokalen Befehle an, der Shim sitzt davor | Nutzer + KI | vorläufig: Tastaturlayout offen | F2.4, A3.5 |
+| E23 | 2026-10-08 | Host-Kontext als Stapel pro Terminal, gesetzt per Hotkey und Web-UI; Automatik nur für Session-Start und Rückkehr | Remote-Shells nehmen keine lokalen Befehle an, der Shim sitzt davor | Nutzer + KI | fest | F2.4, A3.5 |
+| E29 | 2026-10-09 | Hotkey-Präfix `F12` statt `Ctrl-]`, konfigurierbar | Nutzer wollte eine andere Taste; F12 ist auf dem Schweizer Layout einfach erreichbar und selten belegt | Nutzer + KI | vorläufig | A3.4 |
 | E24 | 2026-10-08 | Parallele Terminals: getrennte Ströme und Kontexte, eine Zeitachse, ein Graph | Kontexte dürfen sich nicht mischen | an KI delegiert | fest | F2.5 |
 | E25 | 2026-10-08 | Grosse Outputs: alles speichern und durchsuchbar, verdichtet in vier Stufen (Rohstrom, Mentions, Hinweise, Karte) | Nutzer: alle Infos relevant; Karte muss lesbar bleiben | Nutzer + KI | fest | F2.6, A5.11 |
 | E26 | 2026-10-08 | Gespeichert wird nur der Output, nie Tastendrücke. Ab v0.2 vergleicht der Shim die Eingabe mit dem Echo und speichert nur ein Bestätigungs-Flag | Datensparsamkeit; Schutz vor gefälschten Remote-Befehlen | KI-Vorschlag | vorläufig | A5.13 |
@@ -84,7 +86,9 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 | E63 | 2026-10-08 | Notizen, Tags und Status als Entscheide | so gewünscht | Nutzer | fest | F6.5 |
 | E64 | 2026-10-08 | Vorschläge aus Regeln und KI kombiniert, mit Lernmodus | so gewünscht; Lernwert im Studium | Nutzer + KI | fest | F7.1, F7.2 |
 | E65 | 2026-10-08 | LLM lokal (Ollama) und Cloud (Claude) umschaltbar pro Projekt, über ein einziges Gateway | so gewünscht | Nutzer + KI | fest | F4.3, A6.2 |
-| E66 | 2026-10-08 | Cloud-Standardmodell `claude-opus-5-5`; günstigere Modelle nur auf Wunsch | Qualität vor Kosten, Budget begrenzt | KI-Vorschlag | offen: Budget | A6.2 |
+| E66 | 2026-10-09 | KI über die Claude API als Standard, Modell `claude-opus-5-5`; konfigurierbares Monatslimit (Standard 20 USD) nur als Schutz gegen Fehlbedienung | Nutzer: Budget egal, mit API; lokale Modelle sind in der VM zu schwach | Nutzer + KI | fest | A6.2 |
+| E58 | 2026-10-09 | Kein Export in einen Obsidian-Vault; Export bleibt im Projektordner | so gewünscht | Nutzer | fest | A8.7 |
+| E69 | 2026-10-09 | Parser-Reihenfolge nach Verbreitung im Lab, Tests mit nachgestellten Outputs, bis echte vorliegen | kein Testmaterial zur Hand | Nutzer + KI | fest | A5.6 |
 | E67 | 2026-10-08 | Scope-Warnung: v0.1 nach dem Befehlsstart, ab v0.2 vor dem Ausführen | so gewünscht; gestaffelt | Nutzer + KI | fest | F7.4 |
 | E68 | 2026-10-08 | Befehlsvorlagen nur mit typisierten Platzhaltern und Kontext-Encodern | aus Zieldaten gefüllte Befehle sind sonst ein Weg zur Codeausführung auf Kali | KI-Vorschlag | vorläufig | A6.1 |
 
@@ -115,12 +119,8 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 
 | ID | Frage | Wer | Bezug |
 |---|---|---|---|
-| O01 | Rahmen der Diplomarbeit: Start, Dauer, Abgabe, welche Version ist Gegenstand | Nutzer, Schule | VISION |
-| O02 | Regeln der Schule zum KI-Einsatz in der Diplomarbeit | Nutzer, Schule | VISION |
-| O03 | Hotkey-Präfix bei Schweizer Tastaturlayout | Nutzer | E23 |
-| O04 | Hardware und Umgebung (VM oder nativ, Desktop, RAM, GPU, zweiter Rechner) | Nutzer | A13 |
-| O05 | Monatsbudget für Claude im Profil lab | Nutzer | E66 |
-| O06 | Obsidian-Export direkt in den synchronisierten Vault (nur lab)? | Nutzer | A8.7 |
-| O07 | Tools nach nmap und verfügbares Testmaterial | Nutzer | A5.6 |
-| O08 | Sprache der UI | Nutzer | A14 |
-| O09 | Passwortmanager unter Kali | Nutzer | A4.5 |
+| O07 | Echte Outputs aus Metasploitable2 als Testmaterial | Nutzer, sobald vorhanden | A10.2 |
+| O08 | Sprache der UI (Standard: Deutsch mit englischen Fachbegriffen) | Nutzer | A14 |
+| O09 | Passwortmanager unter Kali (ab v0.3 relevant) | Nutzer | A4.5 |
+
+Erledigt am 2026-10-09: Diplomarbeit (keine), KI-Regeln der Schule (entfällt), Hotkey (E29), Umgebung (E09), Budget (E66), Obsidian (E58), Tools (E69).

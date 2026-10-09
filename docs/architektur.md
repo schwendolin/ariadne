@@ -142,7 +142,7 @@ Der Bereich zwischen A und C (Prompt und Eingabe-Echo) wird gespeichert, geht ab
 
 ### 3.4 Hotkey und Mini-Prompt
 
-Präfix `Ctrl-]` (0x1D), dann eine Taste. Zweimal `Ctrl-]` sendet das Zeichen selbst, wichtig für telnet. Erkannt werden auch die Kodierungen `CSI 93;5u` (Kitty-Protokoll) und `CSI 27;5;93~` (modifyOtherKeys). Der Präfix ist konfigurierbar, `ariadne hotkey test` zeigt, was ankommt. Auf dem Schweizer Layout ist `Ctrl-]` schwer erreichbar (offene Frage).
+Präfix `F12` (Sequenz `ESC [ 2 4 ~`), dann eine Taste. Zweimal `F12` sendet `F12` selbst durch. F12 ist auf jedem Layout, auch dem Schweizer, mit einem Finger erreichbar, wird von Shells und gängigen Remote-Programmen kaum genutzt und kommt in allen verbreiteten Terminals als dieselbe Sequenz an. Der Präfix ist konfigurierbar (`f12`, `ctrl-space`, `ctrl-]`, `ctrl-_`), `ariadne hotkey test` zeigt, was ankommt. Auf Laptops kann `Fn` nötig sein.
 
 | Taste | Wirkung | Version |
 |---|---|---|
@@ -769,7 +769,7 @@ SSE-Ereignisse: `changes`, `rec`, `terminal`, `inbox`, `suggestion`, `progress`,
 ### 7.4 Ansichten
 
 - **Kopfzeile:** Projekt mit Profilfarbe, grosser REC-Knopf mit Laufzeit (zeigt den Zustand erst nach Bestätigung per SSE), Sperrzustand, LLM-Modus, Lagebild-Streifen (Hosts entdeckt, gescannt, mit Zugriff, ungetestete Credential-Kombinationen, Inbox, Denkanstösse). Befehlspalette mit `Ctrl+K`.
-- **Leerer Zustand** für Erstnutzer: Checkliste «REC an, nmap mit `-oA`, Foothold mit `Ctrl-]` `k` markieren».
+- **Leerer Zustand** für Erstnutzer: Checkliste «REC an, nmap mit `-oA`, Foothold mit `F12` `k` markieren».
 - **Terminals:** Name, Status, letzter Befehl, Quell-IP, Kontextstapel als Brotkrumen. Die Stufe «unbekannt» ist auffällig markiert und lässt sich direkt setzen.
 - **Inbox:** gruppiert nach Befehl, Tastatur-Triage (`j`/`k`, `a`, `x`, `e`), Sammelbestätigung, Automodus-Schalter, Scope-Urteil und KI-Kennzeichen pro Wert.
 - **Karte** mit Detail-Schublade rechts (Abschnitt 7.5).
@@ -921,7 +921,7 @@ CLI-Befehle, die Schlüsselmaterial zeigen (`reveal-keys`, Recovery-Code), melde
 
 ### 8.7 Export
 
-Ein Exporter `ariadne.export`, ausgelöst per Web-UI oder `ariadne export`. Ziel ist standardmässig `<projekt>/exports/<UTC>/`, ein Ordner, den man in Obsidian als eigenen, nicht synchronisierten Vault öffnen kann.
+Ein Exporter `ariadne.export`, ausgelöst per Web-UI oder `ariadne export`. Ziel ist immer `<projekt>/exports/<UTC>/`. Einen Export in einen Obsidian-Vault gibt es nicht.
 
 ```
 00 Übersicht.md           # Scope, Zeitraum, Statistik, offene Prüfziele
@@ -939,7 +939,7 @@ _ariadne/manifest.json    # Exportzeit, Kettenkopf, Hashes aller Dateien
 - `cys`: Schema aus dem Modul Cybersecurity mit den Phasen Reconnaissance, Scanning/Enumeration, Exploitation, Post-Exploitation und Reporting. Jede Phase mit Ziel, Tools, ausgeführten Befehlen, Erkenntnissen und Belegen. Findings mit Schweregrad (Critical, High, Medium, Low, Informational), MITRE-ATT&CK-ID und Massnahme. Die Zuordnung von Befehlen zu Phasen schlagen Regeln vor (nmap zu Scanning, Listener und Exploit zu Exploitation, linpeas zu Post-Exploitation), der Nutzer korrigiert per Entscheid.
 - `htb`: Enumeration, Foothold, Privilege Escalation, Pivot, Loot, Lessons Learned.
 
-**Sicherheit des Exports.** Obsidian rendert nicht passiv: Es lädt externe Bilder (Tracking beim Öffnen), löst Embeds auf, und Plugins wie Dataview können Inline-JavaScript ausführen. Deshalb:
+**Sicherheit des Exports.** Markdown-Viewer rendern nicht passiv: Viele laden externe Bilder (Tracking beim Öffnen), lösen Embeds auf, und manche Plugins führen Inline-JavaScript aus (z. B. Dataview in Obsidian). Der Export ist deshalb so gebaut, dass er in jedem Viewer harmlos bleibt:
 
 1. Dateinamen entstehen nie aus Zieldaten, sondern als `<kurz-uuid>-<slug>` mit Slug aus `[a-z0-9-]{1,40}`. Geschrieben wird per `openat` relativ zum Export-Verzeichnis mit `O_NOFOLLOW | O_EXCL`.
 2. Ein zentraler Encoder `md_text()` escaped alle Steuerzeichen von CommonMark und Obsidian (`[`, `]`, `!`, `(`, `)`, Backtick, `$`, `%%`, `==`, `^`, `#`, `<`, `>`, `|`). Zieldaten stehen nie in Inline-Code, sondern nur in Codeblöcken mit Info-String `text` und einer Fence, die länger ist als jede Backtick- oder Tilde-Folge im Inhalt.
@@ -948,7 +948,7 @@ _ariadne/manifest.json    # Exportzeit, Kettenkopf, Hashes aller Dateien
 5. C0- und C1-Zeichen, Bidi- und Zero-Width-Zeichen werden sichtbar ersetzt (`<ESC>`, `<U+202E>`).
 6. KI-Texte gelten im Export wie Zieldaten.
 7. Ein Golden-Test exportiert ein feindliches Fixture-Projekt und prüft, dass kein HTML-Element, kein externes Bild, kein Embed, kein `$=`-Inline-Code und kein Pfad ausserhalb des Exports entsteht.
-8. Liegt das Ziel in einem Obsidian-Vault oder Sync-Ordner (`.obsidian`, Nextcloud, Dropbox oberhalb), warnt Ariadne. Die Doku empfiehlt, Dataview-JavaScript im Report-Vault abzuschalten.
+8. Liegt der Projektordner in einem Sync-Ordner (`.obsidian`, Nextcloud, Dropbox oberhalb), warnt Ariadne.
 
 ### 8.8 Installation und Lieferkette
 
@@ -1112,20 +1112,19 @@ Die Schätzungen sind grob. Mit KI-Unterstützung sinkt vor allem die Schreibarb
 | Normalizer ordnet Offsets falsch zu | Provenienz verliert Vertrauen | Golden-Tests mit echten Bytes, metamorphe Tests, Rohstrom bleibt die Wahrheit |
 | Feindliche Zieldaten erreichen eine Senke | Codeausführung auf Kali, Lecks | ein Encoder pro Senke, Worker ohne Schlüssel, feindliches Test-Ziel im CI |
 | Cyber-Klassifikator lehnt KI-Aufrufe ab | Denkanstösse unzuverlässig | Regeln zuerst, Fallbacks, lokale Ausweichroute, Ablehnungsquote messen |
-| Lokale Modelle zu schwach oder zu langsam | Offline-KI und lokale Vision kaum nutzbar | Hardware klären, kleine Modelle testen, Ariadne funktioniert ohne KI |
+| Lokale Modelle zu schwach oder zu langsam (VM mit knapper Leistung) | Offline-KI und lokale Vision kaum nutzbar | Claude über die API als Standard, lokale Modelle nur optional, Ariadne funktioniert ohne KI |
 | Kali-Rolling-Updates zerstören den pipx-venv | keine Aufnahme | Launcher-Fallback, sichtbarer Titel, `doctor` |
 | `sqlcipher3` mit einem Maintainer | Wheels fehlen nach Python-Upgrade | Version pinnen, CI-Matrix, Notfallzugriff über `sqlcipher`-CLI |
 | UI frisst die Zeit | Animationen statt Belege | Tabellen und Belegansicht vor dem Graph, Reihenfolge einhalten |
 | Klartext ausserhalb von Ariadne (Tool-Speicher, History) | Löschnachweis irreführend | ehrlicher Löschnachweis mit Liste, verschlüsselter Arbeitsbereich ab v0.3 |
 | Wayland-Fragmentierung | Screenshots und Zwischenablage eingeschränkt | Backend-Abstraktion ab v0.1, Xfce/X11 als Referenz |
-| Diplom-Rahmen unklar (Termin, KI-Regeln) | Konflikt mit «bis perfekt» und mit Prüfungsregeln | früh mit der Schule klären, Entscheidungsprotokoll führen |
 
 ## 13 Zu verifizieren
 
 Diese Punkte sind vor oder während der Umsetzung als kurze Spikes zu prüfen:
 
 - Startzeit des Shims mit explizitem `sys.path` (Ziel unter 50 ms), Latenz und Durchsatz des Python-Relays
-- QTerminal: Verhalten bei Titel-Reports, OSC 52, Bracketed Paste, ob `Ctrl+5` als 0x1D ankommt, `WINDOWID`
+- QTerminal: Verhalten bei Titel-Reports, OSC 52, Bracketed Paste, ob `F12` als `ESC [ 2 4 ~` ankommt und nicht vom Terminal belegt ist, `WINDOWID`
 - Nonce-Weitergabe in Root-Shells über `/proc/<pid>/environ` der äusseren Shell
 - `tcgetpgrp`-Prüfung für C-Marker (Wettlauf mit `fork`) per PTY-Test
 - `sqlcipher3`: `set_authorizer`, `set_progress_handler`, FTS5 an der gepinnten Version, `sqlcipher_export()` bei gleichzeitigem Schreiben
@@ -1144,13 +1143,15 @@ Diese Punkte sind vor oder während der Umsetzung als kurze Spikes zu prüfen:
 
 ## 14 Offene Fragen
 
-Diese Fragen kann nur der Nutzer beantworten. Sie stehen auch in der [Vision](../VISION.md#offene-punkte).
+Alle blockierenden Fragen sind beantwortet (Stand 2026-10-09):
 
-1. Rahmen der Diplomarbeit (Start, Dauer, Abgabe) und Regeln der Schule zum KI-Einsatz.
-2. Tastaturlayout: Bleibt `Ctrl-]` als Präfix?
-3. Umgebung: Kali als VM oder nativ, welcher Hypervisor, welcher Desktop, Shared Folders, RAM, GPU, zweiter Rechner für Ollama.
-4. Claude-Budget im Profil lab (Vorschlag 20 USD pro Monat), und ob für automatische Aufrufe ab v0.2 ein günstigeres Modell gewählt werden soll.
-5. Obsidian: Export auf Wunsch direkt in den synchronisierten Vault (nur lab), oder immer im Projektordner?
-6. Tools nach nmap, und ob echte Metasploitable2-Outputs als Testmaterial bereitstehen.
-7. Sprache der UI: Deutsch mit englischen Fachbegriffen (Empfehlung, Texte ab Tag 1 über i18n-Schlüssel) oder durchgehend Englisch?
-8. Passwortmanager unter Kali (relevant für die Zwischenablage ab v0.3).
+| Frage | Antwort |
+|---|---|
+| Diplomarbeit | nein, privates Projekt, Start sofort |
+| Hotkey | andere Taste als `Ctrl-]`: Standard ist `F12`, konfigurierbar |
+| Umgebung | Kali in einer VM, eher knappe Leistung |
+| Claude-Budget | kein festes Limit gewünscht; ein konfigurierbares Monatslimit (Standard 20 USD) bleibt als Schutz gegen Fehlbedienung |
+| Obsidian | kein Export in einen Vault |
+| Testmaterial | keins vorhanden; Tests mit nachgestellten Outputs der wichtigsten Tools, nmap zuerst |
+
+Noch offen, aber nicht blockierend: Sprache der UI (Standard Deutsch mit englischen Fachbegriffen, Texte über i18n-Schlüssel) und der Passwortmanager unter Kali (relevant ab v0.3).

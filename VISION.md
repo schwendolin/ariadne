@@ -28,8 +28,8 @@ Ein typischer Ablauf:
 2. Klick auf REC in der Web-Oberfläche. Ab jetzt nimmt Ariadne alle Terminals auf.
 3. `nmap -sV -oA scans/lame 10.10.10.3` füllt die Karte mit Ports und Versionen.
 4. Der Denkanstoss «Unauthentisierten Zugriff auf FTP prüfen» erscheint, mit Begründung und Beleg.
-5. In der Reverse Shell drückt man `Ctrl-]` und `h` und setzt den Host. Ab dann stimmt der Kontext, und die `/etc/passwd` landet beim richtigen Host.
-6. `Ctrl-]` und `k` markiert den Foothold als Schlüsselschritt. Der Faden wächst.
+5. In der Reverse Shell drückt man `F12` und `h` und setzt den Host. Ab dann stimmt der Kontext, und die `/etc/passwd` landet beim richtigen Host.
+6. `F12` und `k` markiert den Foothold als Schlüsselschritt. Der Faden wächst.
 7. Am Ende erzeugt `ariadne export` das Writeup-Gerüst mit allen Belegen.
 
 ## Für wen und in welchem Rahmen
@@ -38,9 +38,10 @@ Ein typischer Ablauf:
 |---|---|
 | Nutzer | eine Person, Student HF Informatik (Cybersecurity), arbeitet hauptberuflich in der IT |
 | Einsatz | zuerst Schule und Labs (Metasploitable2, Übungsboxen bis ca. 10 Hosts), danach professionelle Aufträge. Kundenaufträge sind vorerst fiktiv |
-| Plattform | Kali Linux im Standard-Setup (zsh, QTerminal, Xfce), offline lauffähig, kompatibel mit anderen Shells und Terminals |
-| Projektform | privates Projekt, geplant als Diplomprojekt an der HF, Vorgehen nach HERMES 2022 |
-| Entwicklung | allein, KI-unterstützt, ca. 20 Stunden pro Woche |
+| Plattform | Kali Linux im Standard-Setup (zsh, QTerminal, Xfce) in einer VM mit eher knapper Leistung, offline lauffähig, kompatibel mit anderen Shells und Terminals |
+| Projektform | privates Projekt, keine Schul- oder Diplomarbeit |
+| Entwicklung | allein, KI-unterstützt, ca. 20 Stunden pro Woche, Start sofort |
+| KI | Claude über die API als Standard; lokale Modelle optional, weil die VM wenig Leistung hat |
 | Zertifizierungen | keine geplant, daher kein Prüfungsmodus |
 
 ## Grundsätze
@@ -99,32 +100,9 @@ Jede Version ist für sich nutzbar. Ab v0.1 läuft jede Lab-Übung mit Ariadne, 
 - **Robustheit:** Ein feindliches Test-Ziel (präparierte Hostnamen, Escape-Sequenzen, gefälschte Marker, XSS-Strings) bringt weder Shell, Daemon noch Web-Oberfläche dazu, etwas Unerwünschtes zu tun.
 - **Nutzung:** Ab v0.1 läuft jede Lab-Übung mit Ariadne. Sinkt die Nutzung, ist das ein Signal für das Backlog, nicht für mehr Funktionen.
 
-## Rahmen Diplomarbeit
-
-Als Diplomprojekt folgt Ariadne HERMES 2022. Die bisherigen Dokumente gehören in die Phasen Initialisierung und Konzept:
-
-| HERMES-Phase | Ergebnis | Stand |
-|---|---|---|
-| Initialisierung | Projektauftrag, Stakeholderanalyse, Grobplanung | Projektauftrag fehlt noch; Vision und Roadmap dienen als Grundlage |
-| Konzept | Lösungsarchitektur, Anforderungskatalog, Risikoanalyse | [Lösungsarchitektur](docs/architektur.md) als Entwurf, Anforderungen in Vision und [Entscheidungsprotokoll](docs/entscheide.md), Risiken in der Architektur (Abschnitte 9 und 12); eine Risikomatrix 5x5 fehlt noch |
-| Realisierung | Detailkonzept, Testprotokoll, Implementierungsplan | ab v0.1 |
-| Einführung | Abnahme, Betriebsdokumentation | Einsatz im Lab |
-| Abschluss | Abschlussbericht, Lessons Learned | offen |
-
-**KI-Einsatz:** Konzept und Code entstehen mit KI-Unterstützung. Damit das für die Diplomarbeit sauber bleibt, gilt:
-
-- Die Regeln der Schule zum KI-Einsatz werden vor dem offiziellen Start geklärt.
-- Das [Entscheidungsprotokoll](docs/entscheide.md) hält fest, welche Entscheide vom Nutzer stammen, welche an die KI delegiert wurden und welche nur ein Vorschlag sind.
-- Texte, die als eigene Leistung abgegeben werden (Reflexion, Fazit, Begründungen), schreibt der Nutzer selbst.
-
 ## Offene Punkte
 
-Diese Punkte kann nur der Nutzer klären:
+Keine blockierenden Fragen mehr. Was noch offen ist, klärt sich beim Bauen:
 
-1. **Rahmen der Diplomarbeit:** Start, Dauer, Abgabeform. Welche Version soll Gegenstand der Arbeit sein?
-2. **KI-Regeln der Schule** für die Diplomarbeit.
-3. **Tastaturlayout:** Auf dem Schweizer Layout liegt `]` auf AltGr. Bleibt `Ctrl-]` als Präfix, oder braucht es eine andere Taste?
-4. **Hardware und Umgebung:** Kali als VM oder nativ? Welcher Desktop? RAM und GPU? Gibt es einen zweiten Rechner für Ollama? Davon hängen Screenshots und lokale KI ab.
-5. **Claude-Budget:** Welches Monatslimit gilt im Lab (Vorschlag 20 USD)?
-6. **Obsidian:** Darf Ariadne Lab-Writeups auf Wunsch direkt in den synchronisierten Vault schreiben, oder bleibt der Export immer im Projektordner?
-7. **Testmaterial:** Welche Tools kommen nach nmap am häufigsten zum Einsatz? Gibt es echte Outputs aus Metasploitable2, die als Testfälle dienen können?
+1. **Testmaterial:** Echte Outputs aus Metasploitable2 fehlen noch. Bis dahin bauen die Tests auf nachgestellten Outputs der wichtigsten Tools auf (nmap zuerst). Sobald echte Outputs vorliegen, ersetzen sie die nachgestellten.
+2. **VM-Details:** Hypervisor und Ressourcen sind unbekannt. `ariadne doctor` prüft beim ersten Start, was nötig ist (Shared Folders, Festplattenverschlüsselung, Display-Server).
