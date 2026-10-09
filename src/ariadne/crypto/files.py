@@ -50,7 +50,7 @@ def write_private(path: Path, data: bytes, mode: int = 0o600) -> None:
 
 def read_private(path: Path, max_size: int = 64 << 20) -> bytes:
     """Liest eine reguläre Datei des Benutzers. Symlinks und fremde Dateien werden abgelehnt."""
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NOCTTY)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NOCTTY | os.O_NONBLOCK)
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):

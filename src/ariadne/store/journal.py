@@ -190,7 +190,7 @@ class SqlCipherJournal:
     def _insert(self, b: _Built) -> None:
         r = b.rec
         self.conn.execute(
-            f"INSERT INTO event ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO event ({_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",  # noqa: S608 (feste Spalten)
             (r.seq, r.id, r.layer, r.kind, r.ts_utc_ns, r.mono_ns, r.boot_id, r.operator_id,
              r.origin, r.terminal_id, r.stream_off, b.header_json.decode(), r.body, b.salt,
              b.commit, b.prev, r.hash),
@@ -280,7 +280,8 @@ class SqlCipherJournal:
         if terminal_id is not None:
             where.append("terminal_id = ?")
             params.append(terminal_id)
-        sql = f"SELECT {_COLS} FROM event WHERE {' AND '.join(where)} ORDER BY seq LIMIT {_PAGE}"
+        # Nur feste Spaltennamen und Platzhalter im SQL, Werte immer als Parameter.
+        sql = f"SELECT {_COLS} FROM event WHERE {' AND '.join(where)} ORDER BY seq LIMIT {_PAGE}"  # noqa: S608
         last = after_seq
         while True:
             rows = self.conn.execute(sql, [last, *params]).fetchall()
@@ -291,11 +292,24 @@ class SqlCipherJournal:
             last = int(rows[-1][0])
 
     def get(self, seq: int) -> EventRecord | None:
-        row = self.conn.execute(f"SELECT {_COLS} FROM event WHERE seq = ?", (seq,)).fetchone()
+        row = self.conn.execute(f"SELECT {_COLS} FROM event WHERE seq = ?", (seq,)).fetchone()  # noqa: S608
         return self._record(row) if row else None
 
     def head(self) -> tuple[int, bytes]:
         return self._head
+
+    def verify_head(self) -> bool:
+        """Schnelle Prüfung beim Öffnen: Hash des letzten Events nachrechnen."""
+        row = self.conn.execute(f"SELECT {_COLS} FROM event ORDER BY seq DESC LIMIT 1").fetchone()  # noqa: S608
+        if row is None:
+            return True
+        commit = bytes(row[14]) if row[14] is not None else None
+        h = chain.event_hash(
+            bytes(row[15]), seq=int(row[0]), event_id=row[1], layer=row[2], kind=row[3], ts_utc_ns=row[4],
+            mono_ns=row[5], boot_id=row[6], operator_id=row[7], origin=row[8], terminal_id=row[9],
+            stream_off=row[10], header_json=str(row[11]).encode(), body_commit=commit,
+        )
+        return h == bytes(row[16])
 
     def stream_end(self, terminal_id: str) -> int:
         """Ende des gespeicherten Stroms eines Terminals (0, wenn nichts gespeichert)."""
@@ -316,7 +330,7 @@ class SqlCipherJournal:
         last_hash = prev
         redacted: set[int] = set()
         redaction_refs: set[int] = set()
-        cur = self.conn.execute(f"SELECT {_COLS} FROM event ORDER BY seq")
+        cur = self.conn.execute(f"SELECT {_COLS} FROM event ORDER BY seq")  # noqa: S608
         for row in cur:
             count += 1
             seq = int(row[0])

@@ -1,0 +1,44 @@
+{
+  "name": "ariadne-webui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web-Oberfläche von Ariadne: Svelte 5, TypeScript, Vite, Cytoscape.js",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "vite --mode mock",
+    "build": "vite build",
+    "build:mock": "vite build --mode mock --outDir dist --emptyOutDir",
+    "preview": "vite preview",
+    "preview:mock": "vite preview --outDir dist",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "cytoscape": "3.34.3",
+    "cytoscape-fcose": "2.2.0",
+    "dompurify": "3.4.16",
+    "markdown-it": "15.0.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@testing-library/svelte": "5.4.2",
+    "@types/node": "22.20.4",
+    "eslint": "10.11.0",
+    "eslint-plugin-svelte": "3.23.0",
+    "globals": "17.12.0",
+    "jsdom": "29.1.1",
+    "svelte": "5.57.1",
+    "svelte-check": "4.7.6",
+    "svelte-eslint-parser": "1.8.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.1",
+    "vite": "8.3.1",
+    "vitest": "5.0.1"
+  }
+}

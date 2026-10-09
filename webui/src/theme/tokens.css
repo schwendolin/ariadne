@@ -1,0 +1,279 @@
+/*
+ * Theme-Tokens der Ariadne-Web-UI: hell und dunkel in einer Datei.
+ *
+ * - UI-Tokens (--bg, --text ...) dürfen jede CSS-Farbe sein.
+ * - Karten-Tokens (--map-*) werden zur Laufzeit gelesen und an Cytoscape
+ *   übergeben. Cytoscape versteht nur Hex, rgb() und hsl(), deshalb hier nur Hex.
+ * - Farbgrammatik der Karte (Architektur 7.5): Nebel grau gepunktet, entdeckt grau,
+ *   gescannt entsättigt, Zugriff in Farbe mit Symbol ($ user, # admin/root),
+ *   Arbeitsstand über Rand, Faden kräftig rot, Konflikt orange, KI violett.
+ * - Dunkel gilt bei prefers-color-scheme: dark, ausser data-theme="light",
+ *   und immer bei data-theme="dark".
+ */
+:root {
+  color-scheme: light;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', 'Noto Sans', 'DejaVu Sans', 'Liberation Sans', sans-serif;
+  --font-mono: ui-monospace, 'DejaVu Sans Mono', 'Noto Sans Mono', 'Liberation Mono', monospace;
+  --radius: 6px;
+  --gap: 12px;
+
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eceef2;
+  --surface-3: #e2e5ea;
+  --border: #d3d8df;
+  --text: #1b1f27;
+  --text-muted: #586173;
+  --accent: #2457c5;
+  --accent-text: #ffffff;
+  --focus: #2457c5;
+  --link: #1f4fb5;
+  --rec: #d61f2c;
+  --rec-text: #ffffff;
+  --rec-off: #6b7280;
+  --profile-lab: #0f766e;
+  --profile-customer: #7c3aed;
+  --banner-danger-bg: #fde3e3;
+  --banner-danger-text: #8f1515;
+  --banner-info-bg: #e3ecfd;
+  --banner-info-text: #1d3f8a;
+  --badge-muted-bg: #eceff3;
+  --badge-muted-text: #444c5c;
+  --badge-ok-bg: #dcf2e3;
+  --badge-ok-text: #1c6431;
+  --badge-warn-bg: #fff0d1;
+  --badge-warn-text: #7d4b00;
+  --badge-danger-bg: #fde1e1;
+  --badge-danger-text: #9a1717;
+  --badge-ai-bg: #ebe4fc;
+  --badge-ai-text: #4a2a99;
+  --badge-info-bg: #e3ecfd;
+  --badge-info-text: #1d3f8a;
+  --row-hover: #f0f3f8;
+  --row-selected: #dfe8fb;
+  --mark-bg: #fff2a8;
+  --mark-border: #d9a400;
+  --target-underline: #b26a00;
+  --shadow: 0 6px 24px rgba(15, 23, 42, 0.16);
+
+  --log-bg: #fbfbfc;
+  --log-text: #1f2430;
+  --sgr-black: #1f2430;
+  --sgr-red: #c3261f;
+  --sgr-green: #237a3b;
+  --sgr-yellow: #8a6300;
+  --sgr-blue: #2350b8;
+  --sgr-magenta: #8e2f9e;
+  --sgr-cyan: #0f6f7a;
+  --sgr-white: #6b7280;
+  --sgr-bg-yellow: #ffe680;
+  --sgr-bg-red: #ffd6d6;
+
+  --map-bg: #f4f5f7;
+  --map-label: #1b1f27;
+  --map-label-muted: #6b7280;
+  --map-label-bg: #ffffff;
+  --map-kali-fill: #1f2937;
+  --map-kali-border: #111827;
+  --map-segment-fill: #eaedf2;
+  --map-segment-border: #98a2b3;
+  --map-fog-fill: #e5e7eb;
+  --map-fog-border: #8b93a1;
+  --map-discovered: #b8bec8;
+  --map-scanned: #9fb0c4;
+  --map-versions: #7e9cc2;
+  --map-user: #2f9e6f;
+  --map-admin: #8b3fd1;
+  --map-border: #4b5563;
+  --map-in-progress: #d08700;
+  --map-dead-end: #6b7280;
+  --map-done: #2f9e6f;
+  --map-thread: #d61f2c;
+  --map-thread-label: #ffffff;
+  --map-conflict: #e07b00;
+  --map-ai: #6d4fc2;
+  --map-oos-fill: #f1f2f4;
+  --map-oos-hatch: #c3c8d0;
+  --map-oos-border: #b42318;
+  --map-service-fill: #ffffff;
+  --map-service-border: #98a2b3;
+  --map-reach: #b8bec8;
+  --map-selected: #2457c5;
+  --map-fresh: #2457c5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #0f1217;
+    --surface: #171b22;
+    --surface-2: #1e232c;
+    --surface-3: #262c37;
+    --border: #2f3643;
+    --text: #e6e9ef;
+    --text-muted: #9aa3b2;
+    --accent: #5b8cff;
+    --accent-text: #0b1020;
+    --focus: #8ab0ff;
+    --link: #8ab0ff;
+    --rec: #ff3b47;
+    --rec-text: #ffffff;
+    --rec-off: #8b93a1;
+    --profile-lab: #2bb3a3;
+    --profile-customer: #a78bfa;
+    --banner-danger-bg: #3a1417;
+    --banner-danger-text: #ffb4b4;
+    --banner-info-bg: #16233f;
+    --banner-info-text: #b8cdfc;
+    --badge-muted-bg: #262c37;
+    --badge-muted-text: #c3cad6;
+    --badge-ok-bg: #123322;
+    --badge-ok-text: #8ee0ae;
+    --badge-warn-bg: #3a2a0c;
+    --badge-warn-text: #ffd27a;
+    --badge-danger-bg: #3a1417;
+    --badge-danger-text: #ffb4b4;
+    --badge-ai-bg: #2a2142;
+    --badge-ai-text: #cdbfff;
+    --badge-info-bg: #16233f;
+    --badge-info-text: #b8cdfc;
+    --row-hover: #1c222b;
+    --row-selected: #1f2c47;
+    --mark-bg: #3d3410;
+    --mark-border: #c9a227;
+    --target-underline: #f0a500;
+    --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+
+    --log-bg: #0c0f13;
+    --log-text: #d7dce4;
+    --sgr-black: #9aa3b2;
+    --sgr-red: #ff6b6b;
+    --sgr-green: #6fdc8c;
+    --sgr-yellow: #f4d35e;
+    --sgr-blue: #78a9ff;
+    --sgr-magenta: #e08bff;
+    --sgr-cyan: #5fd7e0;
+    --sgr-white: #e6e9ef;
+    --sgr-bg-yellow: #5a4a00;
+    --sgr-bg-red: #5a1a1a;
+
+    --map-bg: #0f1217;
+    --map-label: #e6e9ef;
+    --map-label-muted: #9aa3b2;
+    --map-label-bg: #171b22;
+    --map-kali-fill: #e6e9ef;
+    --map-kali-border: #ffffff;
+    --map-segment-fill: #161b22;
+    --map-segment-border: #4b5563;
+    --map-fog-fill: #2a303a;
+    --map-fog-border: #6b7280;
+    --map-discovered: #4a515e;
+    --map-scanned: #4f6177;
+    --map-versions: #4f6f99;
+    --map-user: #34b37d;
+    --map-admin: #a66be8;
+    --map-border: #c3cad6;
+    --map-in-progress: #f0a500;
+    --map-dead-end: #8b93a1;
+    --map-done: #34b37d;
+    --map-thread: #ff4d5a;
+    --map-thread-label: #ffffff;
+    --map-conflict: #ff9f1a;
+    --map-ai: #a993ff;
+    --map-oos-fill: #171b22;
+    --map-oos-hatch: #3a404b;
+    --map-oos-border: #ff6b6b;
+    --map-service-fill: #1b2028;
+    --map-service-border: #5b6474;
+    --map-reach: #3a414d;
+    --map-selected: #6aa1ff;
+    --map-fresh: #6aa1ff;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1217;
+  --surface: #171b22;
+  --surface-2: #1e232c;
+  --surface-3: #262c37;
+  --border: #2f3643;
+  --text: #e6e9ef;
+  --text-muted: #9aa3b2;
+  --accent: #5b8cff;
+  --accent-text: #0b1020;
+  --focus: #8ab0ff;
+  --link: #8ab0ff;
+  --rec: #ff3b47;
+  --rec-text: #ffffff;
+  --rec-off: #8b93a1;
+  --profile-lab: #2bb3a3;
+  --profile-customer: #a78bfa;
+  --banner-danger-bg: #3a1417;
+  --banner-danger-text: #ffb4b4;
+  --banner-info-bg: #16233f;
+  --banner-info-text: #b8cdfc;
+  --badge-muted-bg: #262c37;
+  --badge-muted-text: #c3cad6;
+  --badge-ok-bg: #123322;
+  --badge-ok-text: #8ee0ae;
+  --badge-warn-bg: #3a2a0c;
+  --badge-warn-text: #ffd27a;
+  --badge-danger-bg: #3a1417;
+  --badge-danger-text: #ffb4b4;
+  --badge-ai-bg: #2a2142;
+  --badge-ai-text: #cdbfff;
+  --badge-info-bg: #16233f;
+  --badge-info-text: #b8cdfc;
+  --row-hover: #1c222b;
+  --row-selected: #1f2c47;
+  --mark-bg: #3d3410;
+  --mark-border: #c9a227;
+  --target-underline: #f0a500;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+
+  --log-bg: #0c0f13;
+  --log-text: #d7dce4;
+  --sgr-black: #9aa3b2;
+  --sgr-red: #ff6b6b;
+  --sgr-green: #6fdc8c;
+  --sgr-yellow: #f4d35e;
+  --sgr-blue: #78a9ff;
+  --sgr-magenta: #e08bff;
+  --sgr-cyan: #5fd7e0;
+  --sgr-white: #e6e9ef;
+  --sgr-bg-yellow: #5a4a00;
+  --sgr-bg-red: #5a1a1a;
+
+  --map-bg: #0f1217;
+  --map-label: #e6e9ef;
+  --map-label-muted: #9aa3b2;
+  --map-label-bg: #171b22;
+  --map-kali-fill: #e6e9ef;
+  --map-kali-border: #ffffff;
+  --map-segment-fill: #161b22;
+  --map-segment-border: #4b5563;
+  --map-fog-fill: #2a303a;
+  --map-fog-border: #6b7280;
+  --map-discovered: #4a515e;
+  --map-scanned: #4f6177;
+  --map-versions: #4f6f99;
+  --map-user: #34b37d;
+  --map-admin: #a66be8;
+  --map-border: #c3cad6;
+  --map-in-progress: #f0a500;
+  --map-dead-end: #8b93a1;
+  --map-done: #34b37d;
+  --map-thread: #ff4d5a;
+  --map-thread-label: #ffffff;
+  --map-conflict: #ff9f1a;
+  --map-ai: #a993ff;
+  --map-oos-fill: #171b22;
+  --map-oos-hatch: #3a404b;
+  --map-oos-border: #ff6b6b;
+  --map-service-fill: #1b2028;
+  --map-service-border: #5b6474;
+  --map-reach: #3a414d;
+  --map-selected: #6aa1ff;
+  --map-fresh: #6aa1ff;
+}

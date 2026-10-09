@@ -171,7 +171,8 @@ class OperatorVault:
         ensure_private_dir(self.directory / "slots")
         identity, recipient = age.generate_identity()
         code = new_recovery_code()
-        write_private(self.slot_file("passphrase"), age.encrypt_with_passphrase(identity.encode(), passphrase))
+        write_private(self.slot_file("passphrase"),
+                      age.encrypt_with_passphrase(identity.encode(), passphrase))
         write_private(self.slot_file("recovery"),
                       age.encrypt_with_passphrase(identity.encode(), normalize_recovery_code(code)))
         op = UnlockedOperator(
