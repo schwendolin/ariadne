@@ -107,19 +107,23 @@ __ariadne_precmd() {
 
 if [[ -n ${ARIADNE_SHIM_TTY-} && ${ARIADNE_SHIM_TTY} == "${TTY-}" ]]; then
   # Innen: Hooks installieren (idempotent, Zähler bleibt beim erneuten Einlesen).
-  if [[ ${#ARIADNE_NONCE} == 32 && ${ARIADNE_NONCE} != *[^0-9a-f]* ]]; then
-    typeset -g __ariadne_nonce=$ARIADNE_NONCE
+  () {
+    emulate -L zsh
+    local nonce=${ARIADNE_NONCE-}
+    [[ ${#nonce} == 32 && $nonce != *[^0-9a-f]* ]] || return 0
+    typeset -g __ariadne_nonce=$nonce
     if (( ! ${+__ariadne_ctr} )); then
       # Startwert aus der Uhr (Mikrosekunden): nach "exec zsh" mit gleicher
       # PID muss der Zähler weiter steigen, sonst gilt der Marker als Wiederholung.
       zmodload -F zsh/datetime p:EPOCHREALTIME 2>/dev/null
-      typeset -gi __ariadne_ctr=${${${EPOCHREALTIME-0}//[^0-9]/}[1,16]}
+      local now=${${EPOCHREALTIME-0}//[^0-9]/}
+      typeset -gi __ariadne_ctr=${now[1,16]}
     fi
     (( ${+__ariadne_ran} )) || typeset -gi __ariadne_ran=0
     autoload -Uz add-zsh-hook
     add-zsh-hook preexec __ariadne_preexec
     add-zsh-hook precmd __ariadne_precmd
-  fi
+  }
   return 0
 fi
 
@@ -138,7 +142,7 @@ if [[ -t 0 && -t 1 && -n ${TERM-} && $TERM != dumb && -z ${ARIADNE_DISABLE-} ]] 
     local launcher=${${(%):-%x}:A:h}/launcher.sh
     local self=${${:-/proc/$$/exe}:A}
     [[ -f $launcher && -x $launcher && -x /bin/sh && -f $self && -x $self ]] || return 0
-    exec $launcher $self -i
+    exec "$launcher" "$self" -i
   }
 fi
 return 0

@@ -101,6 +101,9 @@ export default defineConfig([
       'svelte/require-each-key': 'error',
       'svelte/button-has-type': 'error',
       'svelte/no-useless-mustaches': 'error',
+      // Absicht: Listen im Zustand werden nur als Ganzes ersetzt ($state.raw), interne
+      // Hilfsmengen (Ladezustand, platzierte Knoten) sind bewusst nicht reaktiv.
+      'svelte/prefer-svelte-reactivity': 'off',
     },
   },
   {

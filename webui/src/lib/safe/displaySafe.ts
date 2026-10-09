@@ -112,7 +112,7 @@ export function hasHiddenChars(value: string): boolean {
  * Es findet keine Namensauflösung statt, nur die URL-Normalisierung des Browsers.
  */
 export function punycodeHint(name: string): string | null {
-  if (!/[^\x00-\x7f]/.test(name)) return null;
+  if (!Array.from(name).some((ch) => (ch.codePointAt(0) ?? 0) > 0x7f)) return null;
   if (hasHiddenChars(name) || /[\s/\\?#@:]/.test(name)) return null;
   try {
     const host = new URL(`http://${name}/`).hostname;

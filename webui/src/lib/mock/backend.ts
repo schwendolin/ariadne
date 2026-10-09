@@ -85,7 +85,7 @@ export class MockBackend implements Backend {
     return this.fx.inbox.reduce((n, g) => n + g.items.filter((i) => i.state === 'candidate').length, 0);
   }
 
-  private host(id: string): HostSummary | undefined {
+  private findHost(id: string): HostSummary | undefined {
     return this.fx.hosts.find((h) => h.id === id);
   }
 
@@ -136,7 +136,7 @@ export class MockBackend implements Backend {
     const resolve = (host: string | null | undefined) => {
       if (!host) return { host: null, host_label: null, host_id: null, scope: null };
       const key = host.includes(':') ? host : ip(host);
-      const h = this.host(key);
+      const h = this.findHost(key);
       if (!h) warnings.push({ code: 'host_unknown', identifier: key });
       else if (h.scope !== 'in') warnings.push({ code: h.scope === 'excluded' ? 'scope_excluded' : 'scope_out', identifier: key });
       return { host: key, host_label: h?.label ?? host, host_id: h?.id ?? null, scope: h?.scope ?? 'unknown' };
@@ -197,7 +197,7 @@ export class MockBackend implements Backend {
   async host(pid: string, hostId: string): Promise<HostDetail> {
     await this.tick();
     this.checkPid(pid);
-    const h = this.host(hostId);
+    const h = this.findHost(hostId);
     if (!h) throw new ApiError('not_found', 404, 'Host unbekannt');
     const prefix = `svc:${hostId}|`;
     const services = this.fx.services.filter((s) => s.host_id === hostId);
@@ -404,7 +404,7 @@ export class MockBackend implements Backend {
         for (const g of fx.inbox) for (const i of g.items) if (i.claim_key === f.claim_key) i.state = state;
         changes.push(['claim', f.claim_key, 'updated'], ['inbox', f.claim_key, 'updated']);
         if (f.subject.startsWith('ip:') && f.predicate === 'host.address') {
-          const h = this.host(f.subject);
+          const h = this.findHost(f.subject);
           if (h) {
             h.claim_state = state;
             changes.push(['host', h.id, 'updated']);
@@ -430,7 +430,7 @@ export class MockBackend implements Backend {
         break;
       }
       case 'd.status.work': {
-        const h = this.host(d.payload.subject);
+        const h = this.findHost(d.payload.subject);
         if (!h) throw new ApiError('conflict', 409, 'Subjekt unbekannt');
         h.work = d.payload.value;
         h.work_reason = d.payload.reason ?? null;
@@ -438,7 +438,7 @@ export class MockBackend implements Backend {
         break;
       }
       case 'd.status.access': {
-        const h = this.host(d.payload.subject);
+        const h = this.findHost(d.payload.subject);
         if (!h) throw new ApiError('conflict', 409, 'Subjekt unbekannt');
         h.access = d.payload.value;
         h.progress = progressOf(h.knowledge, h.access);
@@ -451,7 +451,7 @@ export class MockBackend implements Backend {
         break;
       case 'd.tag.add':
       case 'd.tag.remove': {
-        const h = this.host(d.payload.subject);
+        const h = this.findHost(d.payload.subject);
         if (!h) throw new ApiError('conflict', 409, 'Subjekt unbekannt');
         const tag = d.payload.tag.trim().slice(0, 64);
         h.tags = d.kind === 'd.tag.add' ? [...new Set([...h.tags, tag])] : h.tags.filter((t) => t !== tag);
@@ -475,7 +475,7 @@ export class MockBackend implements Backend {
         const s = fx.services.find((x) => x.service_id === c.subject);
         if (s) {
           s.conflicts = 0;
-          const h = this.host(s.host_id);
+          const h = this.findHost(s.host_id);
           if (h) h.conflicts = Math.max(0, h.conflicts - 1);
           changes.push(['service', s.service_id, 'updated'], ['host', s.host_id, 'updated']);
         }
@@ -505,7 +505,7 @@ export class MockBackend implements Backend {
           kind: 'thread', id: `thread:${seq}`, seq, step: d.payload.step, source: last?.target ?? 'kali', target,
           ts: new Date().toISOString(), decision_id: `d-keystep-${seq}`, note: d.payload.note ?? null, evidence: null,
         });
-        const h = this.host(target);
+        const h = this.findHost(target);
         if (h) h.on_thread = true;
         changes.push(['thread', `thread:${seq}`, 'added']);
         break;
@@ -528,7 +528,7 @@ export class MockBackend implements Backend {
             description: p.description ?? base.description,
             mitigation: p.mitigation ?? base.mitigation,
             attack_ids: p.attack_ids ?? base.attack_ids,
-            assets: p.assets ? p.assets.map((id) => ({ id, label: this.host(id)?.label ?? id, kind: id.startsWith('svc:') ? 'service' : 'host' })) : base.assets,
+            assets: p.assets ? p.assets.map((id) => ({ id, label: this.findHost(id)?.label ?? id, kind: id.startsWith('svc:') ? 'service' : 'host' })) : base.assets,
             updated_at: now,
           };
           if (idx >= 0) fx.findings[idx] = next;

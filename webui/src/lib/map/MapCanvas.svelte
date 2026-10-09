@@ -51,8 +51,8 @@
 
   const LAYOUT_INTERVAL = 2000;
 
-  function simpleNodes() {
-    return cy!.nodes().filter((n) => !n.isParent() && n.id() !== OOS_ID);
+  function simpleNodes(): NodeSingular[] {
+    return cy!.nodes().toArray().filter((n) => !n.isParent() && n.id() !== OOS_ID) as NodeSingular[];
   }
 
   function initialPosition(el: ElementDefinition): { x: number; y: number } {

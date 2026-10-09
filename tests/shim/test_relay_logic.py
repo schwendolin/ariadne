@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from ariadne._shim.launch import Spawned
 from ariadne._shim.markers import MarkerValidator
 from ariadne._shim.relay import Shim
@@ -54,6 +56,7 @@ def make_shim() -> tuple[Shim, StubTransport]:
     shim.validator = MarkerValidator(NONCE, 4242, -1, tcgetpgrp=lambda fd: 4242, getpgid=lambda p: 4242,
                                      comm=lambda p: "zsh", descends=lambda p, a: True)
     shim._title_live = True
+    shim.titles.interval = 0.0  # Callbacks nutzen die echte Uhr, die Tests feste Zeiten
     return shim, t
 
 
@@ -85,7 +88,7 @@ def test_waiting_buffers_and_rewinds_on_unlock():
     shim._update_capture(0.0)
     t.state_msg(shim, True, rec="waiting", project="lame")
     assert shim.capture and t.dropped == 0
-    shim._refresh_title(1.0)
+    shim._refresh_title(time.monotonic())
     assert b"[REC! gesperrt]" in shim._disp
     t.state_msg(shim, False, rec="on", project="lame")
     assert t.rewound == 1
@@ -98,7 +101,7 @@ def test_disconnect_keeps_buffering_only_if_rec_was_on():
     t.connected = t.ready = False
     shim._on_disconnect_cb()
     assert shim.capture  # zuletzt on: weiter puffern
-    shim._refresh_title(5.0)
+    shim._refresh_title(time.monotonic())
     assert b"[ariadne offline]" in shim._disp
     t.connected = True
     t.state_msg(shim, True, rec="off")
@@ -140,14 +143,15 @@ def test_titles_osc52_and_daemon_stack_override():
                 stack=[{"kind": "local", "host": "local", "opened_at": 0},
                        {"kind": "ssh", "host": "name:web01", "user": "root", "opened_at": 5}])
     assert shim.stack.label() == "web01 root"
-    t.state_msg(shim, False, rec="on", stack=[{"kind": "bogus"}])  # ungültig: ignoriert
+    t.state_msg(shim, False, rec="on", project="lame", stack=[{"kind": "bogus"}])  # ungültig: ignoriert
     assert shim.stack.label() == "web01 root"
     shim._disp.clear()
-    shim.titles._last_t = -10.0
-    shim._on_output(b"\x1b]0;\x1b[2Jevil [REC fake]\x07\x1b]52;c;ZXZpbA==\x07", 10.0)
-    assert b"\x1b[2J" not in shim._disp
-    assert b"[REC lame] web01 root | <ESC>[2Jevil [REC fake]" in shim._disp
-    assert ("term.osc52_blocked", {"stream_off": 0, "length": 19, "terminal_id": "term-1"}) in t.events
+    hostile = "evil \u202e[REC fake]\x01\x9b2J".encode()
+    shim._on_output(b"\x1b]0;" + hostile + b"\x07\x1b]52;c;ZXZpbA==\x07", time.monotonic())
+    title = bytes(shim._disp)
+    assert title.startswith(b"\x1b]2;[REC lame] web01 root | evil <U+202E>[REC fake]<0x01><0x9B>2J")
+    assert title.count(b"\x1b") == 1 and title.endswith(b"\x07")
+    assert ("term.osc52_blocked", {"stream_off": 28, "length": 16, "terminal_id": "term-1"}) in t.events
 
 
 def test_hotkey_request_requires_daemon():

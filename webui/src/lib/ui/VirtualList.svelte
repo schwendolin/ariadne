@@ -43,6 +43,8 @@
   });
 </script>
 
+<!-- Scrollbare Bereiche müssen per Tastatur erreichbar sein (WCAG 2.1.1), daher tabindex. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   class="vl"
   bind:this={viewport}

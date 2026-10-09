@@ -83,7 +83,7 @@
 {/snippet}
 
 <button type="button" class="backdrop" tabindex="-1" aria-label={t('common.close')} onclick={close}></button>
-<aside class="evidence" role="dialog" aria-modal="true" aria-labelledby="ev-title">
+<div class="evidence" role="dialog" aria-modal="true" aria-labelledby="ev-title">
   <header class="head">
     <div class="stack grow">
       <span class="small muted">{t('ev.title')}</span>
@@ -117,7 +117,7 @@
       </section>
     {/each}
   {/if}
-</aside>
+</div>
 
 <style>
   .backdrop {
