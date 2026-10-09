@@ -42,7 +42,7 @@
   class:pending
   aria-pressed={rec?.on ?? false}
   aria-busy={pending}
-  disabled={!app.project || pending}
+  disabled={!app.status?.project || pending}
   {title}
   onclick={() => app.toggleRec()}
 >

@@ -786,7 +786,15 @@ export interface StreamPayloads {
   terminal: { terminal_id: string; change: 'opened' | 'closed' | 'context' | 'command' | 'label' | 'bind' | 'gap' };
   inbox: { open: number };
   suggestion: { suggestion_key: string; change: 'added' | 'updated' | 'removed'; open: number };
-  progress: { job_id: string; kind: Job['kind']; status: Job['status']; pct: number | null; message: string | null };
+  progress: {
+    job_id: string;
+    kind: Job['kind'];
+    status: Job['status'];
+    pct: number | null;
+    /** fester Text des Daemons, nie Modell- oder Zieltext */
+    message: string | null;
+    result?: Record<string, unknown> | null;
+  };
   presentation: { on: boolean };
   project: { project_id: string | null; locked: boolean };
   reset: { reason: 'reparse' | 'buffer' | 'restart'; generation: number | null };
