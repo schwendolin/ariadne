@@ -288,7 +288,16 @@
     const id = selected;
     if (!ready || !cy) return;
     cy.$(':selected').unselect();
-    if (id) cy.getElementById(id).select();
+    if (!id) return;
+    const n = cy.getElementById(id);
+    if (n.empty()) return;
+    n.select();
+    // Die Host-Schublade deckt rechts bis zu 560 px ab: Knoten bei Bedarf sichtbar schieben.
+    const visibleRight = cy.width() - Math.min(560, cy.width()) - 20;
+    const p = n.renderedPosition();
+    if (p.x > visibleRight || p.x < 40 || p.y < 40 || p.y > cy.height() - 40) {
+      cy.animate({ panBy: { x: visibleRight / 2 - p.x, y: cy.height() / 2 - p.y } }, { duration: 300 });
+    }
   });
 
   let lastRelayout = 0;

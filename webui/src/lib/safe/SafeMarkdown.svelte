@@ -42,6 +42,8 @@
       ALLOW_ARIA_ATTR: false,
       FORBID_ATTR: ['style'],
       FORBID_TAGS: ['style', 'script', 'a', 'svg', 'math', 'iframe', 'form'],
+      // Einzige erlaubte URL-Art: blob: (Bilder, die Ariadne selbst aus /blobs geladen hat).
+      ALLOWED_URI_REGEXP: /^blob:/i,
       RETURN_DOM_FRAGMENT: true,
     });
   }

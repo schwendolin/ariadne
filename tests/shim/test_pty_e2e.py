@@ -14,6 +14,7 @@ import time
 import pexpect
 import pytest
 
+from ariadne import events
 from ariadne._shim import protocol as P
 from tests.shim.conftest import PROMPT, available_shells, shell_kind
 from tests.shim.fake_daemon import FakeDaemon
@@ -66,6 +67,14 @@ def test_session_markers_and_recording(shell, box_factory):
         # Shim läuft für dieses TTY, Shell sieht ihre Variablen
         out = run_cmd(c, 'echo "tty=$ARIADNE_SHIM_TTY failed=${ARIADNE_SHIM_FAILED:-none}"')
         assert b"failed=none" in out and b"tty=/dev/pts/" in out
+
+        # Prozessname und Härtung nur für den Shim, nicht für die Shell
+        out = run_cmd(c, 'cat /proc/$ARIADNE_SHIM_PID/comm; '
+                         'grep -i "core file" /proc/$ARIADNE_SHIM_PID/limits; '
+                         'echo "shell-hard=$(ulimit -Hc)"')
+        assert b"ariadne-shim" in out
+        assert re.search(rb"core file size\s+0\s+0", out)
+        assert b"shell-hard=unlimited" in out
 
         # echo hello landet im aufgezeichneten Strom
         run_cmd(c, "echo hello-$((40+2))")
@@ -138,6 +147,19 @@ def test_session_markers_and_recording(shell, box_factory):
         finish(c, 3)
         assert d.wait_for(lambda: d.frames(P.BYE))
         assert d.frames(P.BYE)[0].obj == {"exit_code": 3}
+
+        # Vertrag: jedes term.*-Event passt zum Modell in ariadne.events
+        kinds = set()
+        for e in d.events():
+            if e["kind"].startswith("term."):
+                events.validate_header(e["kind"], {k: v for k, v in e.items() if k not in ("seq", "kind")})
+                kinds.add(e["kind"])
+        # term.close fehlt hier zu Recht: F12 r hat REC ausgeschaltet
+        assert {"term.mark", "term.resize", "term.ctx_snapshot", "term.marker_forged"} <= kinds
+        assert "term.close" not in kinds
+        seqs = [r.obj[0] if r.type == P.OUT else r.obj["seq"]
+                for r in d.frames() if r.type in (P.OUT, P.EVENT)]
+        assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -228,7 +250,10 @@ def test_rec_off_sends_no_content_then_gap_on_rec_on(box_factory):
         assert gap["reason"] == "rec_off" and gap["bytes_lost"] > 0
         first_out = min(r.obj[1] for r in d.frames(P.OUT))
         assert gap["stream_off"] + gap["bytes_lost"] == first_out
-        finish(c)
+        finish(c, 4)
+        close = d.wait_for(lambda: d.events("term.close"))
+        assert close[0]["exit_code"] == 4
+        events.validate_header("term.close", {k: v for k, v in close[0].items() if k not in ("seq", "kind")})
 
 
 def test_daemon_restart_resends_buffer(box_factory):
@@ -334,4 +359,21 @@ def test_hotkeys_keystep_shot_pop_and_alt_screen(box_factory):
         c.expect_exact(b"ariadne: im Vollbild")
         run_cmd(c, "printf '\\033[?1049l'")
         assert b"[ariadne] Host" not in c.before
+        finish(c)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_markers_survive_unusual_user_options(shell, box_factory):
+    box = box_factory(shell=shell)
+    rc = box.home / (".zshrc" if shell_kind(shell) == "zsh" else ".bashrc")
+    extra = ("setopt ksh_arrays no_unset sh_word_split\n" if shell_kind(shell) == "zsh"
+             else "set -u\nshopt -s extglob nullglob\n")
+    rc.write_text(rc.read_text() + extra)
+    with FakeDaemon(box.sock) as d:
+        c = spawn(box, shell)
+        run_cmd(c, "IP=10.0.0.9; true")
+        run_cmd(c, 'echo "x $IP" | grep -q nomatch')
+        dm = d.wait_for(lambda: [m for m in d.marks("D") if m.get("exit") == 1])
+        assert dm and dm[-1]["pipestatus"] == [0, 1]
+        assert d.events("term.marker_forged") == []
         finish(c)

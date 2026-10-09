@@ -147,7 +147,7 @@ const HOSTS: HostSeed[] = [
     tags: ['honeypot?'],
     services: [
       [22, 'ssh', 'OpenSSH', '7.4\u001b]0;REC aus\u0007', 'remote'],
-      [80, 'http', 'Apache httpd', '2.4.‮gnp.exe', 'web'],
+      [80, 'http', 'Apache httpd', '2.4.\u202egnp.exe', 'web'],
     ],
   },
   {
@@ -266,7 +266,7 @@ export function createLameFixture(now: number = Date.now()): MockFixture {
   }
 
   function addFact(subject: string, subjectLabel: string, predicate: string, value: string | number | boolean, o: FactOpts): Fact {
-    const trust = o.trust ?? 'structured';
+    const trust: Trust = o.ai ? 'ai' : (o.trust ?? 'structured');
     const claim_key = fakeHash(`${subject}|${predicate}|${String(value)}`);
     const confidence = o.confidence ?? BASE_CONF[trust];
     const srcs: SourceView[] = [];
@@ -275,7 +275,7 @@ export function createLameFixture(now: number = Date.now()): MockFixture {
       srcs.push({
         t: 'stream', terminal_id: u.terminal_id, terminal_label: terminalLabels[u.terminal_id] ?? null, unit_id: u.unit_id,
         cmd: u.cmd, context: u.context, off: [u.offStart + o.lines[0] * 72, u.offStart + (o.lines[1] + 1) * 72],
-        lines: o.lines, parser: o.ai ? 'llm.extract@1' : u.parser, trust: o.ai ? 'ai' : trust === 'structured' ? 'tool_text' : trust,
+        lines: o.lines, parser: o.ai ? 'llm.extract@1' : u.parser, trust: trust === 'structured' ? 'tool_text' : trust,
         truncated: false, partial: false,
       });
     }
@@ -285,12 +285,13 @@ export function createLameFixture(now: number = Date.now()): MockFixture {
         lines: null, xpath: o.file.xpath, parser: 'nmap.xml', trust: 'structured',
       });
     }
-    if (o.ai && srcs.length && srcs[0]) {
-      srcs.unshift({ t: 'ai', call_id: fakeHash(`call:${claim_key}`).slice(0, 32), model: 'claude-opus-5-5', quote_in: srcs[0] });
+    if (o.ai && srcs[0]) {
+      // KI-Wert: die Quelle ist der Modellaufruf, das geprüfte Zitat steht im Rohtext.
+      srcs.splice(0, 1, { t: 'ai', call_id: fakeHash(`call:${claim_key}`).slice(0, 32), model: 'claude-opus-5-5', quote_in: srcs[0] });
     }
     const f: Fact = {
       fact_id: claim_key, claim_key, subject, subject_label: subjectLabel, predicate, value,
-      state: o.state ?? 'confirmed', confidence, confidence_level: confidenceLevel(confidence), trust: o.ai ? 'ai' : trust,
+      state: o.state ?? 'confirmed', confidence, confidence_level: confidenceLevel(confidence), trust,
       parser: o.ai ? 'llm.extract@1' : (o.parser ?? o.unit?.unit.parser ?? null), ai: o.ai ?? false,
       offered_by_target: o.offered ?? false, scope: o.scope ?? 'in', sources_count: srcs.length,
       first_seen: at(o.minAgo ?? 60), last_seen: at(Math.max(0, (o.minAgo ?? 60) - 1)), conflict_key: o.conflict ?? null,

@@ -108,7 +108,7 @@
   .profile {
     padding: 0 8px;
     border-radius: 4px;
-    color: #fff;
+    color: var(--profile-text);
     font-size: 0.78rem;
     font-weight: 700;
     text-transform: uppercase;

@@ -363,7 +363,9 @@ export const de = {
 
   'sg.title': 'Denkanstösse',
   'sg.request': 'KI-Denkanstoss anfordern',
-  'sg.requestHint': 'Das Modell sieht nur das Lagebild, keinen Rohtext. Es führt nichts aus.',
+  'sg.requestHint': 'Das Modell sieht nur das Lagebild, keinen Rohtext.',
+  'sg.refused': 'Das Modell hat die Anfrage abgelehnt. Ariadne formuliert sie nicht um.',
+  'sg.failed': 'Der KI-Denkanstoss ist fehlgeschlagen.',
   'sg.learning': 'Lernmodus',
   'sg.learningHint': 'Zuerst eine Frage, dann eine Richtung, erst zuletzt Befehle.',
   'sg.nextStage': 'Nächste Stufe zeigen',

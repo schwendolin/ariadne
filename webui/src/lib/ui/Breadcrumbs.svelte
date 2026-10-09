@@ -9,7 +9,8 @@
 
 <ol class="crumbs">
   {#each stack as s (s.depth)}
-    <li class:unknown={s.kind === 'unknown'} class:suspended={s.state === 'suspended'}>
+    <li class:suspended={s.state === 'suspended'}>
+      <span class="stage" class:unknown={s.kind === 'unknown'}>
       {#if s.depth === 0 && s.kind === 'local'}
         Kali
       {:else if s.kind === 'unknown'}
@@ -18,6 +19,7 @@
         <Txt value={s.host_label ?? s.host ?? '?'} max={40} />{#if s.user} <span class="muted">(<Txt value={s.user} max={24} />)</span>{/if}
         <span class="kind small muted">{t(`stage.${s.kind}`)}</span>
       {/if}
+      </span>
     </li>
   {/each}
 </ol>
@@ -40,6 +42,11 @@
     content: '›';
     margin: 0 4px;
     color: var(--text-muted);
+  }
+  .stage {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
   }
   .unknown {
     padding: 0 6px;

@@ -1,5 +1,8 @@
 // Gemeinsame Test-Umgebung (jsdom): fehlende Browser-APIs minimal nachbilden.
+// Tests mit `@vitest-environment node` (z. B. lint-rules) haben kein window.
 import { vi } from 'vitest';
+
+const browser = typeof window !== 'undefined';
 
 if (!('ResizeObserver' in globalThis)) {
   class RO {
@@ -10,7 +13,7 @@ if (!('ResizeObserver' in globalThis)) {
   (globalThis as unknown as { ResizeObserver: typeof RO }).ResizeObserver = RO;
 }
 
-if (!window.matchMedia) {
+if (browser && !window.matchMedia) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: false,
     media: query,
@@ -24,7 +27,7 @@ if (!window.matchMedia) {
 }
 
 // jsdom hat kein Canvas; ohne Stub schreibt es bei jedem Aufruf einen Fehler in die Konsole.
-HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement['getContext'];
+if (browser) HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement['getContext'];
 
 let blobCounter = 0;
 if (!URL.createObjectURL) {

@@ -211,3 +211,17 @@ th {
   text-decoration: underline wavy var(--target-underline);
   text-underline-offset: 3px;
 }
+
+/* Knopf, der wie ein Link aussieht (z. B. Host in der Zeitachse). */
+.linkish {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  text-decoration: underline;
+  font-size: inherit;
+}
+.linkish:hover:not(:disabled) {
+  background: none;
+}

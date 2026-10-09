@@ -243,16 +243,23 @@ export class SseClient {
           const parser = new SseParser();
           parser.lastEventId = this.lastEventId;
           const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            kick();
-            for (const msg of parser.push(value)) {
-              this.lastEventId = parser.lastEventId;
-              const ev = toStreamEvent(msg);
-              if (ev) opts.onEvent(ev);
+          // Abbruch (stop, Wachhund) beendet auch ein hängendes read().
+          const onAbort = () => void reader.cancel().catch(() => undefined);
+          conn.signal.addEventListener('abort', onAbort, { once: true });
+          try {
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              kick();
+              for (const msg of parser.push(value)) {
+                this.lastEventId = parser.lastEventId;
+                const ev = toStreamEvent(msg);
+                if (ev) opts.onEvent(ev);
+              }
+              if (parser.retryMs !== null) serverRetry = parser.retryMs;
             }
-            if (parser.retryMs !== null) serverRetry = parser.retryMs;
+          } finally {
+            conn.signal.removeEventListener('abort', onAbort);
           }
         }
       } catch {

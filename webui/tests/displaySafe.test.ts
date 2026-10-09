@@ -14,11 +14,11 @@ describe('visible', () => {
   });
 
   it('macht Bidi- und Zero-Width-Zeichen sichtbar', () => {
-    expect(visible('‮gnp.exe')).toBe('<U+202E>gnp.exe');
-    expect(visible('ad​min')).toBe('ad<U+200B>min');
-    expect(visible('⁦x⁩')).toBe('<U+2066>x<U+2069>');
-    expect(visible('﻿BOM')).toBe('<U+FEFF>BOM');
-    expect(visible('؜᠎')).toBe('<U+061C><U+180E>');
+    expect(visible('\u202egnp.exe')).toBe('<U+202E>gnp.exe');
+    expect(visible('ad\u200bmin')).toBe('ad<U+200B>min');
+    expect(visible('\u2066x\u2069')).toBe('<U+2066>x<U+2069>');
+    expect(visible('\ufeffBOM')).toBe('<U+FEFF>BOM');
+    expect(visible('\u061c\u180e')).toBe('<U+061C><U+180E>');
   });
 
   it('macht Unicode-Tag-Zeichen sichtbar (versteckte Prompt-Injection)', () => {
@@ -27,8 +27,8 @@ describe('visible', () => {
   });
 
   it('macht Format-, Private-Use- und einzelne Surrogat-Zeichen sichtbar', () => {
-    expect(visible('­')).toBe('<0xAD>'); // Soft Hyphen, Kategorie Cf
-    expect(visible('')).toBe('<U+E000>'); // Private Use
+    expect(visible('\u00ad')).toBe('<0xAD>'); // Soft Hyphen, Kategorie Cf
+    expect(visible('\ue000')).toBe('<U+E000>'); // Private Use
     expect(visible('x\ud800y')).toBe('x<U+D800>y'); // einzelnes Surrogat
   });
 
@@ -69,10 +69,10 @@ describe('displaySafe', () => {
   it('enthält nach dem Encoder nie ESC, C0, C1, DEL, Bidi oder Zero-Width', () => {
     let all = '';
     for (let cp = 0; cp < 0x250; cp++) all += String.fromCharCode(cp);
-    all += '​‎‪‮⁦⁩﻿';
+    all += '\u200b\u200e\u202a\u202e\u2066\u2069\ufeff';
     const out = displaySafe(all, 0);
     // eslint-disable-next-line no-control-regex
-    expect(out).not.toMatch(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/);
+    expect(out).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/);
   });
 });
 
@@ -82,6 +82,6 @@ describe('punycodeHint', () => {
   });
   it('gibt null für ASCII-Namen und für Namen mit Steuerzeichen', () => {
     expect(punycodeHint('lame.htb')).toBeNull();
-    expect(punycodeHint('bü‮cher.htb')).toBeNull();
+    expect(punycodeHint('bü\u202echer.htb')).toBeNull();
   });
 });

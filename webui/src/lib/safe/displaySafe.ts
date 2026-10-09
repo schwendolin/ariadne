@@ -10,7 +10,7 @@
  *
  * Svelte escapt HTML ohnehin. displaySafe sorgt zusätzlich dafür, dass ein Ziel
  * die Anzeige nicht mit unsichtbaren oder richtungsumkehrenden Zeichen fälschen
- * kann (z. B. `‮gnp.exe` als `<U+202E>gnp.exe`).
+ * kann (z. B. `\u202egnp.exe` als `<U+202E>gnp.exe`).
  *
  * Kleine Abweichung zu Python: welche Codepoints «nicht zugewiesen» (Cn) sind,
  * hängt von der Unicode-Version der Laufzeit ab (ICU im Browser, unicodedata in

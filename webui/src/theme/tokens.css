@@ -33,6 +33,7 @@
   --rec-off: #6b7280;
   --profile-lab: #0f766e;
   --profile-customer: #7c3aed;
+  --profile-text: #ffffff;
   --banner-danger-bg: #fde3e3;
   --banner-danger-text: #8f1515;
   --banner-info-bg: #e3ecfd;
@@ -121,6 +122,7 @@
     --rec-off: #8b93a1;
     --profile-lab: #2bb3a3;
     --profile-customer: #a78bfa;
+    --profile-text: #0b1020;
     --banner-danger-bg: #3a1417;
     --banner-danger-text: #ffb4b4;
     --banner-info-bg: #16233f;
@@ -209,6 +211,7 @@
   --rec-off: #8b93a1;
   --profile-lab: #2bb3a3;
   --profile-customer: #a78bfa;
+  --profile-text: #0b1020;
   --banner-danger-bg: #3a1417;
   --banner-danger-text: #ffb4b4;
   --banner-info-bg: #16233f;

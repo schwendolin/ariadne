@@ -67,7 +67,7 @@
       {#each d.items as i (i.id)}
         <li class="item {i.type}">
           <time title={utcTooltip(i.ts)}>{timeLocal(i.ts, true)}</time>
-          <Badge tone={tone(i.type)}>{t(`tlType.${i.type}`)}</Badge>
+          <span><Badge tone={tone(i.type)}>{t(`tlType.${i.type}`)}</Badge></span>
           <div class="body">
             <div class:mono={i.type === 'command' || i.type === 'segment'}><Txt value={i.title} max={160} /></div>
             <div class="small muted row">
@@ -119,17 +119,5 @@
   }
   .body {
     min-width: 0;
-  }
-  .linkish {
-    min-height: 0;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--link);
-    text-decoration: underline;
-    font-size: inherit;
-  }
-  .linkish:hover:not(:disabled) {
-    background: none;
   }
 </style>

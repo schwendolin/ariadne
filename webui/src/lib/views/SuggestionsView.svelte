@@ -19,6 +19,8 @@
 
   const list = $derived(project.suggestions.filter((s) => showClosed || s.status === 'open'));
   const aiJobs = $derived(Object.values(jobs).filter((j) => j.kind === 'ai.denkanstoss'));
+  const running = $derived(aiJobs.filter((j) => j.status === 'queued' || j.status === 'running'));
+  const failed = $derived(aiJobs.filter((j) => j.status === 'failed' || j.status === 'refused'));
   const llmReady = $derived(!!status && status.llm.mode !== 'off' && status.llm.available);
 
   function setLearning(v: boolean) {
@@ -51,7 +53,7 @@
 <section class="view" aria-labelledby="sg-title">
   <div class="view-head">
     <h1 id="sg-title">{t('sg.title')}</h1>
-    <button type="button" class="primary" disabled={!llmReady || requesting || aiJobs.length > 0} onclick={request} title={t('sg.requestHint')}>
+    <button type="button" class="primary" disabled={!llmReady || requesting || running.length > 0} onclick={request} title={t('sg.requestHint')}>
       {t('sg.request')}
     </button>
     <label class="row small" title={t('sg.learningHint')}>
@@ -64,8 +66,11 @@
     </label>
   </div>
   <p class="muted small">{t('sg.noExec')} {t('sg.requestHint')}</p>
-  {#each aiJobs as j (j.job_id)}
+  {#each running as j (j.job_id)}
     <p class="job small" role="status">{t('sg.job', { msg: j.message ?? j.status })}</p>
+  {/each}
+  {#each failed as j (j.job_id)}
+    <p class="error small" role="alert">{j.status === 'refused' ? t('sg.refused') : t('sg.failed')}</p>
   {/each}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 

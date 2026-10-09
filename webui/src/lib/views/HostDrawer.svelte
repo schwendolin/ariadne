@@ -110,7 +110,7 @@
       <span class="muted small">{t('host.title')}</span>
       <h2 id="host-title">
         {#if host}
-          {#if host.access === 'admin'}<span aria-hidden="true"># </span>{:else if host.access === 'user'}<span aria-hidden="true">$ </span>{/if}<Txt value={host.label} max={60} />
+          {#if host.access === 'admin'}<span class="sym" aria-hidden="true">#</span>{:else if host.access === 'user'}<span class="sym" aria-hidden="true">$</span>{/if}<Txt value={host.label} max={60} />
         {:else}
           <Txt value={shortId(hostId)} max={60} />
         {/if}
@@ -369,6 +369,11 @@
   .grow {
     flex: 1;
     gap: 0;
+  }
+  .sym {
+    margin-right: 0.4em;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
   }
   section {
     margin: 14px 0;
