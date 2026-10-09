@@ -59,7 +59,8 @@ def test_encoder_matches_python_decoder(shell, tmp_path):
     for value in TRICKY:
         r = run([shell, str(script), value], env=env)
         enc = r.stdout
-        assert all(c in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~/:@+,-%" for c in enc)
+        safe = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~/:@+,-%"
+        assert all(c in safe for c in enc)
         assert percent_decode(enc) == value.encode(), (shell, value)
 
 
@@ -165,7 +166,8 @@ def test_shim_imports_only_stdlib_and_allowed_modules():
     )
     r = run([str(VENV_PY), "-I", "-S", "-c", code, str(SRC)])
     mods, pyd = r.stdout.decode().split("\n")[:2]
-    allowed = {"ariadne", "ariadne.ids", "ariadne.paths", "ariadne.termsafe", "ariadne.ctxrules", "ariadne._shim"}
+    allowed = {"ariadne", "ariadne.ids", "ariadne.paths", "ariadne.termsafe", "ariadne.ctxrules",
+               "ariadne._shim"}
     assert pyd == "False"
     for m in mods.split():
         assert m in allowed or m.startswith("ariadne._shim."), m

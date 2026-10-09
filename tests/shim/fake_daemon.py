@@ -171,7 +171,9 @@ class FakeDaemon:
                 conn.sendall(P.encode_json(P.ACK, {"seq": seq}))
             if fr.type == P.EVENT and obj.get("kind") == "req.rec":
                 on = obj.get("on")
-                new = ("off" if self.state["rec"] == "on" else "on") if on is None else ("on" if on else "off")
+                if on is None:
+                    on = self.state["rec"] != "on"
+                new = "on" if on else "off"
                 self.state["rec"] = new
                 conn.sendall(P.encode_json(P.STATE, self.state))
         except OSError:

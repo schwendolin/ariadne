@@ -447,6 +447,7 @@ class Shim:
             try:
                 res = self.scanner.expire(now)
             except Exception:
+                self.scanner = None
                 self._broken()
             else:
                 self._apply_scan(res, off0, now)
@@ -493,6 +494,7 @@ class Shim:
         try:
             res = self.scanner.feed(data, now)
         except Exception:
+            self.scanner = None
             self._broken()
             self._show(data)
             return
@@ -855,9 +857,7 @@ class Shim:
         if self._child_status is not None and not self._hup:
             self._drain_master(0.5)
         if self._child_status is None:
-            with contextlib.suppress(OSError):
-                os.close(self.master)
-            self._master_eof = True
+            self._close_master()
             end = now + HUP_WAIT_S
             while self._child_status is None and time.monotonic() < end:
                 try:
@@ -885,8 +885,15 @@ class Shim:
         self._restore_tty()
         with contextlib.suppress(OSError, ValueError):
             signal.set_wakeup_fd(-1)
-        with contextlib.suppress(OSError):
-            os.close(self.master)
+        self._close_master()
+
+    def _close_master(self) -> None:
+        """Master genau einmal schliessen (die Nummer könnte sonst neu vergeben sein)."""
+        self._master_eof = True
+        if self.master >= 0:
+            with contextlib.suppress(OSError):
+                os.close(self.master)
+            self.master = -1
 
     def _restore_tty(self) -> None:
         if self._saved_attrs is not None:

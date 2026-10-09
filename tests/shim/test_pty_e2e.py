@@ -106,7 +106,7 @@ def test_session_markers_and_recording(shell, box_factory):
         c.expect(rb"(\d+) (\d+)\r\nsize-done")
         assert c.match.group(1, 2) == (b"30", b"100")
         c.expect_exact(PROMPT)
-        assert d.wait_for(lambda: [e for e in d.events("term.resize") if e["rows"] == 30 and e["cols"] == 100])
+        assert d.wait_for(lambda: [e for e in d.events("term.resize") if (e["rows"], e["cols"]) == (30, 100)])
 
         # Unter-Shell: Hooks ja, zweiter Shim nein
         c.sendline(shell)
