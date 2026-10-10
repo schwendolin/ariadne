@@ -54,8 +54,19 @@
     return parts.join(', ');
   }
 
+  // Sammelbestätigung (docs/web-api.md, Abschnitt 7): nur Claims im Scope mit Konfidenz über
+  // «niedrig». KI-Werte und vom Ziel angebotene Werte brauchen immer einen eigenen Entscheid.
   function bulkCandidates(g: InboxGroup): InboxItem[] {
-    return g.items.filter((i) => i.type === 'claim' && i.claim_key && i.scope === 'in' && i.confidence_level !== 'low');
+    return g.items.filter(
+      (i) => i.type === 'claim' && i.claim_key && i.scope === 'in' && i.confidence_level !== 'low' && !i.ai && !i.offered_by_target,
+    );
+  }
+
+  /** Claims, die nur wegen KI-Herkunft oder «vom Ziel angeboten» nicht mitbestätigt werden. */
+  function bulkExcludedAi(g: InboxGroup): number {
+    return g.items.filter(
+      (i) => i.type === 'claim' && i.scope === 'in' && i.confidence_level !== 'low' && (i.ai || i.offered_by_target),
+    ).length;
   }
 
   async function decide(items: InboxItem[], decisions: DecisionInput[]) {
@@ -190,6 +201,7 @@
     <div class="groups" bind:this={listEl}>
       {#each groups as g (g.group_id)}
         {@const bulk = bulkCandidates(g)}
+        {@const bulkAi = bulkExcludedAi(g)}
         <article class="group card">
           <header class="group-head">
             <div class="stack grow">
@@ -203,8 +215,8 @@
             {#if bulk.length > 1}
               <div class="stack bulk">
                 <button type="button" class="primary small" onclick={() => confirmGroup(g)}>{t('inbox.confirmAll', { n: bulk.length })}</button>
-                {#if g.summary.out_of_scope || g.summary.low_confidence}
-                  <span class="small muted">{t('inbox.confirmAllHint', { oos: g.summary.out_of_scope, low: g.summary.low_confidence })}</span>
+                {#if g.summary.out_of_scope || g.summary.low_confidence || bulkAi}
+                  <span class="small muted">{t('inbox.confirmAllHint', { oos: g.summary.out_of_scope, low: g.summary.low_confidence, ai: bulkAi })}</span>
                 {/if}
               </div>
             {/if}
@@ -292,6 +304,7 @@
   }
   .group-head {
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
     align-items: flex-start;
     margin-bottom: 8px;
@@ -315,8 +328,10 @@
     margin: 0;
     padding: 0;
   }
+  /* Schmale Fenster: Knöpfe rutschen unter den Wert, statt ihn auf ein Zeichen Breite zu drücken. */
   .item {
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
     align-items: flex-start;
     justify-content: space-between;
@@ -333,6 +348,7 @@
   }
   .main {
     display: flex;
+    flex: 1 1 260px;
     flex-wrap: wrap;
     gap: 6px 10px;
     align-items: baseline;
@@ -348,7 +364,8 @@
     flex-wrap: wrap;
   }
   .actions {
-    flex: none;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
   }
   .conflict {
     list-style: none;

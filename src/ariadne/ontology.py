@@ -40,6 +40,11 @@ PREDICATES: dict[str, Predicate] = {
         _P("host.netbios", "host", "str", "many", "topology"),
         _P("host.os", "host", "str", "one", "topology"),
         _P("host.domain", "host", "str", "one", "ad"),
+        # Ergänzungen v1 (nur neue Prädikate, daher keine neue Version)
+        _P("host.sshkey", "host", "ref", "many", "none", inbox=False),  # Wert: sshkey:<typ>:<fp>
+        _P("host.smb_os", "host", "str", "one", "none", inbox=False),  # smb-os-discovery
+        _P("host.smb_domain", "host", "str", "one", "ad", inbox=False),  # NetBIOS-Domäne/Workgroup
+        _P("host.script", "host", "str", "many", "none", inbox=False),  # NSE-Hostskript, attrs: output
         # Service
         _P("service.state", "service", "str", "one", "services"),  # open | filtered | closed
         _P("service.name", "service", "str", "one", "services"),

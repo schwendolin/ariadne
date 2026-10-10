@@ -30,7 +30,7 @@
 | Präfix | alle Pfade unter `/api/v1`, projektbezogene unter `/api/v1/p/{pid}`. Alles andere ist die SPA (Abschnitt 1.5) |
 | Anmeldung | `Authorization: Bearer <token>` auf jeder Route ausser `POST /session`. Keine Cookies, daher kein CSRF |
 | Middleware vor jeder Route | `Host` exakt `127.0.0.1:7330` (sonst 421), `Sec-Fetch-Site` nur `same-origin` oder `none` (sonst 403, auch für statische Dateien), `Origin` bei `POST`, `PUT`, `DELETE` nur der eigene, kein CORS, `OPTIONS` ergibt 405, Tokenvergleich mit `hmac.compare_digest` |
-| Header der SPA-Shell | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, dazu `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin` |
+| Header der SPA-Shell | `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` (genau Architektur 7.2.4; kein `font-src`, die UI nutzt nur Systemschriften), dazu `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store` |
 | Header aller anderen Antworten | `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` |
 | Logs | nur Metadaten. Kein Pfadparameter, keine Query, keine Bodies im Access-Log (Architektur 8.6) |
 
@@ -90,11 +90,11 @@ type ApiErrorCode =
   | 'internal';         // 500
 ```
 
-Die UI übersetzt nur über `code`. `message` dient der Diagnose und erscheint nie ungeprüft im UI. Für jede projektbezogene Route gelten zusätzlich: 401, 409 `no_project` und `project_mismatch`, 423 `locked`. Sie stehen unten nicht jedes Mal dabei.
+Die UI übersetzt nur über `code`. `message` dient der Diagnose und erscheint nie ungeprüft im UI. Für jede projektbezogene Route gelten zusätzlich: 401, 409 `no_project` und `project_mismatch`, 423 `locked` (ausser `GET /p/{pid}/events`, der Strom läuft auch bei gesperrtem Projekt, Abschnitt 12). Sie stehen unten nicht jedes Mal dabei.
 
 ### 1.5 SPA-Auslieferung
 
-Alle Pfade ausserhalb von `/api/` liefern die SPA-Shell `index.html` aus `src/ariadne/web/static/`, damit der History-Router funktioniert (`/karte`, `/inbox`, `/terminals`, `/zeitachse`, `/denkanstoesse`, `/findings`, jeweils mit Query wie `?host=` und `?fact=`). Statische Dateien unter `/assets/` mit Hash im Namen dürfen gecacht werden (`Cache-Control: public, max-age=31536000, immutable`), die Shell nicht.
+Alle Pfade ausserhalb von `/api/` liefern die SPA-Shell `index.html` aus `src/ariadne/web/static/`, damit der History-Router funktioniert (`/karte`, `/inbox`, `/terminals`, `/zeitachse`, `/denkanstoesse`, `/findings`, jeweils mit Query wie `?host=` und `?fact=`). Wie in Architektur 7.2.4 tragen alle Antworten `Cache-Control: no-store`, auch die Dateien unter `/assets/`. Über Loopback kostet das kaum Zeit. Ob gehashte Assets doch gecacht werden dürfen, ist offen (Abschnitt 13).
 
 ## 2 Gemeinsame Typen
 
@@ -285,11 +285,11 @@ interface Terminal {
 
 ### POST /api/v1/terminals/{tid}/context
 
-Zweck: Kontext setzen, eine Stufe darüber öffnen, die oberste schliessen oder einen Vorschlag annehmen. Der Server schreibt den passenden Entscheid (`d.ctx.set`, `d.ctx.push`, `d.ctx.pop`, `d.ctx.accept`) und setzt `stream_off` auf den aktuellen Offset, ausser `from_off` ist angegeben (rückwirkend).
+Zweck: Kontext setzen, eine Stufe darüber öffnen, die oberste schliessen oder einen Vorschlag annehmen. Der Server schreibt den passenden Entscheid (`d.ctx.set`, `d.ctx.push`, `d.ctx.pop`, `d.ctx.accept`) und setzt `stream_off` bzw. `from_off` auf den aktuellen Offset, ausser `from_off` ist angegeben (rückwirkend). `to_off` begrenzt einen rückwirkenden Bereich, `null` heisst «bis jetzt und weiter».
 
 ```ts
-type ContextOp =
-  | { op: 'set'; depth?: number; host?: string | null; user?: string | null; kind?: StageKind; from_off?: number }
+type ContextOp =   // Felder wie DCtxSet, DCtxPush, DCtxPop, DCtxAccept in events.py
+  | { op: 'set'; depth?: number; host?: string | null; user?: string | null; kind?: StageKind; from_off?: number; to_off?: number | null }
   | { op: 'push'; kind?: StageKind; host?: string | null; user?: string | null }
   | { op: 'pop' }
   | { op: 'accept'; suggestion_key: string };
@@ -668,7 +668,7 @@ interface InboxItem {
 }
 ```
 
-Die Sammelbestätigung der UI bestätigt nur `claim`-Einträge mit Scope `in` und Konfidenz über `low`. `summary.out_of_scope` und `summary.low_confidence` zeigt sie getrennt an. Werte ausserhalb des Scopes bleiben Hinweise und werden nie Ziel.
+Die Sammelbestätigung der UI bestätigt nur `claim`-Einträge mit Scope `in`, Konfidenz über `low`, `ai = false` und `offered_by_target = false`. KI-Werte und vom Ziel angebotene Werte brauchen immer einen eigenen Entscheid (Architektur 5.7, 6.4). `summary.out_of_scope` und `summary.low_confidence` zeigt sie getrennt an, dazu die Zahl der ausgenommenen KI- und Zielwerte. Werte ausserhalb des Scopes bleiben Hinweise und werden nie Ziel.
 
 ### GET /api/v1/p/{pid}/suggestions?status=
 
@@ -1016,3 +1016,5 @@ data: {"generation":43,"entities":{"host":1,"claim":3,"inbox":1}}
 6. **Mehrere Tabs:** jeder Tab hält einen eigenen SSE-Strom; bei HTTP/1.1 sind pro Origin nur etwa 6 Verbindungen offen. Später `BroadcastChannel` oder `SharedWorker`.
 7. **Linse Faden (v0.2):** `GraphView` für `lens = 'faden'` mit Zeitachse statt Segmenten.
 8. **Positionen bei Merge und Split:** Wer verschiebt gespeicherte Positionen, wenn sich die stärkste Kennung eines Hosts ändert?
+9. **Caching der Assets:** Architektur 7.2.4 verlangt `Cache-Control: no-store` für alles. Gehashte Dateien unter `/assets/` enthalten keine Projektdaten und könnten `immutable` sein. Lohnt sich das auf der knappen VM, braucht es einen Entscheid und eine Anpassung in Architektur 7.2.4.
+10. **Namen der Entscheide:** Architektur 5.3 schreibt `d.finding.*` und `d.artifact.*`, `events.py` (einzige Quelle, E85) registriert `d.finding` und `d.artifact` als je eine Art; für `d.finding` schlägt Abschnitt 9 dafür ein Feld `action` vor. Dieses Dokument folgt `events.py`; die Architektur sollte nachziehen.

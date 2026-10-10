@@ -13,7 +13,8 @@ Nur Standardbibliothek. Keine DNS-Auflösung, nie.
   Steuer- oder Leerzeichen, kein ``%`` im Host.
 
 Kennungen haben die Form ``ip:default/<adresse>``, ``fqdn:<name>`` und
-``url:<url>`` (siehe ``ariadne.parsers.api.Ref``).
+``url:<url>`` (siehe ``ariadne.parsers.api.Ref``). Eingegebene Kontext-Hosts
+``name:<name>`` werden zu ``fqdn:<name>``.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ __all__ = [
     "split_host_port",
     "to_identifier",
     "mixed_script",
+    "remove_dot_segments",
 ]
 
 SPACE = "default"  # v0.1 kennt nur einen Adressraum
@@ -112,8 +114,6 @@ def normalize_hostname(raw: str) -> str | None:
                 return None
             if mixed_script(ulabel):
                 return None
-        elif "--" in label[2:4]:
-            return None  # reservierte Form ab3--
     if _ends_in_number(labels[-1]):
         return None
     return ascii_name
@@ -312,10 +312,38 @@ def normalize_url(raw: str) -> str | None:
         if port == _DEFAULT_PORT[scheme]:
             port = None
     tail = tail.split("#", 1)[0]
-    if not tail.startswith("/"):
-        tail = "/" + tail
+    path, sep, query = tail.partition("?")
+    path = remove_dot_segments(path if path.startswith("/") else "/" + path)
+    tail = path + sep + query
     tail = "".join(c if ord(c) < 0x80 else quote(c, safe="") for c in tail)
     return f"{scheme}://{host_n}{':' + port if port else ''}{tail}"
+
+
+_DOT = {".", "%2e"}
+_DOTDOT = {"..", ".%2e", "%2e.", "%2e%2e"}
+
+
+def remove_dot_segments(path: str) -> str:
+    """Entfernt ``.``- und ``..``-Segmente (RFC 3986, 5.2.4; ``%2e`` zählt als Punkt wie bei WHATWG).
+
+    Sonst umgeht ``/public/../admin`` eine Ausschlussregel für ``/admin``.
+    """
+    out: list[str] = []
+    segs = path.split("/")[1:]
+    for i, seg in enumerate(segs):
+        low = seg.lower()
+        last = i == len(segs) - 1
+        if low in _DOT:
+            if last:
+                out.append("")
+        elif low in _DOTDOT:
+            if out:
+                out.pop()
+            if last:
+                out.append("")
+        else:
+            out.append(seg)
+    return "/" + "/".join(out)
 
 
 # --------------------------------------------------------------------------- Kennung
@@ -350,6 +378,8 @@ def to_identifier(raw: str) -> str | None:
     s = raw.strip()
     if not s or len(s) > _MAX_INPUT or has_control(s):
         return None
+    if s.startswith("name:"):
+        s = "fqdn:" + s[5:]
     if s.startswith(("ip:", "fqdn:", "url:")):
         return _from_identifier(s)
     if "://" in s:

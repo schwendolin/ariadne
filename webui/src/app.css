@@ -2,7 +2,8 @@
 @import './theme/tokens.css';
 
 /* Cytoscape fügt sonst ein <style>-Element ein, das die CSP blockiert.
-   main.ts legt ein Platzhalter-Element mit der ID an, die Regel steht hier. */
+   MapCanvas.svelte legt über src/lib/map/csp.ts vorher ein Platzhalter-Element
+   mit derselben ID an, die eine Regel steht hier. */
 .__________cytoscape_container {
   position: relative;
 }
@@ -221,6 +222,10 @@ th {
   color: var(--link);
   text-decoration: underline;
   font-size: inherit;
+  /* Lange Zielnamen umbrechen statt abschneiden (button setzt sonst nowrap). */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 .linkish:hover:not(:disabled) {
   background: none;

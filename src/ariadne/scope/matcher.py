@@ -60,7 +60,7 @@ _SPECIAL: tuple[tuple[str, IPNet], ...] = tuple(
 )
 _RANGE = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3})-(\d{1,3}(?:\.\d{1,3}){3}|\d{1,3})")
 _DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
-_HHMM = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
+_HHMM = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)|(24):(00)")
 
 
 def strictest(verdicts: Iterable[tuple[VerdictKind, str | None]]) -> tuple[VerdictKind, str | None]:
@@ -89,11 +89,13 @@ class _Window:
     tz: ZoneInfo
 
     def contains(self, at_utc_ns: int) -> bool:
-        local = datetime.fromtimestamp(at_utc_ns / 1e9, tz=UTC).astimezone(self.tz)
+        local = datetime.fromtimestamp(at_utc_ns // 1_000_000_000, tz=UTC).astimezone(self.tz)
         minute = local.hour * 60 + local.minute
         day = local.weekday()
-        if self.start == self.end:
+        if self.start == 0 and self.end == 24 * 60:
             return day in self.days
+        if self.start == self.end:
+            return False
         if self.start < self.end:
             return day in self.days and self.start <= minute < self.end
         # über Mitternacht: Start-Tag zählt
@@ -159,7 +161,7 @@ class ScopeMatcher:
             self.errors.append(f"{where}: kein Text")
             return None
         e = entry.strip()
-        for prefix in ("ip:default/", "fqdn:", "url:"):
+        for prefix in ("ip:default/", "fqdn:", "name:", "url:"):
             if e.startswith(prefix):
                 e = e[len(prefix) :]
         rule: _Rule | None = None
@@ -408,12 +410,14 @@ def _parse_days(value: Any) -> frozenset[int] | None:
     return frozenset(days) if days else None
 
 
-def _minutes(value: Any) -> int | None:
+def _minutes(value: Any, *, allow_24: bool = False) -> int | None:
     if not isinstance(value, str):
         return None
     m = _HHMM.fullmatch(value.strip())
     if not m:
         return None
+    if m.group(3) is not None:
+        return 24 * 60 if allow_24 else None
     return int(m.group(1)) * 60 + int(m.group(2))
 
 
@@ -422,7 +426,7 @@ def _parse_window(w: Any) -> _Window | None:
         return None
     days = _parse_days(w.get("days"))
     start = _minutes(w.get("from", "00:00"))
-    end = _minutes(w.get("to", "00:00"))
+    end = _minutes(w.get("to", "24:00"), allow_24=True)
     tz_name = w.get("tz", "UTC")
     if days is None or start is None or end is None or not isinstance(tz_name, str):
         return None

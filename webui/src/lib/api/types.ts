@@ -186,7 +186,7 @@ export interface Terminal {
 }
 
 export type ContextOp =
-  | { op: 'set'; depth?: number; host?: string | null; user?: string | null; kind?: StageKind; from_off?: number }
+  | { op: 'set'; depth?: number; host?: string | null; user?: string | null; kind?: StageKind; from_off?: number; to_off?: number | null }
   | { op: 'push'; kind?: StageKind; host?: string | null; user?: string | null }
   | { op: 'pop' }
   | { op: 'accept'; suggestion_key: string };

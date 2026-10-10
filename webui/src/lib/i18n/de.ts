@@ -220,7 +220,7 @@ export const de = {
   'inbox.open': '{n} offen',
   'inbox.empty': 'Nichts offen. Neue Werte erscheinen hier und als Nebel auf der Karte.',
   'inbox.confirmAll': 'Gruppe bestätigen ({n})',
-  'inbox.confirmAllHint': 'Nicht mitbestätigt: {oos} ausserhalb des Scopes, {low} mit niedriger Konfidenz.',
+  'inbox.confirmAllHint': 'Nicht mitbestätigt: {oos} ausserhalb des Scopes, {low} mit niedriger Konfidenz, {ai} vom Sprachmodell oder vom Ziel angeboten.',
   'inbox.confirm': 'Bestätigen',
   'inbox.reject': 'Verwerfen',
   'inbox.edit': 'Bearbeiten',

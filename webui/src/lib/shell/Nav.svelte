@@ -26,6 +26,13 @@
 </nav>
 
 <style>
+  /* Schmale Fenster: die Leiste scrollt in sich, die Seite bleibt ohne horizontales Scrollen. */
+  nav {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
   ul {
     display: flex;
     gap: 2px;
@@ -42,6 +49,7 @@
     color: var(--text-muted);
     text-decoration: none;
     font-weight: 600;
+    white-space: nowrap;
   }
   a:hover {
     color: var(--text);

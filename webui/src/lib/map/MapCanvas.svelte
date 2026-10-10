@@ -5,6 +5,8 @@
     Knoten werden höchstens alle 2 s eingepasst und nie während einer Interaktion.
   - Positionen pro Projekt und Linse speichern (über das Backend, im Mock lokal).
   - Neue Elemente blenden ein und pulsieren einmal.
+  - Bei prefers-reduced-motion keine Bewegung: kein Einblenden, Layout und
+    Kamerafahrten springen. Die Hervorhebung neuer Knoten bleibt (statisch).
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -50,6 +52,11 @@
   let layoutRunning = false;
 
   const LAYOUT_INTERVAL = 2000;
+
+  /** Dauer einer Animation, 0 bei reduzierter Bewegung (Barrierefreiheit, schwache VM). */
+  function ms(duration: number): number {
+    return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : duration;
+  }
 
   function simpleNodes(): NodeSingular[] {
     return cy!.nodes().toArray().filter((n) => !n.isParent() && n.id() !== OOS_ID) as NodeSingular[];
@@ -113,9 +120,10 @@
   }
 
   function reveal(n: NodeSingular): void {
+    n.flashClass('pulse', 1600);
+    if (!ms(600)) return;
     n.style('opacity', 0);
     n.animate({ style: { opacity: 1 } }, { duration: 600, complete: () => n.removeStyle('opacity') });
-    n.flashClass('pulse', 1600);
   }
 
   function requestLayout(): void {
@@ -147,7 +155,7 @@
       name: 'fcose',
       quality: 'default',
       randomize: fixed.length === 0,
-      animate: mode !== 'full',
+      animate: mode !== 'full' && ms(350) > 0,
       animationDuration: 350,
       fit: mode !== 'incremental',
       padding: 50,
@@ -280,7 +288,7 @@
     for (const id of ids) eles.merge(cy.getElementById(id));
     if (eles.nonempty()) {
       eles.addClass('highlight');
-      cy.animate({ fit: { eles, padding: 120 } }, { duration: 400 });
+      cy.animate({ fit: { eles, padding: 120 } }, { duration: ms(400) });
     }
   });
 
@@ -296,7 +304,7 @@
     const visibleRight = cy.width() - Math.min(560, cy.width()) - 20;
     const p = n.renderedPosition();
     if (p.x > visibleRight || p.x < 40 || p.y < 40 || p.y > cy.height() - 40) {
-      cy.animate({ panBy: { x: visibleRight / 2 - p.x, y: cy.height() / 2 - p.y } }, { duration: 300 });
+      cy.animate({ panBy: { x: visibleRight / 2 - p.x, y: cy.height() / 2 - p.y } }, { duration: ms(300) });
     }
   });
 
@@ -314,7 +322,7 @@
     const tok = fitToken;
     if (!ready || !cy || tok === lastFit) return;
     lastFit = tok;
-    cy.animate({ fit: { eles: cy.elements(), padding: 50 } }, { duration: 300 });
+    cy.animate({ fit: { eles: cy.elements(), padding: 50 } }, { duration: ms(300) });
   });
 </script>
 

@@ -15,13 +15,14 @@ import { defineConfig, loadEnv } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { svelteTesting } from '@testing-library/svelte/vite';
 
+// Genau die CSP aus Architektur 7.2.4. Kein font-src: die UI nutzt nur Systemschriften,
+// default-src 'none' sperrt damit jede Schriftdatei (fällt im Preview-Lauf sofort auf).
 export const CSP = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' blob:",
   "connect-src 'self'",
-  "font-src 'self'",
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",
@@ -33,6 +34,7 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Resource-Policy': 'same-origin',
+  'Cache-Control': 'no-store',
 };
 
 // Der Daemon prüft Host und Origin exakt (Architektur 7.2). Der Dev-Proxy
