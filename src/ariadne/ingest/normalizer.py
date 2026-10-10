@@ -64,6 +64,7 @@ MAX_STRING = 8192
 MAX_CSI = 512
 MAX_ALT_BYTES = 8 << 20
 MAX_PARAM = 65535
+_END = 1 << 62  # offenes Ende eines Prompt-Bereichs
 
 _GROUND, _ESC, _ESC_INT, _CSI, _STR, _STR_ESC = range(6)
 _TEXT = re.compile(
@@ -254,12 +255,13 @@ class Normalizer:
 
     def __init__(self, start: int = 0, *, prompt_ranges: Iterable[tuple[int, int | None]] = (),
                  breaks: Iterable[int] = (), size: tuple[int, int] = (24, 80)) -> None:
-        self._off = start
-        self._ranges = sorted((a, b) for a, b in prompt_ranges if b is None or b > a)
+        self._off = start  # Stream-Offset des nächsten eingehenden Bytes
+        self._ranges = sorted((a, _END if b is None else b) for a, b in prompt_ranges
+                              if b is None or b > a)
         bounds = set(breaks)
         for a, b in self._ranges:
             bounds.add(a)
-            if b is not None:
+            if b != _END:
                 bounds.add(b)
         self._bounds = sorted(x for x in bounds if x > start)
         self._rows_n, self._cols_n = max(1, min(size[0], 500)), max(1, min(size[1], 1000))
@@ -275,6 +277,9 @@ class Normalizer:
         self._seq = _Seq()
         self._pend = b""  # unvollständiges UTF-8 am Ende
         self._pend_off = 0
+        self._buf = b""  # aktueller Arbeitspuffer und sein absoluter Start
+        self._buf_base = 0
+        self._alt_from = 0
         self._alt = False
         self._alt_start = 0
         self._alt_content = 0
@@ -318,10 +323,7 @@ class Normalizer:
 
     def finish(self) -> list[NormLine]:
         if not self._finished:
-            nb = self._next_bound()
-            while nb is not None and nb <= self._off:
-                self._boundary(nb)
-                nb = self._next_bound()
+            self._bounds = []
             self._flush_utf8()
             if self._alt:
                 self._alt_close(self._off)
@@ -331,20 +333,23 @@ class Normalizer:
 
     # ------------------------------------------------------------- Grenzen
     def _in_prompt(self, off: int) -> bool:
-        i = bisect.bisect_right(self._ranges, (off, float("inf"))) - 1
-        if i < 0:
-            return False
-        a, b = self._ranges[i]
-        return a <= off and (b is None or off < b)
+        i = bisect.bisect_right(self._ranges, (off, _END)) - 1
+        while i >= 0:
+            a, b = self._ranges[i]
+            if a <= off < b:
+                return True
+            i -= 1
+        return False
 
     def _next_bound(self) -> int | None:
-        while self._bounds and self._bounds[0] <= self._off - 0 and self._bounds[0] < self._off:
+        while self._bounds and self._bounds[0] < self._off:
             self._bounds.pop(0)
         return self._bounds[0] if self._bounds else None
 
     def _boundary(self, off: int) -> None:
         if self._bounds and self._bounds[0] == off:
             self._bounds.pop(0)
+        self._flush_utf8()
         if self._alt:
             return  # im Alternate Screen gibt es keine Zeilen zu trennen
         self._flush_rows(off)
@@ -385,59 +390,47 @@ class Normalizer:
         else:
             base = self._off
         self._off = base + len(data)
-        alt_from = 0 if self._alt else None
+        self._buf, self._buf_base, self._alt_from = data, base, 0
         n = len(data)
         i = 0
         while i < n:
-            st = self._state
-            if st == _GROUND:
-                m = _TEXT.match(data, i)
-                if m is not None:
-                    if not self._alt:
-                        self._text(m.group(), base + i)
-                    i = m.end()
-                    continue
-                b = data[i]
-                if b == 0x1B:
-                    fm = _CSI_FAST.match(data, i)
-                    if fm is not None and fm.end() - i <= MAX_CSI:
-                        was_alt = self._alt
-                        self._seq = _Seq(start=base + i)
-                        self._csi(bytes(fm.group(1)), bytes(fm.group(2)), fm.group(3)[0], base + fm.end())
-                        i = fm.end()
-                        if self._alt and not was_alt:
-                            alt_from = i
-                        elif was_alt and not self._alt:
-                            alt_from = None
-                        continue
-                    self._seq = _Seq(start=base + i)
+            if self._state != _GROUND:
+                i = self._escape_byte(data, i, base)
+                continue
+            m = _TEXT.match(data, i)
+            if m is not None:
+                if not self._alt:
+                    self._text(m.group(), base + i)
+                i = m.end()
+                continue
+            b = data[i]
+            if b == 0x1B:
+                fm = _CSI_FAST.match(data, i)
+                self._seq = _Seq(start=base + i)
+                if fm is not None and fm.end() - i <= MAX_CSI:
+                    self._csi(bytes(fm.group(1)), bytes(fm.group(2)), fm.group(3)[0], base + fm.end())
+                    i = fm.end()
+                else:
                     self._state = _ESC
                     i += 1
-                    continue
-                if b < 0x20 or b == 0x7F:
-                    if not self._alt:
-                        self._control(b, base + i)
-                    i += 1
-                    continue
-                # ungültiges oder unvollständiges UTF-8
-                k, truncated = _utf8_subpart(data, i)
-                if truncated:
-                    self._pend = bytes(data[i:])
-                    self._pend_off = base + i
-                    self._off = base + i
-                    break
-                if not self._alt:
-                    self._write("�", (base + i,))
-                i += k
                 continue
-            was_alt = self._alt
-            i = self._escape_byte(data, i, base)
-            if self._alt and not was_alt:
-                alt_from = i
-            elif was_alt and not self._alt:
-                alt_from = None
-        if self._alt and alt_from is not None:
-            self._alt_append(data[alt_from:i])
+            if b < 0x20 or b == 0x7F:
+                if not self._alt:
+                    self._control(b, base + i)
+                i += 1
+                continue
+            # ungültiges oder unvollständiges UTF-8
+            k, truncated = _utf8_subpart(data, i)
+            if truncated:
+                self._pend = bytes(data[i:])
+                self._pend_off = base + i
+                break
+            if not self._alt:
+                self._write("\ufffd", (base + i,))
+            i += k
+        if self._alt:
+            self._alt_append(data[self._alt_from : i])
+        self._buf = b""
 
     def _escape_byte(self, data: bytes, i: int, base: int) -> int:
         """Ein Schritt im Escape-Automaten; gibt die neue Position zurück."""
@@ -507,7 +500,7 @@ class Normalizer:
             if data[i] == 0x5C:  # ESC \ = ST
                 self._state = _GROUND
                 return i + 1
-            self._state = _GROUND  # ESC beendet die Zeichenkette und beginnt neu
+            # ESC beendet die Zeichenkette und beginnt eine neue Sequenz
             self._seq = _Seq(start=base + i - 1)
             self._state = _ESC
             return i
@@ -556,7 +549,7 @@ class Normalizer:
             col = self._col
             if col >= MAX_COLS:
                 row.wrapped = True
-                self._linefeed(offs[i])
+                self._linefeed(offs[i] - 1)
                 row = self._rows[self._cur]
                 col = 0
             ln = len(row.chars)
@@ -829,7 +822,9 @@ class Normalizer:
             self._alt_start = self._seq.start
             self._alt_content = end_off
             self._alt_buf = bytearray()
+            self._alt_from = end_off - self._buf_base
         elif not on and self._alt:
+            self._alt_append(self._buf[self._alt_from : end_off - self._buf_base])
             keep = max(0, self._seq.start - self._alt_content)
             del self._alt_buf[keep:]
             self._alt_close(end_off)
@@ -851,11 +846,10 @@ class Normalizer:
     # ------------------------------------------------------------ Ausgabe
     def _flush_utf8(self) -> None:
         if self._pend:
-            pend, off = self._pend, self._pend_off
+            off = self._pend_off
             self._pend = b""
             if self._state == _GROUND and not self._alt:
-                self._write("�", (off,))
-            self._off = off + len(pend)
+                self._write("\ufffd", (off,))
 
     def _line(self, row: _Row, raw_end: int) -> NormLine:
         chars, raws, attrs = row.chars, row.raws, row.attrs
@@ -870,7 +864,7 @@ class Normalizer:
             j = i + 1
             while j < n and attrs[j] == a:
                 j += 1
-            if a is not _DEFAULT and a != _DEFAULT:
+            if a != _DEFAULT:
                 c = a.concealed
                 spans.append(SgrSpan(i, j, a.fg, a.bg, a.bold, c))
                 if c and any(ch != " " for ch in chars[i:j]):
@@ -942,23 +936,40 @@ def _utf8_subpart(data: bytes, i: int) -> tuple[int, bool]:
 
 
 _PARAM_CLAMP = re.compile(rb"\d{5,}")
+# Sequenzen, an denen pyte scheitert oder die nichts zum Bild beitragen:
+# CSI mit privatem Präfix < = > oder Zwischenzeichen, DCS/SOS/PM/APC und OSC.
+_PYTE_DROP = re.compile(
+    rb"\x1b\[[<=>][0-?]*[ -/]*[@-~]"
+    rb"|\x1b\[[0-?]*[ -/]+[@-~]"
+    rb"|\x1b[P_^X][^\x1b]*(?:\x1b\\)?"
+    rb"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?"
+)
+_ESC_SPLIT = re.compile(rb"(?=\x1b)")
 
 
 def _render_screen(data: bytes, rows: int, cols: int) -> list[str]:
-    """Schlussbild des Alternate Screens über pyte (ohne Leerzeilen am Rand)."""
+    """Schlussbild des Alternate Screens über pyte (ohne Leerzeilen am Rand).
+
+    pyte ist nicht für feindliche Eingaben gebaut: Parameter werden begrenzt,
+    problematische Sequenzen entfernt, und nach einer Ausnahme läuft ein neuer
+    Parser auf demselben Bild weiter.
+    """
     if not data:
         return []
     try:
         import pyte
     except ImportError:  # pragma: no cover - pyte ist Abhängigkeit
         return []
-    data = _PARAM_CLAMP.sub(b"9999", data)
+    data = _PYTE_DROP.sub(b"", _PARAM_CLAMP.sub(b"9999", data))
     screen = pyte.Screen(cols, rows)
     stream = pyte.ByteStream(screen)
-    try:
-        stream.feed(data)
-    except Exception:  # noqa: BLE001 - feindliche Bytes dürfen pyte nicht durchschlagen
-        pass
+    for part in _ESC_SPLIT.split(data):
+        if not part:
+            continue
+        try:
+            stream.feed(part)
+        except Exception:  # noqa: BLE001 - feindliche Bytes dürfen pyte nicht durchschlagen
+            stream = pyte.ByteStream(screen)
     lines = [ln.rstrip() for ln in screen.display]
     while lines and not lines[-1]:
         lines.pop()
