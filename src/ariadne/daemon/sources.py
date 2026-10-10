@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import ipaddress
 import logging
 import os
@@ -268,18 +267,16 @@ class LocalSources:
         if p is None:
             return None
         blob_id = None
-        sha = None
         if fd.data is not None:
-            ref = p.blobs.put_bytes(fd.data, kind="file")
-            blob_id, sha = ref.blob_id, ref.sha256
+            blob_id = p.blobs.put_bytes(fd.data, kind="file").blob_id
         mime, sniffed = safeopen.sniff(fd.data, path)
         header: dict[str, Any] = {
-            "path": path, "sha256": sha or "0" * 64, "size": fd.size, "blob_id": blob_id, "mime": mime,
-            "sniff": sniffed if sniffed else ("too_large" if fd.data is None else None), **fields,
+            "path": path, "sha256": fd.sha256, "size": fd.size, "blob_id": blob_id, "mime": mime,
+            "sniff": sniffed if fd.data is not None else "too_large", **fields,
         }
         header = {k: v for k, v in header.items() if v is not None}
-        self.d.submit(AppendItem("file.observed", header, origin="watcher" if fields.get("origin") == "companion"
-                                 else "import"))
+        origin = "daemon" if fields.get("origin") == "companion" else "cli"
+        self.d.submit(AppendItem("file.observed", header, origin=origin))
         return header
 
     # ------------------------------------------------------------------ ausdrücklicher Import
@@ -307,5 +304,4 @@ class LocalSources:
         if header is None:
             raise safeopen.UnsafeFile("no_project")
         return {"path": header["path"], "size": fd.size, "stored": fd.data is not None,
-                "sha256": header["sha256"] if fd.data is not None else None,
-                "digest": hashlib.sha256(header["path"].encode()).hexdigest()[:8]}
+                "sha256": fd.sha256}

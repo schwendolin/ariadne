@@ -19,6 +19,7 @@ Nur Standardbibliothek. Dieses Modul liest Bytes, es parst sie nicht.
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import stat
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ __all__ = [
     "UnsafeFile",
     "FileData",
     "MAX_STORE",
+    "MAX_HASH",
     "blocked_reason",
     "open_beneath",
     "open_absolute",
@@ -40,6 +42,7 @@ __all__ = [
 ]
 
 MAX_STORE = 100 << 20  # bis hier landet eine Datei im Blob-Store (Architektur 4.1)
+MAX_HASH = 16 << 30  # grössere Dateien werden gar nicht gelesen
 
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC
@@ -61,8 +64,9 @@ class UnsafeFile(Exception):
 
 @dataclass(frozen=True)
 class FileData:
-    data: bytes | None  # None: zu gross, nur Metadaten
+    data: bytes | None  # None: grösser als die Grenze, nur Metadaten und Hash
     size: int
+    sha256: str
     mtime_ns: int
 
 
@@ -129,31 +133,35 @@ def check_fd(fd: int, *, dev: int | None = None) -> os.stat_result:
     return st
 
 
-def read_fd(fd: int, limit: int) -> bytes:
-    """Liest höchstens ``limit`` Bytes. Ist die Datei grösser: :class:`UnsafeFile` ``too_large``."""
-    chunks: list[bytes] = []
+def read_fd(fd: int, limit: int, *, hard_limit: int = MAX_HASH) -> tuple[bytes | None, int, str]:
+    """Liest über das fd und hasht alles (SHA-256). Inhalt nur, wenn höchstens ``limit`` Bytes.
+
+    Gibt ``(daten oder None, grösse, sha256)`` zurück. Über ``hard_limit``: ``too_large``.
+    """
+    h = hashlib.sha256()
+    chunks: list[bytes] | None = []
     total = 0
     while True:
-        chunk = os.read(fd, min(1 << 20, limit + 1 - total))
+        chunk = os.read(fd, 1 << 20)
         if not chunk:
             break
-        chunks.append(chunk)
         total += len(chunk)
-        if total > limit:
+        if total > hard_limit:
             raise UnsafeFile("too_large")
-    return b"".join(chunks)
+        h.update(chunk)
+        if chunks is not None:
+            if total > limit:
+                chunks = None
+            else:
+                chunks.append(chunk)
+    return (b"".join(chunks) if chunks is not None else None), total, h.hexdigest()
 
 
 def _read(fd: int, *, limit: int, dev: int | None) -> FileData:
     try:
         st = check_fd(fd, dev=dev)
-        if st.st_size > limit:
-            return FileData(None, st.st_size, st.st_mtime_ns)
-        try:
-            data = read_fd(fd, limit)
-        except UnsafeFile:
-            return FileData(None, st.st_size, st.st_mtime_ns)
-        return FileData(data, len(data), st.st_mtime_ns)
+        data, size, sha = read_fd(fd, limit)
+        return FileData(data, size, sha, st.st_mtime_ns)
     finally:
         os.close(fd)
 

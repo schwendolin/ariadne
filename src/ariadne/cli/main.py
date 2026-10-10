@@ -332,9 +332,83 @@ def cmd_secrets(paths: Paths, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_show(paths: Paths, args: argparse.Namespace) -> int:
+    from ariadne.cli.views import render_view
+
+    res = _call(paths, "show", what=args.what, limit=args.limit)
+    for line in render_view(args.what, res.get("items") or [], full=args.all):
+        say(line)
+    ing = res.get("ingest") or {}
+    if ing.get("last_error"):
+        say(f"Hinweis: letzte Auswertung fehlgeschlagen ({s(ing['last_error'], 60)}), siehe Daemon-Log")
+    return 0
+
+
+def cmd_search(paths: Paths, args: argparse.Namespace) -> int:
+    from ariadne.cli.views import render_search
+
+    res = _call(paths, "search", text=args.text, limit=args.limit)
+    for line in render_search(res.get("items") or []):
+        say(line)
+    return 0
+
+
+def cmd_confirm(paths: Paths, args: argparse.Namespace) -> int:
+    from ariadne.cli.views import STATE_TEXT
+
+    res = _call(paths, "claim.confirm", ref=args.ref)
+    say(f"{res['confirmed']} Claim(s) bestätigt.")
+    for c in (res.get("claims") or [])[:10]:
+        say(f"  {s(c.get('subject'), 40)} {s(c.get('predicate'), 24)} = {s(c.get('value'), 60)} "
+            f"[{STATE_TEXT.get(str(c.get('state')), '-')}]")
+    return 0
+
+
+def cmd_reject(paths: Paths, args: argparse.Namespace) -> int:
+    res = _call(paths, "claim.reject", ref=args.ref, reason=args.reason)
+    for c in res.get("claims") or []:
+        say(f"Verworfen: {s(c.get('subject'), 40)} {s(c.get('predicate'), 24)} = {s(c.get('value'), 60)}")
+    return 0
+
+
+def cmd_mark(paths: Paths, args: argparse.Namespace) -> int:
+    res = _call(paths, "keystep.mark", step=args.step, host=args.host, note=args.note,
+                terminal_id=getattr(args, "terminal", None) or os.environ.get("ARIADNE_TERMINAL_ID"))
+    raw = str(res.get("host") or "")
+    shown = raw.split("/", 1)[1] if raw.startswith("ip:") else raw.removeprefix("name:")
+    host = f" für {s(shown, 80)}" if shown else " (ohne Host)"
+    say(f"Schlüsselschritt {s(res['step'], 12)} gespeichert{host}.")
+    return 0
+
+
+def cmd_import(paths: Paths, args: argparse.Namespace) -> int:
+    path = os.path.abspath(args.path)
+    res = _call(paths, "import", path=path, host=args.host)
+    stored = "verschlüsselt gespeichert" if res.get("stored") else "nur Metadaten (zu gross)"
+    say(f"Importiert: {s(res['path'], 300)} ({s(res['size'], 16)} Bytes, {stored}, "
+        f"sha256 {s(res.get('sha256'), 64)[:16]}…)")
+    return 0
+
+
+def cmd_reparse(paths: Paths, args: argparse.Namespace) -> int:
+    from ariadne.cli.views import render_reparse
+
+    for line in render_reparse(_call(paths, "reparse")):
+        say(line)
+    return 0
+
+
 def cmd_daemon(paths: Paths, args: argparse.Namespace) -> int:
     from ariadne.daemon.main import run_foreground, spawn_detached
 
+    if args.dcmd == "stop":
+        try:
+            _call(paths, "shutdown", start=False)
+        except CliError:
+            say("Daemon läuft nicht.")
+            return 0
+        say("Daemon wird beendet.")
+        return 0
     if args.detach:
         if spawn_detached(paths, timeout=3.0):
             say("Daemon läuft.")
@@ -448,10 +522,46 @@ def build_parser() -> argparse.ArgumentParser:
     sr.add_argument("label")
     sp.set_defaults(fn=cmd_secrets)
 
+    sp = sub.add_parser("show", help="Textansicht: hosts, services, inbox, timeline, keysteps, pending")
+    sp.add_argument("what", choices=["hosts", "services", "inbox", "timeline", "keysteps", "pending"])
+    sp.add_argument("--all", action="store_true", help="alle Einträge statt der ersten 25 pro Gruppe")
+    sp.add_argument("--limit", type=int, default=200, help="höchstens so viele Einträge (Zeitachse)")
+    sp.set_defaults(fn=cmd_show)
+
+    sp = sub.add_parser("search", help="Volltextsuche in der aufgenommenen Ausgabe")
+    sp.add_argument("text")
+    sp.add_argument("--limit", type=int, default=50)
+    sp.set_defaults(fn=cmd_search)
+
+    sp = sub.add_parser("confirm", help="Kandidaten bestätigen (Claim-Schlüssel oder Gruppe aus der Inbox)")
+    sp.add_argument("ref", help="Claim-Schlüssel (mind. 8 Zeichen) oder Gruppe wie g1a2b3c4d")
+    sp.set_defaults(fn=cmd_confirm)
+
+    sp = sub.add_parser("reject", help="Claim verwerfen")
+    sp.add_argument("ref", help="Claim-Schlüssel (mind. 8 Zeichen)")
+    sp.add_argument("--reason")
+    sp.set_defaults(fn=cmd_reject)
+
+    sp = sub.add_parser("mark", help="Schlüsselschritt markieren")
+    sp.add_argument("step", choices=["foothold", "privesc", "pivot", "loot"])
+    sp.add_argument("--host", help="IP oder Name (Standard: Host der obersten Stufe dieses Terminals)")
+    sp.add_argument("--note")
+    sp.add_argument("--terminal", help="terminal_id (Standard: ARIADNE_TERMINAL_ID)")
+    sp.set_defaults(fn=cmd_mark)
+
+    sp = sub.add_parser("import", help="Datei ausdrücklich ins Projekt übernehmen")
+    sp.add_argument("path")
+    sp.add_argument("--host", help="Host, von dem die Datei stammt (IP oder Name)")
+    sp.set_defaults(fn=cmd_import)
+
+    sp = sub.add_parser("reparse", help="Auswertung neu aufbauen, Unterschiede zeigen")
+    sp.set_defaults(fn=cmd_reparse)
+
     sp = sub.add_parser("daemon", help="Daemon")
     dsub = sp.add_subparsers(dest="dcmd", required=True, metavar="AKTION")
     dr = dsub.add_parser("run")
     dr.add_argument("--detach", action="store_true")
+    dsub.add_parser("stop", help="laufenden Daemon beenden (offenes Projekt wird geschlossen)")
     sp.set_defaults(fn=cmd_daemon)
 
     sp = sub.add_parser("hotkey", help="Hotkey")
@@ -467,6 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
 _ERROR_HINTS = {
     "wrong_passphrase": "Passphrase falsch.",
     "locked": "Gesperrt: zuerst ariadne unlock.",
+    "no_project": "Kein Projekt offen (ariadne project open <slug>).",
 }
 
 

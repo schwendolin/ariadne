@@ -102,8 +102,9 @@ def hosts(conn: Any) -> list[dict[str, Any]]:
         by_host.setdefault(str(s["host_id"]), []).append(s)
     out: list[dict[str, Any]] = []
     for r in conn.execute(
-            "SELECT host_id, label, scope, claim_state, knowledge, access, work, progress, os, addresses_json, "
-            "names_json, services_total, placeholder, conflicts FROM v_host ORDER BY placeholder, label"):
+            "SELECT host_id, label, scope, claim_state, knowledge, access, work, progress, os, "
+            "addresses_json, names_json, services_total, placeholder, conflicts FROM v_host "
+            "ORDER BY placeholder, label"):
         out.append({
             "host_id": r[0], "label": r[1], "scope": r[2], "claim_state": r[3], "knowledge": r[4],
             "access": r[5], "work": r[6], "progress": r[7], "os": r[8], "addresses": _json(r[9], []) or [],
@@ -269,7 +270,8 @@ def search(conn: Any, text: str, limit: int = 50) -> list[dict[str, Any]]:
 
 def _claims(conn: Any) -> dict[str, tuple[Any, ...]]:
     return {str(r[0]): tuple(r[1:]) for r in conn.execute(
-        "SELECT claim_key, state, value_text, round(confidence, 3), subject_identifier, predicate FROM v_claim")}
+        "SELECT claim_key, state, value_text, round(confidence, 3), subject_identifier, predicate "
+        "FROM v_claim")}
 
 
 def reparse_diff(old: Any, new: Any, sample: int = 10) -> dict[str, Any]:

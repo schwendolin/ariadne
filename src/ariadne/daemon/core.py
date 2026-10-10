@@ -37,6 +37,13 @@ Erweiterungen für die Auswertung:
 * :meth:`Daemon.add_mark_hook` ``fn(record, ctx)`` für jedes gespeicherte
   ``term.mark``, ``ctx`` ist ein :class:`~ariadne.daemon.terminal.MarkContext`.
 
+Eingebaut sind zwei Hooks: die Auswertung (:class:`~ariadne.daemon.ingest.IngestService`,
+Pipeline in einem eigenen Thread) und die lokalen Quellen
+(:class:`~ariadne.daemon.sources.LocalSources`: Begleitdateien beim D-Marker,
+``ip route get`` beim C-Marker). Bei bash vor 5.3 trägt erst der D-Marker den
+Befehlstext; Session-Starter (ssh, nc -l) erkennt der Stapel dort nicht live, die
+Auswertung ordnet sie rückwirkend zu.
+
 Fehler in Hooks werden nur mit ihrer Klasse geloggt. Logs enthalten nie Inhalte.
 """
 
@@ -67,6 +74,8 @@ from ariadne.crypto.vault import (
 )
 from ariadne.ctxrules import ContextStack, context_argv
 from ariadne.daemon import hardening
+from ariadne.daemon.ingest import IngestService
+from ariadne.daemon.sources import LocalSources, list_pending
 from ariadne.daemon.terminal import (
     STAGE_KINDS,
     AckEntry,
@@ -78,6 +87,7 @@ from ariadne.daemon.terminal import (
     parse_hello,
 )
 from ariadne.daemon.writer import Writer
+from ariadne.ingest import queries
 from ariadne.paths import Paths, ensure_private_dir
 from ariadne.project.service import (
     GuardrailError,
@@ -88,6 +98,7 @@ from ariadne.project.service import (
     ProjectService,
 )
 from ariadne.secrets.redactor import Redactor
+from ariadne.sources.safeopen import UnsafeFile
 from ariadne.store.api import AppendItem, EventRecord, JournalError
 
 __all__ = ["Daemon", "OpError", "CommitHook", "MarkHook"]
@@ -136,6 +147,8 @@ class Daemon:
         pause_timeout: float = 120.0,
         buffer_limit: int = 16 << 20,
         clock_check: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        ingest: IngestService | bool = True,
+        sources: bool = True,
     ) -> None:
         self.paths = paths
         self.check_peer_comm = check_peer_comm
@@ -160,6 +173,12 @@ class Daemon:
         self._lock = hardening.InstanceLock(paths.runtime_dir / "daemon.lock")
         self._last_slug: str | None = None
         self._started = False
+        self.ingest: IngestService | None = (IngestService() if ingest is True else
+                                              ingest if isinstance(ingest, IngestService) else None)
+        if self.ingest is not None:
+            self.add_commit_hook(self.ingest.on_commit)
+        self.sources = LocalSources(self, routes=sources, companions=sources)
+        self.add_mark_hook(self.sources.on_mark)
         self._update_redactor()
 
     # ================================================================== #
@@ -822,6 +841,8 @@ class Daemon:
             self._close_current("project_switch")
         self.project = new
         self._last_slug = slug
+        if self.ingest is not None:
+            self.ingest.attach(new)
         self._update_redactor()
         if self.rec_on:  # REC lief schon (wartend): im neuen Journal vermerken
             self.writer.add_event(AppendItem("rec.set", {"on": True, "source": "system"}, origin="daemon"))
@@ -846,6 +867,8 @@ class Daemon:
             self.writer.flush_now()
         finally:
             self.writer.drop_carry()
+            if self.ingest is not None:
+                self.ingest.detach()
             self.project = None
             head = p.close()
             self._update_redactor()
@@ -941,6 +964,7 @@ class Daemon:
             "terminals": len(connected),
             "recording": sum(1 for t in connected if t.recording),
             "waiting": sum(1 for t in connected if self.status_of(t) == "waiting"),
+            "ingest": self._ingest_info(),
         }
 
     async def op_init(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1152,9 +1176,154 @@ class Daemon:
         self._end_pause(t, None)
         return {"resumed": was}
 
+    # ---- Auswertung, Ansichten, Entscheide (Ersatz für die Web-UI) --------- #
+    def _ingest_info(self) -> dict[str, Any] | None:
+        ing = self.ingest
+        if ing is None:
+            return None
+        return {"active": ing.active, "runs": ing.runs, "last_error": ing.last_error}
+
+    async def _sync_ingest(self) -> IngestService:
+        """Alles Empfangene speichern (auch den Rückhalt des Redaktors) und auswerten."""
+        self._require_project()
+        ing = self.ingest
+        if ing is None or not ing.active:
+            raise OpError("no_ingest", "Auswertung nicht aktiv")
+        for t in self.terminals.values():
+            if t.recording and t.pause is None:
+                self.writer.add_flush(t)
+        self.writer.flush_now()
+        await ing.sync()
+        return ing
+
+    async def op_show(self, args: dict[str, Any]) -> dict[str, Any]:
+        p = self._require_project()
+        what = _arg_str(args, "what", max_len=32)
+        limit = _arg_int(args, "limit", 1, 5000, 200)
+        if what == "pending":
+            return {"what": what, "items": await asyncio.to_thread(list_pending, p, limit)}
+        views: dict[str, Callable[[Any], Any]] = {
+            "hosts": queries.hosts, "services": queries.services, "inbox": queries.inbox,
+            "keysteps": queries.keysteps, "timeline": lambda c: queries.timeline(c, limit),
+        }
+        fn = views.get(str(what))
+        if fn is None:
+            raise OpError("invalid", "unbekannte Ansicht")
+        ing = await self._sync_ingest()
+        return {"what": what, "items": await ing.query(fn), "ingest": self._ingest_info()}
+
+    async def op_search(self, args: dict[str, Any]) -> dict[str, Any]:
+        text = _arg_str(args, "text", max_len=200) or ""
+        limit = _arg_int(args, "limit", 1, 500, 50)
+        ing = await self._sync_ingest()
+        return {"items": await ing.query(lambda c: queries.search(c, text, limit))}
+
+    async def _resolve(self, fn: Callable[[Any], Any]) -> Any:
+        ing = await self._sync_ingest()
+        try:
+            return await ing.query(fn)
+        except queries.RefError as exc:
+            raise OpError("not_found", str(exc)) from None
+
+    async def op_claim_confirm(self, args: dict[str, Any]) -> dict[str, Any]:
+        ref = _arg_str(args, "ref", max_len=200) or ""
+        keys: list[str] = await self._resolve(lambda c: queries.resolve_confirm(c, ref))
+        for k in keys:
+            self.submit(AppendItem("d.claim.confirm", {"claim_key": k}, origin="cli"))
+        ing = await self._sync_ingest()
+        claims = await ing.query(lambda c: queries.claim_snapshot(c, keys[:50]))
+        return {"confirmed": len(keys), "claims": claims}
+
+    async def op_claim_reject(self, args: dict[str, Any]) -> dict[str, Any]:
+        ref = _arg_str(args, "ref", max_len=200) or ""
+        reason = _arg_str(args, "reason", required=False, max_len=500)
+        key: str = await self._resolve(lambda c: queries.resolve_claim(c, ref))
+        header = {"claim_key": key, "reason": reason} if reason else {"claim_key": key}
+        self.submit(AppendItem("d.claim.reject", header, origin="cli"))
+        ing = await self._sync_ingest()
+        return {"rejected": 1, "claims": await ing.query(lambda c: queries.claim_snapshot(c, [key]))}
+
+    def op_keystep_mark(self, args: dict[str, Any]) -> dict[str, Any]:
+        p = self._require_project()
+        step = _arg_str(args, "step", max_len=16)
+        if step not in KEYSTEPS:
+            raise OpError("invalid", "Schritt: foothold, privesc, pivot oder loot")
+        note = _arg_str(args, "note", required=False, max_len=500)
+        raw_host = _arg_str(args, "host", required=False, max_len=253)
+        try:
+            host = normalize_host(raw_host) if raw_host and raw_host.strip() else None
+        except ValueError as exc:
+            raise OpError("invalid", str(exc)) from None
+        tid = _arg_str(args, "terminal_id", required=False, max_len=64)
+        t = self.terminals.get(tid) if tid else None
+        header: dict[str, Any] = {"step": step}
+        item_tid = item_off = None
+        if t is not None and t.bound_project_id in (None, p.info.id):
+            item_tid, item_off = t.terminal_id, t.recv_end
+            header.update(terminal_id=item_tid, stream_off=item_off)
+            if host is None:
+                top = t.stack.top().host
+                host = top if top and top != "local" else None
+        if host:
+            header["host"] = host
+        if note:
+            header["note"] = note
+        self.submit(AppendItem("d.keystep.mark", header, origin="cli", terminal_id=item_tid,
+                               stream_off=item_off))
+        self.writer.flush_now()
+        return {"step": step, "host": host, "terminal": item_tid is not None}
+
+    async def op_import(self, args: dict[str, Any]) -> dict[str, Any]:
+        self._require_project()
+        path = _arg_str(args, "path", max_len=4096) or ""
+        raw_host = _arg_str(args, "host", required=False, max_len=253)
+        try:
+            host = normalize_host(raw_host) if raw_host and raw_host.strip() else None
+        except ValueError as exc:
+            raise OpError("invalid", str(exc)) from None
+        try:
+            res = await self.sources.import_file(path, host)
+        except UnsafeFile as exc:
+            raise OpError("unsafe_file", _UNSAFE.get(exc.reason, "Datei abgelehnt")) from None
+        self.writer.flush_now()
+        log.info("Datei importiert")
+        return res
+
+    async def op_reparse(self, args: dict[str, Any]) -> dict[str, Any]:
+        ing = await self._sync_ingest()
+        return await ing.reparse()
+
     def op_shutdown(self, args: dict[str, Any]) -> dict[str, Any]:
         asyncio.get_running_loop().call_soon(self._stop.set)
         return {"stopping": True}
+
+
+_UNSAFE = {
+    "path": "Pfad ungültig (absolut, ohne .. und ohne leere Teile)",
+    "symlink": "Symlink im Pfad: Ariadne folgt nie Symlinks",
+    "symlink_or_not_dir": "Symlink oder kein Ordner im Pfad",
+    "missing": "Datei nicht gefunden",
+    "permission": "keine Leserechte",
+    "not_regular": "keine reguläre Datei",
+    "hardlink": "Datei hat mehrere harte Links",
+    "owner": "Datei gehört weder dir noch root",
+    "other_fs": "Datei liegt auf einem anderen Dateisystem",
+    "too_large": "Datei zu gross",
+    "blocked": "Pfad liegt in der Sperrliste (~/.ssh, ~/.gnupg, ~/.config, Ariadne-Daten, Browser, Keyrings)",
+    "vault": "Pfad liegt in einem .vault",
+    "no_project": "kein Projekt offen",
+    "project_changed": "Projekt wurde während des Imports gewechselt",
+    "open_failed": "Datei lässt sich nicht öffnen",
+}
+
+
+def _arg_int(args: dict[str, Any], key: str, lo: int, hi: int, default: int) -> int:
+    v = args.get(key)
+    if v is None:
+        return default
+    if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi:
+        raise OpError("invalid", f"Argument ungültig: {key}")
+    return v
 
 
 def _origin(source: str) -> str:
@@ -1216,5 +1385,12 @@ _OPS: dict[str, Callable[[Daemon, dict[str, Any]], Any]] = {
     "secrets.remove": Daemon.op_secrets_remove,
     "pause_terminal": Daemon.op_pause_terminal,
     "resume_terminal": Daemon.op_resume_terminal,
+    "show": Daemon.op_show,
+    "search": Daemon.op_search,
+    "claim.confirm": Daemon.op_claim_confirm,
+    "claim.reject": Daemon.op_claim_reject,
+    "keystep.mark": Daemon.op_keystep_mark,
+    "import": Daemon.op_import,
+    "reparse": Daemon.op_reparse,
     "shutdown": Daemon.op_shutdown,
 }
