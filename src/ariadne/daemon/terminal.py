@@ -50,12 +50,17 @@ class Pause:
 
 @dataclass(frozen=True)
 class MarkContext:
-    """Kontext eines ``term.mark`` zum Zeitpunkt der Verarbeitung (für Mark-Hooks)."""
+    """Kontext eines ``term.mark`` zum Zeitpunkt der Verarbeitung (für Mark-Hooks).
+
+    ``stack`` und ``local`` gelten nach dem Marker, ``local_before`` davor: bei
+    einem C-Marker sagt es, ob der Befehl auf Kali eingegeben wurde.
+    """
 
     terminal_id: str
     project_id: str
     stack: tuple[dict[str, Any], ...]
     local: bool
+    local_before: bool = True
 
 
 @dataclass
@@ -149,7 +154,7 @@ def parse_hello(obj: dict[str, Any]) -> dict[str, Any]:
     return {
         "terminal_id": tid,
         "tty": _opt_str(obj, "tty", 128),
-        "shell": _opt_str(obj, "shell", 64) or "unknown",
+        "shell": _opt_str(obj, "shell", 256) or "unknown",
         "term": _opt_str(obj, "term", 64),
         "rows": _int(obj, "rows", 0, 1000),
         "cols": _int(obj, "cols", 0, 1000),

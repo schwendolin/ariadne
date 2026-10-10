@@ -79,7 +79,7 @@ def _client(paths: Paths, *, start: bool = True) -> CtlClient:
     from ariadne.daemon.main import spawn_detached
 
     if not spawn_detached(paths, timeout=3.0):
-        raise CliError("Daemon liess sich nicht starten (siehe ~/.local/state/ariadne/ariadned.log)")
+        raise CliError(f"Daemon liess sich nicht starten (siehe {paths.daemon_log})")
     return client
 
 

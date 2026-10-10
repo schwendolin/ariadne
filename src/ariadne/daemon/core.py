@@ -65,7 +65,7 @@ from ariadne.crypto.vault import (
     WrongPassphrase,
     valid_label,
 )
-from ariadne.ctxrules import ContextStack, split_command
+from ariadne.ctxrules import ContextStack, context_argv
 from ariadne.daemon import hardening
 from ariadne.daemon.terminal import (
     STAGE_KINDS,
@@ -420,7 +420,7 @@ class Daemon:
             t.bound_slug = p.info.slug
         tid = t.terminal_id
         if p.info.id not in t.opened_in:
-            end = p.journal.stream_end(tid) if hasattr(p.journal, "stream_end") else 0
+            end = p.journal.stream_end(tid)
             t.recv_end = max(t.recv_end, end)
             t.stored_end = max(t.stored_end, end)
             header = {
@@ -633,18 +633,19 @@ class Daemon:
         off = header.get("stream_off")
         mark_ctx: MarkContext | None = None
         before = t.stack.snapshot()
+        local_before = t.stack.is_local()
         if kind == "term.mark":
             mark = header["mark"]
             if mark == "C":
                 cmd = header.get("cmd_expanded") or header.get("cmd_typed") or ""
-                t.stack.on_command_start(split_command(cmd), int(off or 0))
+                t.stack.on_command_start(context_argv(cmd), int(off or 0))
             elif mark == "D" and header.get("fg_shell"):
                 t.stack.on_command_end(header.get("exit"), int(off or 0))
             if mark in ("A", "D") and header.get("fg_shell") and t.pause is not None:
                 self._end_pause(t, off)
             if self.project is not None:
                 mark_ctx = MarkContext(t.terminal_id, self.project.info.id, tuple(t.stack.snapshot()),
-                                       t.stack.is_local())
+                                       t.stack.is_local(), local_before)
         elif kind == "term.ctx_snapshot":
             t.stack = ContextStack.from_snapshot(header["stack"])
         elif kind == "term.resize":

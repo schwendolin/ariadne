@@ -62,7 +62,7 @@ def spawn_detached(paths: Paths | None = None, timeout: float = 3.0) -> bool:
     if CtlClient(paths.ctl_sock).ping():
         return True
     ensure_private_dir(paths.state_dir)
-    log_path = paths.state_dir / "ariadned.log"
+    log_path = paths.daemon_log
     fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     env = {k: v for k, v in os.environ.items() if k not in ("ARIADNE_TERMINAL_ID", "NOTIFY_SOCKET")}
     try:

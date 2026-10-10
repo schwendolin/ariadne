@@ -58,6 +58,11 @@ class Paths:
         return self.config_dir / "config.toml"
 
     @property
+    def daemon_log(self) -> Path:
+        """Log des abgekoppelt gestarteten Daemons (nur Metadaten, nie Inhalte)."""
+        return self.state_dir / "ariadned.log"
+
+    @property
     def disable_file(self) -> Path:
         """Existiert diese Datei, startet der Shim nicht (Notausgang)."""
         return self.config_dir / "disable"

@@ -58,6 +58,7 @@ __all__ = [
 ]
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+_DERIVED_RE = re.compile(r"^derived(\.[a-z0-9-]{1,32})?\.db$")
 WORKSPACE_DIRS = ("scans", "loot", "imports", "screenshots", "exports")
 MANIFEST_FORMAT = "ariadne.project-manifest/1"
 SLOT_FORMAT = "ariadne.project-slot/1"
@@ -149,8 +150,11 @@ class OpenProject:
             raise ProjectError("Projekt ist geschlossen")
         return open_db(self.info.vault / name, bytes(self._db_key), readonly=readonly)
 
-    def connect_derived(self, readonly: bool = False) -> sqlcipher3.Connection:
-        return self._db("derived.db", readonly)
+    def connect_derived(self, readonly: bool = False, *, name: str = "derived.db") -> sqlcipher3.Connection:
+        """Verbindung auf ``derived.db`` oder eine Arbeitskopie ``derived.<x>.db`` (Reparse)."""
+        if not _DERIVED_RE.match(name):
+            raise ProjectError("ungültiger Dateiname für derived.db")
+        return self._db(name, readonly)
 
     def connect_state(self, readonly: bool = False) -> sqlcipher3.Connection:
         return self._db("state.db", readonly)

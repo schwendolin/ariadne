@@ -47,7 +47,13 @@ BASE_CONFIDENCE: Mapping[Trust, float] = {
 
 @dataclass(frozen=True)
 class Span:
-    """Fundstelle in der Einheit. Zeilen sind 0-basiert, ``line_end`` inklusiv."""
+    """Fundstelle in der Einheit. Zeilen sind 0-basiert, ``line_end`` inklusiv.
+
+    Gezählt wird in ``UnitView.lines``, also ohne Prompt-Echo und ohne Zeilen
+    aus dem Alternate Screen. In ``derived.db`` entspricht das ``unit_line.idx``
+    (bei verborgenen Zeilen NULL); ``unit_line.pos`` ist nur die
+    Anzeige-Reihenfolge. Belege verweisen deshalb immer über ``idx``.
+    """
 
     line_start: int
     line_end: int
@@ -67,7 +73,10 @@ class Ref:
 
     * ``ip:<adressraum>/<adresse>``    z. B. ``ip:default/10.10.10.5``
     * ``mac:<aa:bb:..>``, ``fqdn:<name>``, ``netbios:<NAME>``
-    * ``sshkey:<typ>:<sha256-fingerprint>``, ``sid:<S-1-5-...>``
+    * ``sshkey:<typ>:<sha256-fingerprint>`` oder ``sshkey:<typ>:MD5:<aa:bb:..>``
+      (die nmap-Normalausgabe kennt nur MD5); ``<typ>`` ist ``dsa``, ``rsa``,
+      ``ecdsa`` oder ``ed25519``
+    * ``sid:<S-1-5-...>``
     * ``ctx:host``                     Host der aktuellen Kontextspanne
     * ``svc:<host-kennung>|<proto>/<port>``
     * ``url:<normalisierte URL>``
@@ -198,7 +207,13 @@ class Line:
 class UnitView(Protocol):
     """Nur lesbare Sicht auf eine Einheit.
 
-    ``lines`` enthält bei Befehlen und Segmenten keine ``prompt_echo``-Zeilen.
+    ``lines`` enthält bei Befehlen und Segmenten keine ``prompt_echo``-Zeilen
+    und keine Zeilen aus dem Alternate Screen.
+
+    Optional (nicht Teil des Protokolls, Zugriff nur per ``getattr``):
+    ``terminal_id``, ``cmd_id``, ``start_off`` und ``end_off``. Die Einheiten
+    der Pipeline (``ariadne.ingest.units.Unit``) haben sie; die Projektion
+    nutzt sie für Kontext und Belege.
     """
 
     unit_id: str

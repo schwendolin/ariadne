@@ -3,7 +3,7 @@
 Die echte Implementierung liegt in ``ariadne.store.journal`` (SQLCipher) und
 ``ariadne.store.blobs`` (age). ``ariadne.store.memory`` enthält Fakes mit
 identischem Verhalten für Tests anderer Teilsysteme. Beide Implementierungen
-müssen die Vertragstests in ``tests/unit/test_store_contract.py`` bestehen.
+müssen die Vertragstests in ``tests/core/test_store_contract.py`` bestehen.
 """
 
 from __future__ import annotations
@@ -104,6 +104,14 @@ class Journal(Protocol):
     def get(self, seq: int) -> EventRecord | None: ...
 
     def head(self) -> tuple[int, bytes]: ...
+
+    def stream_end(self, terminal_id: str) -> int:
+        """Ende des gespeicherten Stroms eines Terminals (0, wenn nichts gespeichert)."""
+        ...
+
+    def verify_head(self) -> bool:
+        """Schnelle Prüfung: Hash des letzten Events nachrechnen (vollständig: :meth:`verify`)."""
+        ...
 
     def verify(self) -> VerifyReport: ...
 

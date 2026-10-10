@@ -28,6 +28,8 @@ __all__ = [
     "Resume",
     "Classification",
     "split_command",
+    "command_argvs",
+    "context_argv",
     "strip_prefixes",
     "classify",
     "ContextStack",
@@ -106,6 +108,49 @@ def split_command(cmd: str) -> list[str]:
             break
         argv.append(tok)
     return argv
+
+
+def command_argvs(cmd: str) -> list[list[str]]:
+    """Alle einfachen Befehle einer Zeile (``stty raw -echo; fg`` ergibt zwei).
+
+    Umleitungsziele (``> datei``) gehören nicht zu argv.
+    """
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=";&|()<>")
+        lex.whitespace_split = True
+        lex.commenters = ""
+        tokens = list(lex)
+    except ValueError:
+        return [cmd.split()] if cmd.split() else []
+    out: list[list[str]] = [[]]
+    redirect = False
+    for tok in tokens:
+        if tok and set(tok) <= set(";&|()"):
+            out.append([])
+            redirect = False
+        elif tok and set(tok) <= set("<>"):
+            redirect = True
+        elif redirect:
+            redirect = False
+        else:
+            out[-1].append(tok)
+    return [c for c in out if c]
+
+
+def context_argv(cmd: str) -> list[str]:
+    """argv, das für den Kontext-Stapel zählt (``ContextStack.on_command_start``).
+
+    Normalerweise der erste einfache Befehl (:func:`split_command`). Ergibt der
+    keine Regel und ist ein späterer Befehl ``fg`` bzw. ``%n``, zählt dieser:
+    beim Shell-Upgrade steht ``fg`` hinten (``stty raw -echo; fg``), sonst bliebe
+    die angehaltene Remote-Stufe angehalten.
+    """
+    first = split_command(cmd)
+    if classify(first) is None:
+        for argv in command_argvs(cmd)[1:]:
+            if isinstance(classify(argv), Resume):
+                return argv
+    return first
 
 
 _PREFIX_WITH_ARG = {

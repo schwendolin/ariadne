@@ -35,12 +35,11 @@ from __future__ import annotations
 import bisect
 import hashlib
 import json
-import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ariadne.ctxrules import ContextStack, Resume, Stage, classify, split_command
+from ariadne.ctxrules import ContextStack, Stage, context_argv, split_command
 from ariadne.ids import cmd_id as make_cmd_id
 
 __all__ = [
@@ -299,41 +298,9 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
 # --------------------------------------------------------------------------- Kontext
 
 
-def _simple_commands(text: str) -> list[list[str]]:
-    """Alle einfachen Befehle einer Zeile (``stty raw -echo; fg`` -> zwei)."""
-    try:
-        lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
-        lex.whitespace_split = True
-        lex.commenters = ""
-        tokens = list(lex)
-    except ValueError:
-        return [text.split()]
-    out: list[list[str]] = [[]]
-    for tok in tokens:
-        if tok and set(tok) <= set(";&|()"):
-            out.append([])
-        elif tok and set(tok) <= set("<>"):
-            out[-1].append("\0")  # Umleitungsziel folgt, nicht Teil von argv
-        elif out[-1][-1:] == ["\0"]:
-            out[-1].pop()
-        else:
-            out[-1].append(tok)
-    return [c for c in out if c]
-
-
 def _argv_for_context(block: CmdBlock) -> list[str]:
-    """argv für ``ContextStack.on_command_start``.
-
-    ``ctxrules.split_command`` sieht nur den ersten einfachen Befehl. Beim
-    Shell-Upgrade steht ``fg`` aber hinten (``stty raw -echo; fg``); ohne
-    Sonderfall bliebe die angehaltene Remote-Stufe angehalten.
-    """
-    argv = list(block.argv)
-    if block.text and classify(argv) is None:
-        for cmd in _simple_commands(block.text)[1:]:
-            if isinstance(classify(cmd), Resume):
-                return cmd
-    return argv
+    """argv für ``ContextStack.on_command_start`` (siehe ``ctxrules.context_argv``)."""
+    return context_argv(block.text) if block.text else list(block.argv)
 
 
 class _Tracked:

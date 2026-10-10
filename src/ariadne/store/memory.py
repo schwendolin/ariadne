@@ -135,6 +135,28 @@ class MemoryJournal:
             return 0, chain.genesis_hash(self.project_id)
         return len(self._rows), self._rows[-1].rec.hash
 
+    def stream_end(self, terminal_id: str) -> int:
+        end = 0
+        for row in self._rows:
+            r = row.rec
+            if r.kind == "term.out" and r.terminal_id == terminal_id and r.stream_off is not None:
+                end = max(end, r.stream_off + int(r.header.get("length", 0)))
+        return end
+
+    def verify_head(self) -> bool:
+        if not self._rows:
+            return True
+        row = self._rows[-1]
+        r = row.rec
+        prev = self._rows[-2].rec.hash if len(self._rows) > 1 else chain.genesis_hash(self.project_id)
+        h = chain.event_hash(
+            prev, seq=r.seq, event_id=r.id, layer=r.layer, kind=r.kind, ts_utc_ns=r.ts_utc_ns,
+            mono_ns=r.mono_ns, boot_id=r.boot_id, operator_id=r.operator_id, origin=r.origin,
+            terminal_id=r.terminal_id, stream_off=r.stream_off, header_json=row.header_json,
+            body_commit=row.commit,
+        )
+        return h == r.hash
+
     def verify(self) -> VerifyReport:
         problems: list[str] = []
         prev = chain.genesis_hash(self.project_id)

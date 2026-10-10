@@ -303,7 +303,17 @@ class DEntitySplit(_M):
 
 
 class DCtxSet(_M):
-    """Kontext für einen Offset-Bereich setzen (auch rückwirkend)."""
+    """Kontext für einen Offset-Bereich setzen (auch rückwirkend).
+
+    Wirkt auf die Stufe, die bei ``from_off`` oben liegt (bzw. die Stufe
+    ``depth``), ab ``from_off`` bis ``to_off``; ``to_off=None`` heisst: bis
+    diese Stufe endet. Liegt oben Kali, legt der Entscheid wie
+    ``ContextStack.set_top`` eine neue Stufe an. Bei Überschneidungen gewinnt
+    der spätere Entscheid (höhere ``seq``). ``host`` ist die eingegebene
+    Kennung (``ip:default/<ip>``, ``name:<name>``). Die Projektion v0.1
+    überträgt den Host vereinfachend auf die ganze Stufe, die ``from_off``
+    enthält (eine Remote-Sitzung gehört zu genau einem Host).
+    """
 
     terminal_id: str
     from_off: int = Field(ge=0)

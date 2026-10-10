@@ -56,6 +56,10 @@ class AgeBlobStore:
         self._recipient = recipient
         self._identity = identity
 
+    def with_connection(self, conn: sqlcipher3.Connection) -> AgeBlobStore:
+        """Gleicher Store über eine andere Verbindung (z. B. nur lesend in einem anderen Thread)."""
+        return AgeBlobStore(self.root, conn, recipient=self._recipient, identity=self._identity)
+
     def _path(self, blob_id: str) -> Path:
         return self.root / blob_id[:2] / f"{blob_id}.age"
 

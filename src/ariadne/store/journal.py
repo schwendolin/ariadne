@@ -34,7 +34,7 @@ from ariadne.store.api import (
     VerifyReport,
 )
 
-__all__ = ["SCHEMA_VERSION", "SqlCipherJournal", "init_schema", "read_boot_id"]
+__all__ = ["SCHEMA_VERSION", "SqlCipherJournal", "JournalReader", "init_schema", "read_boot_id"]
 
 SCHEMA_VERSION = 1
 
@@ -407,6 +407,30 @@ class SqlCipherJournal:
         if vacuum:
             self.conn.execute("VACUUM")
             self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+
+    def close(self) -> None:
+        try:
+            self.conn.close()
+        except sqlcipher3.Error:
+            pass
+
+
+class JournalReader:
+    """Nur lesender Zugriff auf ``journal.db`` über eine eigene Verbindung.
+
+    Für Threads ausserhalb des Daemon-Loops (Auswertung): Die Verbindung von
+    :class:`SqlCipherJournal` ist nicht threadsicher. ``conn`` stammt in der
+    Regel aus ``OpenProject.connect_journal()`` (``mode=ro``) und gehört dem
+    Thread, der sie geöffnet hat. Schreiben ist nicht möglich.
+    """
+
+    def __init__(self, conn: sqlcipher3.Connection) -> None:
+        self.conn = conn
+
+    _record = SqlCipherJournal._record
+    iter_events = SqlCipherJournal.iter_events
+    get = SqlCipherJournal.get
+    stream_end = SqlCipherJournal.stream_end
 
     def close(self) -> None:
         try:

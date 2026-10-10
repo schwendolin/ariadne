@@ -35,7 +35,7 @@ from ariadne._shim.ringbuf import FrameRing, capacity_from_env
 from ariadne._shim.scanner import AltScreen, Forged, Marker, Osc52, OutputScanner, ScanResult, Title
 from ariadne._shim.title import Link, TitleWriter, compose_title
 from ariadne._shim.transport import Transport
-from ariadne.ctxrules import ContextStack, Stage, split_command
+from ariadne.ctxrules import ContextStack, Stage, context_argv
 from ariadne.paths import default_paths
 
 __all__ = ["Shim"]
@@ -538,7 +538,7 @@ class Shim:
         self._emit("term.mark", ev)
         before = self.stack.label()
         if v.marker.mark == "C" and ev.get("cmd_typed"):
-            self.stack.on_command_start(split_command(ev["cmd_typed"]), item.stream_off)
+            self.stack.on_command_start(context_argv(ev["cmd_typed"]), item.stream_off)
         elif v.marker.mark == "D" and v.fg_shell:
             self.stack.on_command_end(ev.get("exit"), item.stream_off)
         if self.stack.label() != before:

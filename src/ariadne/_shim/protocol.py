@@ -16,11 +16,26 @@ Shim an Daemon
            ohne entfernte Ariadne-Marker und ohne gefilterte Sequenzen.
     EVENT  JSON  {"seq": int, "kind": <Event-Art aus ariadne.events>, ...Felder}
            Erlaubte Arten: term.mark, term.resize, term.ctx_snapshot, term.gap,
-           term.close, term.osc52_blocked, term.marker_forged, und die
-           Hotkey-Anfragen "req.rec" {"on": bool|null (toggle)}, "req.ctx.set",
-           "req.ctx.push", "req.ctx.pop", "req.keystep", "req.shot".
-           ``req.*`` sind Anfragen, aus denen der Daemon Events bzw. Entscheide
-           macht. Der Shim setzt nie selbst eine Operator-ID.
+           term.close, term.osc52_blocked, term.marker_forged. Ohne ``seq`` und
+           ``kind`` entsprechen die Felder genau dem Modell in ``ariadne.events``
+           (inklusive ``terminal_id``, das der Daemon zur Sicherheit überschreibt).
+           ``term.gap``: ``stream_off`` ist der Beginn der Lücke, ``bytes_lost``
+           ihre Länge; danach geht der Strom bei ``stream_off + bytes_lost`` weiter.
+           Dazu die Hotkey-Anfragen (``req.*``), aus denen der Daemon Events
+           bzw. Entscheide macht:
+             "req.rec"      {"on": bool|null}  (null schaltet um)
+             "req.ctx.set"  {"host"?, "user"?, "stage_kind"?}  oberste Stufe setzen
+             "req.ctx.push" {"host"?, "user"?, "stage_kind"?}  neue Stufe
+             "req.ctx.pop"  {}                                 oberste Stufe schliessen
+             "req.keystep"  {"step": foothold|privesc|pivot|loot, "host"?, "note"?}
+             "req.shot"     {"mode"?: window|monitor|region}
+           Die Stufenart heisst ``stage_kind`` (``kind`` ist die Event-Art);
+           ``ctx_kind`` wird ebenfalls angenommen. ``host`` ist der eingegebene
+           Text (IP oder Name); der Daemon normalisiert zu ``ip:default/<ip>``
+           bzw. ``name:<name>`` und löst nie auf. Optional schickt der Shim bei
+           jedem ``req.*`` ``terminal_id`` und ``stream_off`` mit; der Daemon
+           ignoriert beide und nimmt seine eigenen Werte. Der Shim setzt nie
+           selbst eine Operator-ID.
     BYE    JSON  {"exit_code": int|null}
 
 Daemon an Shim
@@ -28,11 +43,25 @@ Daemon an Shim
                   "project_id": str|null, "profile": "lab"|"customer"|null,
                   "bound_project_id": str|null, "stack": [Stage-Dicts],
                   "suggestion": str|null, "hosts": [str], "title_extra": str|null}
+           ``offline`` sendet der Daemon nie; der Shim nutzt den Wert intern
+           (Daemon nicht erreichbar) und behandelt einen empfangenen Wert wie
+           «letzten bekannten Zustand beibehalten». ``title_extra`` ist eine
+           kurze Rückmeldung (etwa 5 s), z. B. ``REC pausiert: <slug>``.
     ACK    JSON  {"seq": int}  bis einschliesslich dieser Sequenz gespeichert.
 
 Sequenznummern: OUT und EVENT teilen sich eine fortlaufende ``seq`` pro
 Terminal (ab 1). Nach einem Reconnect sendet der Shim alles ab
-``resume_from_seq`` erneut; der Daemon verwirft Duplikate idempotent.
+``resume_from_seq`` erneut; der Daemon verwirft Rahmen mit ``seq`` kleiner
+oder gleich der höchsten empfangenen ``seq`` idempotent (und wiederholt nur
+das letzte ACK).
+
+ACK-Semantik: Der Daemon bestätigt erst, wenn ein Rahmen und alle davor
+gespeichert (oder bewusst verworfen, etwa bei REC aus) sind. Im Zustand
+``waiting`` (Projekt gesperrt) puffert er im RAM und bestätigt erst nach dem
+Speichern. Wegen des Rückhalts des Redaktors kann ein ACK um höchstens die
+Länge des längsten eigenen Secrets minus eins hinterherhinken, bis das nächste
+EVENT oder der Leerlauf-Flush kommt. EVENTs müssen nach den vorangehenden
+OUT-Bytes gesendet werden, damit Journal- und Strom-Reihenfolge stimmen.
 """
 
 from __future__ import annotations
