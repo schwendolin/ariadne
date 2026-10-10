@@ -15,7 +15,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ariadne.ingest.normalizer import NormLine, sgr_from_json
+from ariadne.ingest.normalizer import NormLine, colmap_to_json, sgr_from_json, sgr_to_json
+from ariadne.ingest.seg_activity import write_activity
 from ariadne.ingest.seg_stream import INF, TermStream
 from ariadne.ingest.segmenter import Layout, UnitPlan
 from ariadne.ingest.units import Unit, line_visible
@@ -138,7 +139,7 @@ def sync_layout(conn: Any, ts: TermStream, layout: Layout, *, activity: Any = No
         else:
             conn.execute("DELETE FROM ctx_span WHERE span_id = ?", (key[2:],))
         del prev[key]
-    if not prev.get("_loaded"):
+    if not ts.db_checked:
         # nach einem Neustart: Reste aus der Datenbank entfernen
         ids = {b.cmd_id for b in layout.blocks}
         for (cid,) in conn.execute("SELECT cmd_id FROM cmd_block WHERE terminal_id = ?", (tid,)).fetchall():
@@ -149,14 +150,12 @@ def sync_layout(conn: Any, ts: TermStream, layout: Layout, *, activity: Any = No
         for (sid,) in conn.execute("SELECT span_id FROM ctx_span WHERE terminal_id = ?", (tid,)).fetchall():
             if sid not in sids:
                 conn.execute("DELETE FROM ctx_span WHERE span_id = ?", (sid,))
-        prev["_loaded"] = {"v": 1}
+        ts.db_checked = True
     if activity is not None:
         by_id = {b.cmd_id: b for b in layout.blocks}
         for cid in res.changed_blocks:
             row = activity(by_id[cid], layout)
             if row is not None:
-                from ariadne.ingest.seg_activity import write_activity
-
                 write_activity(conn, row)
     # Einheiten
     old = {
@@ -207,8 +206,6 @@ def store_file_lines(conn: Any, unit_id: str, lines: Sequence[NormLine]) -> tupl
     idx = 0
     for pos, ln in enumerate(lines):
         vis = line_visible(ln.flags)
-        from ariadne.ingest.normalizer import colmap_to_json, sgr_to_json
-
         rows.append((unit_id, pos, idx if vis else None, ln.text, ln.raw_start, ln.raw_end, ln.flags,
                      sgr_to_json(ln.sgr), colmap_to_json(ln.colmap)))
         if vis:

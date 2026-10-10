@@ -27,11 +27,11 @@ import importlib
 import json
 import logging
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ariadne.ingest.db import apply_schema, get_meta, get_watermark, set_meta, set_watermark
+from ariadne.ingest.db import apply_schema, get_watermark, set_meta, set_watermark
 from ariadne.ingest.runner import InProcessRunner, Runner, RunResult
 from ariadne.ingest.seg_activity import activity_row, add_route
 from ariadne.ingest.seg_stream import TermStream, seg_event_from_record
@@ -47,7 +47,6 @@ log = logging.getLogger("ariadne.ingest")
 
 SILENCE_NS = 10 * 60 * 1_000_000_000
 WATERMARK = "ingest"
-_BATCH_COMMIT = 5000  # Events zwischen zwei Zwischenständen bei grossen Rückständen
 
 
 @dataclass
@@ -120,6 +119,10 @@ class Pipeline:
         self.needs_reparse = False
 
     # ------------------------------------------------------------------ öffentlich
+    @property
+    def can_parse(self) -> bool:
+        return self.projector is not None and bool(self.registry)
+
     @property
     def watermark(self) -> int:
         return get_watermark(self.conn, WATERMARK)
@@ -228,6 +231,8 @@ class Pipeline:
                     stats.units_removed += 1
                     if self.projector is not None:
                         self.projector.clear_unit(uid)
+            if not self.can_parse:
+                continue
             for uid, sig, parsed in self.conn.execute(
                     "SELECT unit_id, sig, parsed_sig FROM unit WHERE terminal_id = ? AND state = 'final' "
                     "AND (parsed_sig IS NULL OR parsed_sig != sig) ORDER BY start_off", (tid,)).fetchall():
@@ -313,7 +318,7 @@ class Pipeline:
     # ------------------------------------------------------------------ Parsen
     def _parse(self, unit: Unit, sig: str, previous: str | None, stats: Stats, *,
                provisional: bool = False) -> None:
-        if self.projector is None or not self.registry:
+        if not self.can_parse:
             return
         conn = self.conn
         seq_row = conn.execute("SELECT event_seq FROM unit WHERE unit_id = ?", (unit.unit_id,)).fetchone()
@@ -344,11 +349,3 @@ class Pipeline:
             conn.execute("UPDATE unit SET parsed_sig = ? WHERE unit_id = ?", (sig, unit.unit_id))
             stats.units_parsed += 1
 
-
-def versions(conn: Any) -> dict[str, str | None]:
-    """Kurzinfo für ``ariadne doctor`` und das Reparse-Angebot."""
-    return {k: get_meta(conn, k) for k in ("normalizer_version", "ontology_version", "parsers", "generation")}
-
-
-def _unused(_: Iterable[Any]) -> None:  # pragma: no cover - hält Importe für Typprüfer stabil
-    pass

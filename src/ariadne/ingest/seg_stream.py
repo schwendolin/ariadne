@@ -83,6 +83,7 @@ class TermStream:
         self.new_lines = False
         self.min_new_raw: int | None = None
         self.prev_rows: dict[str, dict[str, Any]] = {}
+        self.db_checked = False
         self._replaying = False
 
     # ------------------------------------------------------------------ Eingang

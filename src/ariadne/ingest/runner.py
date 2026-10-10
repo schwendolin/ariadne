@@ -294,7 +294,7 @@ class SubprocessRunner:
         preexec = _limits(self.mem_limit, self.cpu_limit) if threading.active_count() == 1 else None
         proc = subprocess.Popen(  # noqa: S603 - fester Interpreter, keine Shell
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
-            close_fds=True, cwd="/", preexec_fn=preexec,  # noqa: PLW1509
+            close_fds=True, cwd="/", preexec_fn=preexec,
         )
         deadline = time.monotonic() + self.timeout
         try:
