@@ -350,16 +350,19 @@ class NmapXmlParser:
                 continue
             fp = ssh_fingerprint(m["key"]) if m.get("key") else None
             md5 = _md5_colons(m.get("fingerprint", ""))
-            if fp is None and md5 is None:
-                continue
-            ident = fp or f"MD5:{md5}"
             attrs = {"bits": m["bits"]} if m.get("bits", "").isdigit() else {}
             if md5:
                 attrs["md5"] = md5
             if svc is not None:
                 attrs["service"] = svc.key
-                yield Obs(svc, "service.ssh_hostkey", f"{ktype} {ident}", span, attrs=attrs)
-            yield Obs(host, "host.sshkey", Ref.sshkey(ktype, ident), span, attrs=attrs)
+            # SHA256 wie ssh-keygen; MD5 zusätzlich, damit Funde aus der Normalausgabe
+            # (dort gibt es nur MD5) dieselbe Kennung ergeben
+            for ident in (fp, f"MD5:{md5}" if md5 else None):
+                if ident is None:
+                    continue
+                if svc is not None:
+                    yield Obs(svc, "service.ssh_hostkey", f"{ktype} {ident}", span, attrs=attrs)
+                yield Obs(host, "host.sshkey", Ref.sshkey(ktype, ident), span, attrs=attrs)
 
     def _smb_os(self, s: Any, host: Ref, span: Span) -> Iterator[Obs]:
         m = _elem_map(s)

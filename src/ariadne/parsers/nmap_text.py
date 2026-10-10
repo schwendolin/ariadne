@@ -141,6 +141,7 @@ class NmapTextParser:
                     yield Mention("ip", ip, Span(i, i), {"state": "down", "source": "nmap.text", **sus})
                     continue
                 host = Ref.ip(ip)
+                yield Obs(host, "host.address", ip, Span(i, i), attrs=sus)
                 if name:
                     yield Obs(host, "host.name", name, Span(i, i), attrs={"type": "report", **sus})
                 continue

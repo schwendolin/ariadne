@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS unit (
   sig         TEXT NOT NULL,
   parsed_sig  TEXT,
   line_count  INTEGER NOT NULL DEFAULT 0,
+  vis_count   INTEGER NOT NULL DEFAULT 0,
   event_seq   INTEGER
 );
 CREATE INDEX IF NOT EXISTS unit_term_idx ON unit(terminal_id, start_off);
@@ -198,6 +199,7 @@ CREATE TABLE IF NOT EXISTS seg_term (
   last_out_ns  INTEGER,
   closed       INTEGER NOT NULL DEFAULT 0,
   norm_off     INTEGER,          -- letzte Grenze, an der der Normalizer zurückgesetzt wurde
+  norm_seq     INTEGER NOT NULL DEFAULT 0,
   norm_n       INTEGER NOT NULL DEFAULT 0,
   norm_prompt  INTEGER NOT NULL DEFAULT 0,
   next_n       INTEGER NOT NULL DEFAULT 0

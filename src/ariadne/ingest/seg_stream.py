@@ -24,9 +24,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from ariadne.ingest.normalizer import NormLine, Normalizer, colmap_to_json, sgr_to_json
+from ariadne.ingest.normalizer import Normalizer, NormLine, colmap_to_json, sgr_to_json
 from ariadne.ingest.segmenter import SEG_KINDS, SegEvent, event_offset
-from ariadne.ingest.units import line_visible
 
 __all__ = ["TermStream", "BOUNDARY_KINDS", "INF"]
 
@@ -117,8 +116,8 @@ class TermStream:
         self.last_seq = max(self.last_seq, ev.seq)
         if not self._replaying:
             self.conn.execute(
-                "INSERT OR IGNORE INTO seg_event(terminal_id, seq, kind, off, ts_utc_ns, operator_id, header) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO seg_event(terminal_id, seq, kind, off, ts_utc_ns, operator_id, "
+                "header) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (self.tid, ev.seq, ev.kind, ev.off, ev.ts, ev.operator_id,
                  json.dumps(dict(ev.header), ensure_ascii=False, sort_keys=True)),
             )
@@ -153,6 +152,7 @@ class TermStream:
         if self.norm is None:
             self.norm = Normalizer(off, cols=self.cols, rows=self.rows)
             self.norm_off, self.norm_n = off, self.next_n
+            self.stream_end = max(self.stream_end, off)  # Bytes vor dem Aufnahmebeginn kommen nie
 
     def _feed_bytes(self, stop: int) -> None:
         norm = self.norm
@@ -272,23 +272,23 @@ class TermStream:
     def save(self) -> None:
         self.conn.execute(
             "INSERT INTO seg_term(terminal_id, operator_id, cols, rows, stream_end, last_out_ns, closed, "
-            "norm_off, norm_n, norm_prompt, next_n) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(terminal_id) DO UPDATE SET operator_id = excluded.operator_id, cols = excluded.cols, "
-            "rows = excluded.rows, stream_end = excluded.stream_end, last_out_ns = excluded.last_out_ns, "
-            "closed = excluded.closed, norm_off = excluded.norm_off, norm_n = excluded.norm_n, "
-            "norm_prompt = excluded.norm_prompt, next_n = excluded.next_n",
+            "norm_off, norm_seq, norm_n, norm_prompt, next_n) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(terminal_id) DO UPDATE SET operator_id = excluded.operator_id, "
+            "cols = excluded.cols, rows = excluded.rows, stream_end = excluded.stream_end, "
+            "last_out_ns = excluded.last_out_ns, closed = excluded.closed, norm_off = excluded.norm_off, "
+            "norm_seq = excluded.norm_seq, "
+            "norm_n = excluded.norm_n, norm_prompt = excluded.norm_prompt, next_n = excluded.next_n",
             (self.tid, self.operator_id, self.cols, self.rows, self.stream_end, self.last_out_ns,
-             int(self.closed), self.norm_off, self.norm_n, int(self.norm_prompt), self.next_n),
+             int(self.closed), self.norm_off, self.norm_seq, self.norm_n, int(self.norm_prompt), self.next_n),
         )
-        self.conn.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET "
-                          "value = excluded.value", (f"seg_norm_seq:{self.tid}", str(self.norm_seq)))
 
     @classmethod
     def load(cls, conn: Any, terminal_id: str, journal: Any, upto_seq: int) -> TermStream:
         """Stellt den Zustand nach einem Neustart her (setzt an der letzten Grenze auf)."""
         ts = cls(conn, terminal_id)
         row = conn.execute(
-            "SELECT operator_id, cols, rows, closed, norm_off, norm_n, norm_prompt FROM seg_term "
+            "SELECT operator_id, cols, rows, closed, norm_off, norm_n, norm_prompt, norm_seq, last_out_ns "
+            "FROM seg_term "
             "WHERE terminal_id = ?", (terminal_id,)).fetchone()
         for seq, kind, off, t, op, header in conn.execute(
                 "SELECT seq, kind, off, ts_utc_ns, operator_id, header FROM seg_event WHERE terminal_id = ? "
@@ -300,9 +300,8 @@ class TermStream:
         if row is None:
             return ts
         ts.operator_id = row[0]
-        meta = conn.execute("SELECT value FROM meta WHERE key = ?", (f"seg_norm_seq:{terminal_id}",)).fetchone()
-        norm_seq = int(meta[0]) if meta else 0
-        norm_off, norm_n, norm_prompt = row[4], int(row[5]), bool(row[6])
+        ts.last_out_ns = row[8]
+        norm_off, norm_n, norm_prompt, norm_seq = row[4], int(row[5]), bool(row[6]), int(row[7])
         ts.cols, ts.rows = int(row[1]), int(row[2])
         # Grösse und Ende so, wie sie an der Grenze galten
         for ev in ts.events:
