@@ -1184,14 +1184,16 @@ class Daemon:
         return {"active": ing.active, "runs": ing.runs, "last_error": ing.last_error}
 
     async def _sync_ingest(self) -> IngestService:
-        """Alles Empfangene speichern (auch den Rückhalt des Redaktors) und auswerten."""
+        """Alles Eingereihte speichern und auswerten.
+
+        Der Rückhalt des Redaktors bleibt bewusst stehen (Freigabe nur an Markern
+        und nach 10 s Stille): ein erzwungener Flush könnte ein Secret trennen, das
+        gerade Zeichen für Zeichen als Echo ankommt.
+        """
         self._require_project()
         ing = self.ingest
         if ing is None or not ing.active:
             raise OpError("no_ingest", "Auswertung nicht aktiv")
-        for t in self.terminals.values():
-            if t.recording and t.pause is None:
-                self.writer.add_flush(t)
         self.writer.flush_now()
         await ing.sync()
         return ing

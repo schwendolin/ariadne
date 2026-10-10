@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from ariadne.ingest import queries
 from ariadne.ingest.db import set_meta
-from ariadne.ingest.pipeline import Pipeline, Stats
+from ariadne.ingest.pipeline import Interrupted, Pipeline, Stats
 from ariadne.ingest.runner import Runner, SubprocessRunner
 from ariadne.scope.matcher import ScopeMatcher
 from ariadne.store.api import EventRecord
@@ -81,6 +82,7 @@ class IngestService:
         self._queued = False
         self._state: _ThreadState | None = None
         self._runner: Runner | None = None
+        self._stopping = threading.Event()
         self.runs = 0
         self.last_error: str | None = None
 
@@ -88,6 +90,7 @@ class IngestService:
     def attach(self, project: OpenProject) -> None:
         self.detach()
         self.project = project
+        self._stopping = threading.Event()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ariadne-ingest")
         self._runner = self._runner_factory()
         try:
@@ -98,7 +101,11 @@ class IngestService:
         self._arm_tick()
 
     def detach(self) -> None:
-        """Wartet auf den laufenden Durchgang, schliesst die Verbindungen im Thread."""
+        """Bricht den laufenden Durchgang vor der nächsten Einheit ab, schliesst die Verbindungen.
+
+        Blockiert höchstens so lange, wie der gerade laufende Worker braucht.
+        """
+        self._stopping.set()
         for h in (self._timer, self._tick):
             if h is not None:
                 h.cancel()
@@ -197,7 +204,8 @@ class IngestService:
                     scope = ScopeMatcher.from_settings(settings, version)
                     assert self._runner is not None
                     pipe = Pipeline(journal, blobs, conn, project_key=p.project_key, scope=scope,
-                                    runner=self._runner, registry=self._registry)
+                                    runner=self._runner, registry=self._registry,
+                                    should_stop=self._stopping.is_set)
                 except BaseException:
                     conn.close()
                     raise
@@ -234,6 +242,9 @@ class IngestService:
                 self._reparse_job(snap)
             self.last_error = None
             return stats
+        except Interrupted:
+            log.info("Auswertung abgebrochen (Projekt wird geschlossen)")
+            return None
         except Exception as exc:
             self.last_error = type(exc).__name__
             log.error("Auswertung fehlgeschlagen (%s)", type(exc).__name__)

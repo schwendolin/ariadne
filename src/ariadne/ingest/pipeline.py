@@ -23,9 +23,12 @@ Transaktion. Fehler eines Parsers oder der Projektion einer Einheit werden zu
 :meth:`Pipeline.reparse` baut alles in einer neuen Verbindung neu auf; den
 Dateitausch macht der Aufrufer.
 
-Einbindung in den Daemon (noch offen): ``process_new`` blockiert (Worker bis
-60 s pro Einheit) und gehört deshalb in einen eigenen Thread mit eigener
-Verbindung; Aufruf nach jedem Commit und zusätzlich periodisch (Stille).
+Einbindung in den Daemon: :mod:`ariadne.daemon.ingest`. ``process_new``
+blockiert (Worker bis 60 s pro Einheit) und läuft deshalb in einem eigenen
+Thread mit eigenen Verbindungen; Aufruf nach jedem Commit (entprellt) und
+periodisch (Stille). ``should_stop`` erlaubt einen Abbruch vor jeder Einheit
+(:class:`Interrupted`); die Transaktion wird dann zurückgerollt, der nächste
+Durchgang setzt am alten Wasserstand wieder an.
 """
 
 from __future__ import annotations
@@ -48,13 +51,17 @@ from ariadne.ingest.units import MAX_FILE_LINES_BYTES, Unit, file_lines, is_bina
 from ariadne.scope.api import ScopeChecker
 from ariadne.store.api import EventRecord
 
-__all__ = ["Pipeline", "Stats", "SILENCE_NS", "WATERMARK"]
+__all__ = ["Pipeline", "Stats", "Interrupted", "SILENCE_NS", "WATERMARK"]
 
 log = logging.getLogger("ariadne.ingest")
 
 SILENCE_NS = 10 * 60 * 1_000_000_000
 WATERMARK = "ingest"
 BATCH_VOLUME = 50_000  # Events plus Ausgabe/64 Bytes pro Transaktion (begrenzt gepufferte Zeilen)
+
+
+class Interrupted(Exception):
+    """Durchgang abgebrochen (``should_stop``); nichts aus diesem Abschnitt wurde übernommen."""
 
 
 @dataclass
@@ -97,7 +104,8 @@ class Pipeline:
                  scope: ScopeChecker | None, runner: Runner, projector: Any = None,
                  registry: Sequence[Any] | None = None,
                  projector_factory: Callable[[Any], Any] | None = None,
-                 clock: Callable[[], int] = time.time_ns, silence_ns: int = SILENCE_NS) -> None:
+                 clock: Callable[[], int] = time.time_ns, silence_ns: int = SILENCE_NS,
+                 should_stop: Callable[[], bool] | None = None) -> None:
         """``runner`` ist im Daemon ein :class:`~ariadne.ingest.runner.SubprocessRunner`
         (wer Schlüssel hält, parst nicht); ``InProcessRunner`` nur für Tests.
         ``projector=None`` sucht ``ariadne.ingest.projection.Projector``, ``False`` schaltet ab.
@@ -110,6 +118,7 @@ class Pipeline:
         self.runner: Runner = runner
         self.clock = clock
         self.silence_ns = silence_ns
+        self.should_stop = should_stop
         self.projector_factory = projector_factory
         apply_schema(conn)
         self.registry: list[Any] = list(_auto_registry() if registry is None else registry)
@@ -216,7 +225,8 @@ class Pipeline:
             projector = type(self.projector)(new_conn, project_key=self.project_key, scope=self.scope)
         new = Pipeline(self.journal, self.blobs, new_conn, project_key=self.project_key, scope=self.scope,
                        runner=self.runner, projector=projector, registry=self.registry,
-                       projector_factory=self.projector_factory, clock=self.clock, silence_ns=self.silence_ns)
+                       projector_factory=self.projector_factory, clock=self.clock, silence_ns=self.silence_ns,
+                       should_stop=self.should_stop)
         new.process_new()
         return new
 
@@ -385,6 +395,8 @@ class Pipeline:
                provisional: bool = False) -> None:
         if not self.can_parse:
             return
+        if self.should_stop is not None and self.should_stop():
+            raise Interrupted()
         conn = self.conn
         seq_row = conn.execute("SELECT event_seq FROM unit WHERE unit_id = ?", (unit.unit_id,)).fetchone()
         journal_seq = int(seq_row[0]) if seq_row and seq_row[0] is not None else 0
