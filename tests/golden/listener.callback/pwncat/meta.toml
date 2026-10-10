@@ -1,0 +1,12 @@
+tool = "pwncat-cs"
+version = "0.5.4"
+command = "pwncat-cs -lp 4444"
+source = "nachgestellt"
+
+[unit]
+kind = "segment"
+cmd = "pwncat-cs -lp 4444"
+
+[unit.context]
+kind = "revshell"
+opened_at = 4800

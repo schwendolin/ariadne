@@ -1,0 +1,12 @@
+tool = "nc.openbsd"
+version = "1.226"
+command = "nc -lvnp 4444"
+source = "nachgestellt"
+note = "Segment ohne argv: Port nur aus der Statuszeile"
+
+[unit]
+kind = "segment"
+
+[unit.context]
+kind = "revshell"
+opened_at = 3600

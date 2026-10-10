@@ -1,0 +1,12 @@
+tool = "nc.traditional"
+version = "1.10-48"
+command = "nc -lvnp 4444"
+source = "nachgestellt"
+note = "REC erst nach dem echten Callback eingeschaltet; die einzige Meldung folgt auf Zielausgabe"
+
+[unit]
+kind = "segment"
+
+[unit.context]
+kind = "revshell"
+opened_at = 8400

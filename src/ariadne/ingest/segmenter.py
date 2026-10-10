@@ -33,11 +33,12 @@ from __future__ import annotations
 import bisect
 import hashlib
 import json
+import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ariadne.ctxrules import ContextStack, Stage, split_command
+from ariadne.ctxrules import ContextStack, Resume, Stage, classify, split_command
 from ariadne.ids import cmd_id as make_cmd_id
 
 __all__ = [
@@ -104,6 +105,13 @@ class CmdBlock:
     c_seq: int = 0
     d_seq: int | None = None
     ctx: tuple[dict[str, Any], ...] = ()  # Stapel vor dem C-Marker
+    companions: tuple[str, ...] = ()  # Dateien, die der Befehl laut Parsern schreibt (nur lokal)
+
+    @property
+    def local(self) -> bool:
+        """Lief der Befehl auf Kali (oberste aktive Stufe vor dem C-Marker lokal)?"""
+        top = [s for s in self.ctx if s.get("state", "active") == "active"]
+        return not top or top[-1].get("kind") in LOCAL_KINDS
 
     @property
     def closed(self) -> bool:
@@ -118,6 +126,7 @@ class CmdBlock:
             "pipestatus": json.dumps(list(self.pipestatus)) if self.pipestatus is not None else None,
             "ts_start_ns": self.ts_start, "ts_end_ns": self.ts_end,
             "flags": json.dumps(sorted(self.flags)), "ctx": json.dumps(list(self.ctx), ensure_ascii=False),
+            "companions": json.dumps(list(self.companions), ensure_ascii=False),
         }
 
 
@@ -288,6 +297,43 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
 # --------------------------------------------------------------------------- Kontext
 
 
+def _simple_commands(text: str) -> list[list[str]]:
+    """Alle einfachen Befehle einer Zeile (``stty raw -echo; fg`` -> zwei)."""
+    try:
+        lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
+        lex.whitespace_split = True
+        lex.commenters = ""
+        tokens = list(lex)
+    except ValueError:
+        return [text.split()]
+    out: list[list[str]] = [[]]
+    for tok in tokens:
+        if tok and set(tok) <= set(";&|()"):
+            out.append([])
+        elif tok and set(tok) <= set("<>"):
+            out[-1].append("\0")  # Umleitungsziel folgt, nicht Teil von argv
+        elif out[-1][-1:] == ["\0"]:
+            out[-1].pop()
+        else:
+            out[-1].append(tok)
+    return [c for c in out if c]
+
+
+def _argv_for_context(block: CmdBlock) -> list[str]:
+    """argv für ``ContextStack.on_command_start``.
+
+    ``ctxrules.split_command`` sieht nur den ersten einfachen Befehl. Beim
+    Shell-Upgrade steht ``fg`` aber hinten (``stty raw -echo; fg``); ohne
+    Sonderfall bliebe die angehaltene Remote-Stufe angehalten.
+    """
+    argv = list(block.argv)
+    if block.text and classify(argv) is None:
+        for cmd in _simple_commands(block.text)[1:]:
+            if isinstance(classify(cmd), Resume):
+                return cmd
+    return argv
+
+
 class _Tracked:
     """``ContextStack`` mit stabilen IDs je Stufe (für Entscheide über Bereiche)."""
 
@@ -317,8 +363,15 @@ class _Tracked:
         return out
 
     def snapshot(self, stack: Iterable[Mapping[str, Any]]) -> None:
+        """Stapel ersetzen; unveränderte Stufen behalten ihre ID (REC aus und wieder an)."""
+        old, old_ids = self.st.stages, self.ids
         self.st = ContextStack.from_snapshot([dict(s) for s in stack])
-        self.ids = [self._fresh() for _ in self.st.stages]
+        ids = []
+        for i, st in enumerate(self.st.stages):
+            same = i < len(old) and (old[i].kind, old[i].host, old[i].user, old[i].opened_at) == (
+                st.kind, st.host, st.user, st.opened_at)
+            ids.append(old_ids[i] if same else self._fresh())
+        self.ids = ids
 
     def top_index(self) -> int:
         for i in range(len(self.st.stages) - 1, -1, -1):
@@ -371,7 +424,7 @@ def _replay(tid: str, events: Sequence[SegEvent], blocks: Sequence[CmdBlock], re
         elif ev.kind == "term.mark":
             if h.get("mark") == "C":
                 b = by_c.get(seq)
-                argv = list(b.argv) if b is not None else []
+                argv = _argv_for_context(b) if b is not None else []
                 if b is not None:
                     b.ctx = tuple(_stage_dict(s) for s in tr.st.stages)
                 tr.apply(tr.st.on_command_start, argv, off)

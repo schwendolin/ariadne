@@ -1,0 +1,1 @@
+{"attrs": {"listener": "nc", "remote": "192.168.56.101:49154"}, "confidence": null, "predicate": "access.callback", "span": {"col_end": 43, "col_start": 0, "line_end": 1, "line_start": 1}, "subject": "ip:default/192.168.56.101", "type": "obs", "value": "nc:4444"}

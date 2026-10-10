@@ -1,0 +1,288 @@
+[
+ {
+  "text": "LEGEND:",
+  "raw": [
+   0,
+   20
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 7,
+    "fg": "yellow",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   7,
+   1
+  ]
+ },
+ {
+  "text": "RED/YELLOW: 95% a PE vector",
+  "raw": [
+   20,
+   64
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 10,
+    "fg": "red",
+    "bg": "bright_yellow",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   11,
+   10,
+   1,
+   10,
+   25,
+   17,
+   1
+  ]
+ },
+ {
+  "text": "RED: You should take a look to it",
+  "raw": [
+   64,
+   110
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 3,
+    "fg": "red",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   3,
+   1,
+   3,
+   14,
+   30,
+   1
+  ]
+ },
+ {
+  "text": "╔══════════╣ Sudo version",
+  "raw": [
+   110,
+   179
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 13,
+    "fg": "blue",
+    "b": 1
+   },
+   {
+    "s": 13,
+    "e": 25,
+    "fg": "green",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   13,
+   3,
+   13,
+   51,
+   12,
+   1
+  ]
+ },
+ {
+  "text": "╚ https://book.hacktricks.xyz/linux-hardening/privilege-escalation#sudo-version",
+  "raw": [
+   179,
+   280
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 2,
+    "fg": "blue",
+    "b": 1
+   },
+   {
+    "s": 2,
+    "e": 79,
+    "fg": "cyan",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   2,
+   3,
+   2,
+   18,
+   77,
+   1
+  ]
+ },
+ {
+  "text": "Sudo version 1.8.31",
+  "raw": [
+   280,
+   316
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 13,
+    "e": 19,
+    "fg": "red",
+    "bg": "bright_yellow",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   0,
+   13,
+   1,
+   13,
+   24,
+   6,
+   1
+  ]
+ },
+ {
+  "text": "",
+  "raw": [
+   316,
+   318
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": []
+ },
+ {
+  "text": "╔══╣ SUID - Check easy privesc",
+  "raw": [
+   318,
+   376
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 5,
+    "fg": "blue",
+    "b": 1
+   },
+   {
+    "s": 5,
+    "e": 30,
+    "fg": "green",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   5,
+   3,
+   5,
+   27,
+   25,
+   1
+  ]
+ },
+ {
+  "text": "-rwsr-xr-x 1 root root 31K Feb 21  2022 /usr/bin/pkexec  --->  Linux4.10_to_5.1.17(CVE-2019-13272)",
+  "raw": [
+   376,
+   502
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 40,
+    "e": 55,
+    "fg": "red",
+    "bg": "bright_yellow",
+    "b": 1
+   },
+   {
+    "s": 63,
+    "e": 98,
+    "fg": "red",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   0,
+   40,
+   1,
+   40,
+   51,
+   15,
+   1,
+   55,
+   70,
+   8,
+   1,
+   63,
+   85,
+   35,
+   1
+  ]
+ },
+ {
+  "text": "-rwsr-xr-x 1 root root 1.2M Mar 27  2022 /usr/bin/bash",
+  "raw": [
+   502,
+   562
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   54,
+   1
+  ]
+ },
+ {
+  "text": "  -rw-r--r-- 1 root root 2.3K /etc/passwd",
+  "raw": [
+   562,
+   616
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 41,
+    "fg": "bright_black",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   41,
+   1
+  ]
+ }
+]

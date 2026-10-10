@@ -150,10 +150,8 @@ class ScopeMatcher:
             v = scope.get(key, [])
             return list(v) if isinstance(v, list | tuple) else []
 
-        inc = [str(x) for x in _list("include") if isinstance(x, str)]
-        exc = [str(x) for x in _list("exclude") if isinstance(x, str)]
-        win = [w for w in _list("windows")]
-        return cls(inc, exc, win, version)
+        # Nicht-Text-Einträge gehen mit, damit _rule sie als Fehler meldet
+        return cls(_list("include"), _list("exclude"), _list("windows"), version)
 
     # ------------------------------------------------------------------ #
     def _rule(self, entry: Any, where: str) -> _Rule | None:

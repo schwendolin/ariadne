@@ -1,0 +1,10 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -oX scans/lol.xml 192.168.56.101"
+source = "nachgestellt"
+note = "Billion Laughs; muss sofort und ohne Expansion scheitern"
+
+[unit]
+kind = "file"
+path = "scans/lol.xml"
+sniff = "xml:nmaprun"

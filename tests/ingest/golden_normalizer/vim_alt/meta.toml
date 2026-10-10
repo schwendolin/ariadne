@@ -1,0 +1,6 @@
+tool = "vim 9.1 -u NONE"
+source = "echt: PTY-Aufnahme mit capture.py"
+note = "Alternate Screen mit Cursor-Positionierung und Scroll-Region"
+cols = 80
+rows = 24
+marks = "none"

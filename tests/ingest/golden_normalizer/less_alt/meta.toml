@@ -1,0 +1,6 @@
+tool = "less 590"
+source = "echt: PTY-Aufnahme mit capture.py"
+note = "Alternate Screen ?1049, nur Schlussbild, Flag altscreen"
+cols = 80
+rows = 24
+marks = "none"

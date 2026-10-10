@@ -1,0 +1,203 @@
+[
+ {
+  "text": "�??????????? Basic System Information",
+  "raw": [
+   0,
+   51
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 37,
+    "fg": "cyan",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   37,
+   1
+  ]
+ },
+ {
+  "text": "╔══════════╣ Basic System Information",
+  "raw": [
+   51,
+   133
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 13,
+    "fg": "blue",
+    "b": 1
+   },
+   {
+    "s": 13,
+    "e": 37,
+    "fg": "green",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   13,
+   3,
+   13,
+   51,
+   24,
+   1
+  ]
+ },
+ {
+  "text": "   Check if the Windows versions is vulnerable to some known exploit",
+  "raw": [
+   133,
+   215
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 68,
+    "fg": "bright_black",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   68,
+   1
+  ]
+ },
+ {
+  "text": "    Hostname: DC01",
+  "raw": [
+   215,
+   247
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 14,
+    "e": 18,
+    "fg": "yellow",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   0,
+   14,
+   1,
+   14,
+   21,
+   4,
+   1
+  ]
+ },
+ {
+  "text": "    ProductName: Windows Server 2019 Standard",
+  "raw": [
+   247,
+   295
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   45,
+   1
+  ]
+ },
+ {
+  "text": "    AlwaysInstallElevated set to 1 in HKLM!",
+  "raw": [
+   295,
+   352
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 4,
+    "e": 43,
+    "fg": "red",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   0,
+   4,
+   1,
+   4,
+   11,
+   39,
+   1
+  ]
+ },
+ {
+  "text": "    DefaultPassword               :  P@ssw0rd2024!",
+  "raw": [
+   352,
+   416
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 37,
+    "e": 50,
+    "fg": "red",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   0,
+   37,
+   1,
+   37,
+   44,
+   13,
+   1
+  ]
+ },
+ {
+  "text": "",
+  "raw": [
+   416,
+   419
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": []
+ },
+ {
+  "text": "  [*] Done",
+  "raw": [
+   419,
+   443
+  ],
+  "flags": 0,
+  "sgr": [
+   {
+    "s": 0,
+    "e": 10,
+    "fg": "magenta",
+    "b": 1
+   }
+  ],
+  "colmap": [
+   0,
+   7,
+   10,
+   1
+  ]
+ }
+]

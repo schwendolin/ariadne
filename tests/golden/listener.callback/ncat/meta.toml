@@ -1,0 +1,12 @@
+tool = "ncat"
+version = "7.94SVN"
+command = "ncat -lvnp 4444"
+source = "nachgestellt"
+
+[unit]
+kind = "segment"
+cmd = "ncat -lvnp 4444"
+
+[unit.context]
+kind = "revshell"
+opened_at = 2400

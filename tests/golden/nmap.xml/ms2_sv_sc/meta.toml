@@ -1,0 +1,11 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -sV -sC -oA scans/ms2 192.168.56.101"
+source = "nachgestellt"
+note = "Metasploitable2 mit Versionserkennung und Standardskripten; SSH-Schlüssel sind synthetisch"
+
+[unit]
+kind = "file"
+path = "scans/ms2.xml"
+sniff = "xml:nmaprun"
+mime = "application/xml"

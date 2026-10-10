@@ -1,0 +1,14 @@
+HTTP/1.1 200 OK
+Date: Wed, 08 Oct 2026 12:02:33 GMT
+Server: Apache/2.2.8 (Ubuntu) DAV/2 PHP/5.2.4-2ubuntu5.10
+X-Powered-By: PHP/5.2.4-2ubuntu5.10
+Build 10.0.17763.1 / Java version 1.8.0.181 / OpenSSL/1.0.2.11 / v1.2.3.4
+Release date 08.10.2026, time 14:02:33.123, version 2.4.41
+Links: http://192.168.56.101/twiki/ and http://192.168.56.101:8180/manager/html, (https://admin:tomcat@192.168.56.101:8443/x).
+Dotted 1.2.3.4.5 and 10.0.0.256 and 010.1.1.1 are not addresses; 192.168.56.101. ends a sentence.
+Range 192.168.56.100-192.168.56.104 and net 10.10.10.0/24, host route 10.10.14.2/23
+Contact: msfadmin@metasploitable.localdomain, ssh msfadmin@192.168.56.101
+CVE-2011-2523 (vsftpd backdoor), see cve-2007-2447 and XCVE-2000-0001.
+inet6 fe80::a00:27ff:fe63:7ee7/64 scope link, also [::1]:8080 and ::ffff:192.168.56.101
+MAC 08:00:27:63:7e:e7 at 14:02:33, std::string and Foo::Bar::baz
+Hostname host-192-168-56-101.lab and 4.3.2.1.in-addr.arpa

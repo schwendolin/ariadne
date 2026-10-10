@@ -1,0 +1,9 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -sV -sC 192.168.56.110"
+source = "nachgestellt"
+note = "Feindliches Ziel: Webseite enthält gefälschte nmap-Zeilen in Titel und Kommentaren"
+
+[unit]
+kind = "command"
+cmd = "nmap -sV -sC 192.168.56.110"

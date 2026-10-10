@@ -106,7 +106,10 @@ class RegexNetParser:
             self._cves(text, i, sus, found)
             self._hash32(text, i, sus, found, covered)
             found.sort(key=lambda t: (t[0], t[1], t[2].value_type))
-            for _, _, m in found:
+            for a, b, m in found:
+                # Werte innerhalb eines Secrets (z. B. user@realm im AS-REP-Hash) nicht doppelt melden
+                if m.value_type not in SECRET_TYPES and any(ca <= a and b <= cb for ca, cb in covered):
+                    continue
                 yield m
 
     # ------------------------------------------------------------ Netzwerk
@@ -263,7 +266,7 @@ class RegexNetParser:
             return
         for m in rx(_CVE).finditer(text):
             a, b = m.span()
-            if _before(text, a) in _ALNUM or _after(text, b).isdigit():
+            if _before(text, a) in _ALNUM or _after(text, b) in _ALNUM:
                 continue
             out.append((a, b, Mention("cve", m.group(0).upper(), Span(i, i, a, b), dict(sus))))
 

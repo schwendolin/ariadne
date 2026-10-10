@@ -1,0 +1,6 @@
+Ncat: Version 7.94SVN ( https://nmap.org/ncat )
+Ncat: Listening on [::]:4444
+Ncat: Listening on 0.0.0.0:4444
+Ncat: Connection from 192.168.56.101:49153.
+whoami
+daemon

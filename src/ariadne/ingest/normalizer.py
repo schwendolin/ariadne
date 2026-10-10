@@ -65,6 +65,7 @@ FLAG_ALTSCREEN = 8
 FLAG_WRAPPED = 16  # Zeile wurde bei MAX_COLS hart umbrochen
 
 MAX_COLS = 16384
+MOVE_COLS = 256  # Reichweite von Cursorbewegungen ohne bekannte Breite (gegen Verstärkung)
 MAX_UP = 50
 MAX_STRING = 8192
 MAX_CSI = 512
@@ -191,8 +192,13 @@ def colmap_from_json(text: str | None) -> tuple[int, ...]:
 
 
 def _compress(raws: Sequence[int], base: int) -> tuple[int, ...]:
-    out: list[int] = []
     n = len(raws)
+    if not n:
+        return ()
+    first = raws[0]
+    if raws[-1] - first == n - 1 and list(raws) == list(range(first, first + n)):
+        return (0, first - base, n, 1)  # häufigster Fall: ein Lauf ohne Sprünge
+    out: list[int] = []
     i = 0
     while i < n:
         j = i + 1
@@ -298,6 +304,7 @@ class Normalizer:
         self._alt_buf = bytearray()
         self._alt_dropped = 0
         self._finished = False
+        self._sgr_cache: dict[tuple[_Attr, bytes], _Attr] = {}
 
     # ------------------------------------------------------------------ API
     @property
@@ -640,6 +647,12 @@ class Normalizer:
         self._col = max(0, min(col, MAX_COLS - 1))
         self._wrap = False
 
+    def _move_limit(self) -> int:
+        """Höchste Spalte für Bewegungen: Breite, sonst Textende plus MOVE_COLS."""
+        if self._width:
+            return self._row_start() + self._width - 1
+        return min(MAX_COLS - 1, len(self._rows[self._cur].chars) + MOVE_COLS)
+
     def _phys_rows(self, row: _Row) -> int:
         w = self._width
         return max(1, -(-len(row.chars) // w)) if w else 1
@@ -657,9 +670,7 @@ class Normalizer:
             start = self._row_start()
             col = self._cursor() - start
             nxt = (col // 8 + 1) * 8
-            if self._width:
-                nxt = min(nxt, self._width - 1)
-            self._set_col(start + nxt)
+            self._set_col(min(start + nxt, self._move_limit()))
 
     def _linefeed(self, off: int) -> None:
         row = self._rows[self._cur]
@@ -789,14 +800,22 @@ class Normalizer:
             return
         if self._alt or private or inter:
             return
+        if final == 0x6D:  # m: häufigste Sequenz, ohne Umweg
+            key = (self._attr, body)
+            nxt = self._sgr_cache.get(key)
+            if nxt is None:
+                self._sgr(body)
+                if len(self._sgr_cache) < 4096:
+                    self._sgr_cache[key] = self._attr
+            else:
+                self._attr = nxt
+            return
         args = _ints(body)
         n = args[0] if args and args[0] else 1
         p0 = args[0] if args else 0
         f = chr(final)
         row = self._rows[self._cur]
-        if f == "m":
-            self._sgr(body)
-        elif f == "K":
+        if f == "K":
             cur = self._cursor()
             if p0 == 0:
                 self._erase(row, cur, self._row_end())
@@ -806,14 +825,12 @@ class Normalizer:
                 self._erase(row, self._row_start(), self._row_end())
             self._touch(end_off)
         elif f in "Ca":
-            start = self._row_start()
-            limit = start + self._width - 1 if self._width else MAX_COLS - 1
-            self._set_col(min(self._cursor() + n, limit))
+            self._set_col(min(self._cursor() + n, self._move_limit()))
         elif f == "D":
             self._set_col(max(self._row_start(), self._cursor() - n))
         elif f in "G`":
-            col = min(max(n, 1), self._width or MAX_COLS) - 1
-            self._set_col(self._row_start() + col)
+            col = min(max(n, 1), self._width or MOVE_COLS) - 1
+            self._set_col(min(self._row_start() + col, self._move_limit()))
         elif f == "A":
             self._up(n)
         elif f in "Be":
@@ -827,7 +844,7 @@ class Normalizer:
         elif f in "Hf":
             self._new_row_if_content(end_off - 1)
             col = args[1] if len(args) > 1 and args[1] else 1
-            self._set_col(min(col, self._width or MAX_COLS) - 1)
+            self._set_col(min(col, self._width or MOVE_COLS) - 1)
         elif f == "J":
             cur = self._cursor()
             if p0 == 0:
@@ -858,14 +875,14 @@ class Normalizer:
         elif f == "@":
             cur = self._cursor()
             if cur < len(row.chars):
-                k = min(n, MAX_COLS - len(row.chars))
+                k = min(n, self._width or MOVE_COLS, MAX_COLS - len(row.chars))
                 row.chars[cur:cur] = [" "] * k
                 row.raws[cur:cur] = [end_off - 1] * k
                 row.attrs[cur:cur] = [_DEFAULT] * k
             self._touch(end_off)
         elif f == "b":
             if self._last_char is not None:
-                k = min(n, MAX_COLS)
+                k = min(n, self._width or MOVE_COLS)
                 self._write(self._last_char * k, [end_off - 1] * k)
         elif f == "s":
             self._saved = (self._base_row + self._cur, self._cursor(), self._attr)
@@ -985,6 +1002,9 @@ class Normalizer:
             n -= 1
         runs: list[list] = []  # [start, end, visual]
         i = 0
+        if n and attrs[:n].count(attrs[0]) == n:
+            runs.append([0, n, attrs[0].visual])  # eine Farbe für die ganze Zeile
+            i = n
         while i < n:
             a = attrs[i]
             j = i + 1

@@ -46,8 +46,16 @@ def make_lines(text: str, *, start: int = 0, flags: Mapping[int, str] | None = N
     for i, t in enumerate(parts):
         raw = len(t.encode()) + 1
         f = (flags or {}).get(i, "")
-        out.append(Line(t, off, off + raw, prompt_echo=f == "prompt_echo", concealed=f == "concealed",
-                        overwritten=f == "overwritten"))
+        out.append(
+            Line(
+                t,
+                off,
+                off + raw,
+                prompt_echo=f == "prompt_echo",
+                concealed=f == "concealed",
+                overwritten=f == "overwritten",
+            )
+        )
         off += raw
     return out
 
@@ -75,8 +83,11 @@ def make_unit(
         text = data.decode("utf-8", "replace")
     if argv is None:
         argv = split_command(cmd) if cmd else []
-    ctx = dict(context) if context is not None else ({"kind": "local", "host": "local", "opened_at": 0}
-                                                      if kind == "command" else {})
+    ctx = (
+        dict(context)
+        if context is not None
+        else ({"kind": "local", "host": "local", "opened_at": 0} if kind == "command" else {})
+    )
     if terminal_id and "terminal_id" not in ctx and kind != "file":
         ctx["terminal_id"] = terminal_id
     return FakeUnit(

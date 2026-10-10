@@ -130,6 +130,19 @@ def _with_scheme(value: str) -> str:
     return value if "://" in value else "http://" + value
 
 
+_URI = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*)://(?:[^@/?#]*@)?(\[[^\]/]+\]|[^/:?#]+)")
+
+
+def _uri_target(value: str) -> str | None:
+    """``http(s)://`` bleibt URL, andere Schemata (``ssh://``, ``smb://``) ergeben den Host."""
+    m = _URI.match(value)
+    if m is None:
+        return None
+    if m.group(1).lower() in ("http", "https"):
+        return value
+    return m.group(2).strip("[]") or None
+
+
 # --------------------------------------------------------------------------- Tools
 
 _NMAP_ARG = {
@@ -167,8 +180,8 @@ def _ssh(args: list[str], t: Targets) -> None:
     pos = _positionals(args, _SSH_ARG)
     if pos:
         target = pos[0]
-        if target.startswith("ssh://"):
-            t.add(target)
+        if "://" in target:
+            t.add(_uri_target(target))
         else:
             t.add(_host_of_userhost(target))
 
@@ -304,7 +317,7 @@ def _hydra(args: list[str], t: Targets) -> None:
         return
     first = pos[0]
     if "://" in first:
-        t.add(first)
+        t.add(_uri_target(first))
     elif _looks_like_target(first):
         t.add(first)
 

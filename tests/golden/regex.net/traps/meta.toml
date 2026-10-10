@@ -1,0 +1,9 @@
+tool = "curl"
+version = "8.10.1"
+command = "curl -si http://192.168.56.101/"
+source = "nachgestellt"
+note = "Fallen: Versionen, Datumsangaben, IPs in URLs, Punktfolgen, Zeitstempel, MAC"
+
+[unit]
+kind = "command"
+cmd = "curl -si http://192.168.56.101/"

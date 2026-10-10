@@ -1,0 +1,9 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -sV -sC -oA scans/ms2 192.168.56.101"
+source = "nachgestellt"
+note = "Terminalausgabe zum selben Lauf wie nmap.xml/ms2_sv_sc"
+
+[unit]
+kind = "command"
+cmd = "nmap -sV -sC -oA scans/ms2 192.168.56.101"

@@ -9,11 +9,11 @@ sicher. Gültige Marker, Schnappschüsse und Lücken sind Grenzen des Normalizer
 (Zeilenende, Zustand zurückgesetzt); Entscheide sind keine Grenzen, sie wirken
 über ``raw_start`` der Zeilen.
 
-Zeilen werden mit fortlaufender Nummer ``n`` sofort in ``unit_line``
-geschrieben (noch ohne Einheit, ``unit_id = ''``) und erst nach der
-Segmentierung einer Einheit zugeordnet. Nach einem Neustart setzt
-:meth:`TermStream.load` an der letzten Grenze wieder auf; die gleichen Zeilen
-entstehen mit den gleichen Nummern und werden idempotent überschrieben.
+Endgültige Zeilen bekommen eine fortlaufende Nummer ``n`` und werden beim
+Abgleich mit dem Layout (:func:`ariadne.ingest.unit_store.sync_layout`) gleich
+mit ihrer Einheit gespeichert. Nach einem Neustart setzt :meth:`TermStream.load`
+an der letzten Grenze wieder auf; die gleichen Zeilen entstehen mit den
+gleichen Nummern und überschreiben nur ihren eigenen Inhalt.
 """
 
 from __future__ import annotations
@@ -33,12 +33,6 @@ INF = 1 << 62
 BOUNDARY_KINDS = frozenset({"term.open", "term.ctx_snapshot", "term.gap", "term.close", "term.resize",
                             "term.mark"})
 
-_UPSERT_LINE = (
-    "INSERT INTO unit_line(unit_id, pos, idx, terminal_id, n, text, raw_start, raw_end, flags, sgr, colmap) "
-    "VALUES ('', -1, NULL, ?, ?, ?, ?, ?, ?, ?, ?) "
-    "ON CONFLICT(terminal_id, n) DO UPDATE SET text = excluded.text, raw_start = excluded.raw_start, "
-    "raw_end = excluded.raw_end, flags = excluded.flags, sgr = excluded.sgr, colmap = excluded.colmap"
-)
 
 
 @dataclass
@@ -80,9 +74,10 @@ class TermStream:
         self.norm_n = 0
         self.norm_prompt = False
         self.dirty = False  # Layout neu rechnen
-        self.new_lines = False
-        self.min_new_raw: int | None = None
+        self.lines: list[tuple[int, NormLine]] = []  # endgültige Zeilen, noch nicht gespeichert
+        self.max_n = -1  # höchste gespeicherte Zeilennummer
         self.prev_rows: dict[str, dict[str, Any]] = {}
+        self.companions: dict[tuple[Any, ...], tuple[str, ...]] = {}
         self.db_checked = False
         self._replaying = False
 
@@ -195,9 +190,10 @@ class TermStream:
             return
         if ev.kind == "term.close":
             self._feed_bytes(INF)
-            norm.finish()
+            lines = norm.finish()
             self.finished = True
-            self._collect()
+            if lines:
+                self._store(lines)
             return
         prompt: bool | None = False
         eol = False
@@ -221,16 +217,15 @@ class TermStream:
             self._store(lines)
 
     def _store(self, lines: Iterable[NormLine]) -> None:
-        rows = []
+        """Merkt sich endgültige Zeilen; gespeichert werden sie beim Abgleich mit dem Layout."""
         for ln in lines:
-            rows.append((self.tid, self.next_n, ln.text, ln.raw_start, ln.raw_end, ln.flags,
-                         sgr_to_json(ln.sgr), colmap_to_json(ln.colmap)))
-            if self.min_new_raw is None or ln.raw_start < self.min_new_raw:
-                self.min_new_raw = ln.raw_start
+            self.lines.append((self.next_n, ln))
             self.next_n += 1
-        self.conn.executemany(_UPSERT_LINE, rows)
-        self.new_lines = True
         self.dirty = True
+
+    def take_lines(self) -> list[tuple[int, NormLine]]:
+        out, self.lines = self.lines, []
+        return out
 
     def force_feed(self) -> None:
         """Alles Empfangene normalisieren (nach langer Stille oder vor dem Schliessen)."""
@@ -298,6 +293,8 @@ class TermStream:
         for off, t in conn.execute("SELECT off, ts_utc_ns FROM seg_chunk WHERE terminal_id = ? ORDER BY off",
                                    (terminal_id,)):
             ts._index_chunk(int(off), int(t))
+        top = conn.execute("SELECT MAX(n) FROM unit_line WHERE terminal_id = ?", (terminal_id,)).fetchone()
+        ts.max_n = int(top[0]) if top and top[0] is not None else -1
         if row is None:
             return ts
         ts.operator_id = row[0]

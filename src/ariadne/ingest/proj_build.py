@@ -19,7 +19,6 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ariadne.events import canonical_json
 from ariadne.ingest.claims import (
     STATE_RANK,
     TRUST_ORDER,
@@ -36,6 +35,7 @@ from ariadne.ingest.identity import (
     STRONG_TYPES,
     WEAK_TYPES,
     IdentityGraph,
+    host_identifier,
     host_part,
     id_type,
     normalize_identifier,
@@ -173,6 +173,12 @@ class _Claim:
     def first(self) -> _Src:
         return min(self.sources, key=lambda s: s.order())
 
+    @property
+    def first_observation(self) -> _Src:
+        """Erste echte Beobachtung (Mentions sind keine Beobachtungen); sonst die erste Quelle."""
+        obs = [s for s in self.sources if s.obs_id is not None]
+        return min(obs, key=lambda s: s.order()) if obs else self.first
+
     def strongest(self) -> _Src:
         return min(self.sources, key=lambda s: (TRUST_ORDER.get(s.trust, 9), s.order()))
 
@@ -208,7 +214,8 @@ def display(key: str) -> str:
 
 
 def _dumps(obj: Any) -> str:
-    return canonical_json(obj).decode()
+    """Stabiles JSON (sortiert, kompakt); anders als ``canonical_json`` mit Floats (Konfidenz)."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _max_access(a: str, b: str) -> str:
@@ -304,8 +311,8 @@ class _Builder:
             if not isinstance(term, str) or not isinstance(off, int):
                 continue
             cands = [o for o in stages.get(term, []) if o <= off]
-            host = normalize_identifier(str(d.payload["host"]))
-            if cands and host and id_type(host) in HOST_TYPES:
+            host = host_identifier(str(d.payload["host"]))
+            if cands and host:
                 overrides[(term, max(cands))] = host
         self.ctx_host: dict[str, str] = {}
         for u in self.units.values():
@@ -319,8 +326,8 @@ class _Builder:
             if o:
                 return o
         if u.ctx_host:
-            ident = normalize_identifier(u.ctx_host)
-            if ident and ident != "ctx:host" and id_type(ident) in HOST_TYPES:
+            ident = host_identifier(u.ctx_host)
+            if ident and ident != "ctx:host":
                 return ident
         if u.terminal_id and u.ctx_opened_at is not None:
             return f"ctx:{u.terminal_id}@{u.ctx_opened_at}"
@@ -353,7 +360,9 @@ class _Builder:
                 ref = self._subst(value["ref"], host)
                 value = {"ref": ref}
                 text = ref
-            stage = (u.terminal_id, u.ctx_opened_at) if u.terminal_id and u.ctx_opened_at is not None else None
+            stage = None
+            if u.terminal_id and u.ctx_opened_at is not None:
+                stage = (u.terminal_id, u.ctx_opened_at)
             src = _Src(subject=subject, predicate=o.predicate, value=value, value_text=text,
                        is_secret=o.is_secret, trust=o.trust, auto_eligible=o.auto_eligible,
                        confidence=o.confidence, ts=o.ts, journal_seq=o.journal_seq, unit_id=o.unit_id,
@@ -457,7 +466,7 @@ class _Builder:
             c.scope = self.verdict(c.subject)
             if c.decision_id is not None:
                 continue
-            first = c.first
+            first = c.first_observation
             enabled, parsers = False, ()
             for seq, en, ps in phases:
                 if seq < first.journal_seq:
@@ -484,9 +493,7 @@ class _Builder:
             host: str | None = None
             raw = d.payload.get("host")
             if isinstance(raw, str) and raw:
-                host = normalize_identifier(raw)
-                if host is not None and id_type(host) not in HOST_TYPES:
-                    host = None
+                host = host_identifier(raw)
             if host is None:
                 host = self._host_at(d.payload.get("terminal_id"), d.payload.get("stream_off"))
             out.append((d, host))
@@ -496,15 +503,18 @@ class _Builder:
         if not isinstance(term, str) or not isinstance(off, int):
             return None
         best: UnitRow | None = None
-        for u in self.units.values():
+        containing: UnitRow | None = None
+        for u in sorted(self.units.values(), key=lambda x: x.unit_id):
             if u.terminal_id != term:
                 continue
             if u.start_off is not None and u.end_off is not None and u.start_off <= off <= u.end_off:
-                return self.ctx_host[u.unit_id]
-            if u.ctx_opened_at is not None and u.ctx_opened_at <= off and (
+                if containing is None or (containing.start_off or 0) < u.start_off:
+                    containing = u  # die innerste (zuletzt begonnene) Einheit
+            elif u.ctx_opened_at is not None and u.ctx_opened_at <= off and (
                     best is None or (best.ctx_opened_at or 0) < u.ctx_opened_at):
                 best = u
-        return self.ctx_host[best.unit_id] if best is not None else None
+        hit = containing or best
+        return self.ctx_host[hit.unit_id] if hit is not None else None
 
     # ------------------------------------------------------------------ Identitäten
     def _identity(self, claims: dict[str, _Claim], keysteps: list[tuple[DecisionRow, str | None]]
@@ -736,7 +746,7 @@ class _Builder:
                 if subj in ents:
                     eid = subj
                 else:
-                    ident = normalize_identifier(subj)
+                    ident = normalize_identifier(subj) or host_identifier(subj)
                     eid = self._entity_for(ident, entity_of) if ident else None
             if eid is None or eid not in ents:
                 self.orphans.append((d, "Subjekt unbekannt", subj if isinstance(subj, str) else None))

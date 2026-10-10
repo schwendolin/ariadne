@@ -1,0 +1,153 @@
+[
+ {
+  "text": "ok: äöü € 🔑",
+  "raw": [
+   0,
+   21
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   5,
+   1,
+   5,
+   6,
+   3,
+   2,
+   8,
+   11,
+   2,
+   3,
+   10,
+   15,
+   1,
+   1
+  ]
+ },
+ {
+  "text": "invalid continuation: a�(b",
+  "raw": [
+   21,
+   49
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   26,
+   1
+  ]
+ },
+ {
+  "text": "lone continuation: �� end",
+  "raw": [
+   49,
+   76
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   25,
+   1
+  ]
+ },
+ {
+  "text": "overlong slash: �� and ���",
+  "raw": [
+   76,
+   104
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   26,
+   1
+  ]
+ },
+ {
+  "text": "surrogate: ��� x",
+  "raw": [
+   104,
+   122
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   16,
+   1
+  ]
+ },
+ {
+  "text": "too big: ���� y",
+  "raw": [
+   122,
+   139
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   15,
+   1
+  ]
+ },
+ {
+  "text": "c1 csi as utf-8: [31m] stays text",
+  "raw": [
+   139,
+   176
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   18,
+   1,
+   18,
+   20,
+   15,
+   1
+  ]
+ },
+ {
+  "text": "latin1 from target: Ger�t f�r Stra�e",
+  "raw": [
+   176,
+   214
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   36,
+   1
+  ]
+ },
+ {
+  "text": "truncated at end: �",
+  "raw": [
+   214,
+   234
+  ],
+  "flags": 0,
+  "sgr": [],
+  "colmap": [
+   0,
+   0,
+   19,
+   1
+  ]
+ }
+]

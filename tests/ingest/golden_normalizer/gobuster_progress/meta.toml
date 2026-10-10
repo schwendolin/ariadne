@@ -1,0 +1,6 @@
+tool = "gobuster 3.6 dir"
+source = "nachgestellt (make_crafted.py)"
+note = "Fortschritt mit \r, Treffer mit \r ESC[2K, ONLCR"
+cols = 80
+rows = 24
+marks = "none"

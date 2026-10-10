@@ -1,0 +1,9 @@
+ok: Ã¤Ã¶Ã¼ â‚¬ ğŸ”‘
+invalid continuation: aÃ(b
+lone continuation: €¿ end
+overlong slash: À¯ and à€¯
+surrogate: í € x
+too big: ô€€ y
+c1 csi as utf-8: [Â›31m] stays text
+latin1 from target: Gerät für Straße
+truncated at end: â‚

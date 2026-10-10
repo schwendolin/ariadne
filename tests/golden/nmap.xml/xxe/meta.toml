@@ -1,0 +1,10 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -sV -oX scans/evil.xml 192.168.56.101"
+source = "nachgestellt"
+note = "XXE-Versuch über externe Entity; muss ohne Auswertung scheitern"
+
+[unit]
+kind = "file"
+path = "scans/evil.xml"
+sniff = "xml:nmaprun"

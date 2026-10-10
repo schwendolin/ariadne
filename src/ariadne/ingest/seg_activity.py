@@ -86,7 +86,8 @@ def write_activity(conn: Any, row: Mapping[str, Any]) -> None:
 
 def add_route(conn: Any, seq: int, header: Mapping[str, Any]) -> None:
     """``net.route`` speichern und die Quell-IP im Protokoll nachtragen."""
-    conn.execute("INSERT OR IGNORE INTO net_route(seq, cmd_id, target, src_ip, dev, via) VALUES (?, ?, ?, ?, ?, ?)",
+    conn.execute("INSERT OR IGNORE INTO net_route(seq, cmd_id, target, src_ip, dev, via) "
+                 "VALUES (?, ?, ?, ?, ?, ?)",
                  (seq, header.get("cmd_id"), header.get("target"), header.get("src_ip"), header.get("dev"),
                   header.get("via")))
     if header.get("src_ip"):

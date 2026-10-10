@@ -1,0 +1,9 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "sudo nmap -O -v 192.168.56.100-104"
+source = "nachgestellt"
+note = "Sweep mit -v: Hosts down, rDNS-Zeile, OS details, ohne Versionsspalte"
+
+[unit]
+kind = "command"
+cmd = "sudo nmap -O -v 192.168.56.100-104"

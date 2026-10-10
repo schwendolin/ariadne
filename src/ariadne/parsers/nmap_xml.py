@@ -159,17 +159,17 @@ class NmapXmlParser:
 
     # ------------------------------------------------------------------ parse
     def parse(self, unit: UnitView) -> Iterator[Obs | Mention]:
-        data = unit_bytes(unit)
+        full = unit_bytes(unit)
+        data = full
         if unit.kind == "command":
-            j = data.find(b"<?xml")
+            # nmap -oX -: vor dem XML können Warnungen stehen; Zeilen zählen trotzdem ab Einheitsbeginn
+            j = full.find(b"<?xml")
             if j < 0:
-                j = data.find(b"<nmaprun")
+                j = full.find(b"<nmaprun")
             if j < 0:
                 return
-            # Zeilen vor dem XML (z. B. Warnungen) zählen für die Fundstellen mit
-            prefix_lines = data[:j].count(b"\n")
-            data = b"\n" * prefix_lines + data[j:]
-        loc = _Locator(decode(data))
+            data = full[j:]
+        loc = _Locator(decode(full))
         root_seen = False
         host_idx = 0
         try:

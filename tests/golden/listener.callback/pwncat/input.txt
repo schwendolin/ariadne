@@ -1,0 +1,4 @@
+[16:40:01] Welcome to pwncat!                                      __main__.py:164
+[16:40:05] received connection from 192.168.56.101:49155              bind.py:84
+[16:40:06] 192.168.56.101:49155: registered new host w/ db          manager.py:957
+(local) pwncat$ 

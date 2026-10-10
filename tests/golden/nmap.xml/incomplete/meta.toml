@@ -1,0 +1,10 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -O -v -oX scans/sweep.xml 192.168.56.100-104"
+source = "nachgestellt"
+note = "Lauf abgebrochen: Datei endet mitten im dritten host-Element, kein </nmaprun>"
+
+[unit]
+kind = "file"
+path = "scans/sweep.xml"
+sniff = "xml:nmaprun"

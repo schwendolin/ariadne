@@ -1,0 +1,6 @@
+tool = "linpeas.sh"
+source = "nachgestellt (make_crafted.py)"
+note = "Farbspannen 1;31;103 (RED/YELLOW), Kastenzeichen UTF-8"
+cols = 80
+rows = 24
+marks = "none"

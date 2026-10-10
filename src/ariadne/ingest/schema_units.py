@@ -12,8 +12,12 @@ Alles hier ist Schicht 2 und jederzeit neu berechenbar. Natürliche Schlüssel
     ``flags`` sind die Bits aus ``ariadne.ingest.normalizer`` (1 prompt_echo,
     2 concealed, 4 overwritten, 8 altscreen, 16 wrapped).
 ``unit_fts``
-    FTS5 über ``unit_line.text`` (External Content, über Trigger gepflegt).
-    Prompt-Echo-Zeilen werden nie indexiert.
+    FTS5 über ``unit_line.text`` (External Content). Gepflegt von
+    ``ariadne.ingest.unit_store`` gebündelt pro Durchgang (Trigger pro Zeile
+    sind um ein Vielfaches langsamer). Prompt-Echo-Zeilen werden nie indexiert.
+    Wer ``unit_line`` ausserhalb dieses Moduls ändert, ruft danach
+    ``unit_store.reindex_fts``; ``'rebuild'`` von FTS5 würde auch Prompt-Echo
+    indexieren.
 ``activity``
     Eine Zeile pro lokalem Befehl (Herkunftsstufe ``local``).
 """
@@ -93,23 +97,6 @@ CREATE INDEX IF NOT EXISTS unit_line_raw_idx ON unit_line(terminal_id, raw_start
 CREATE VIRTUAL TABLE IF NOT EXISTS unit_fts USING fts5(
   text, content='unit_line', content_rowid='id', tokenize='unicode61'
 );
-CREATE TRIGGER IF NOT EXISTS unit_line_fts_ai AFTER INSERT ON unit_line
-WHEN (new.flags & 1) = 0 BEGIN
-  INSERT INTO unit_fts(rowid, text) VALUES (new.id, new.text);
-END;
-CREATE TRIGGER IF NOT EXISTS unit_line_fts_ad AFTER DELETE ON unit_line
-WHEN (old.flags & 1) = 0 BEGIN
-  INSERT INTO unit_fts(unit_fts, rowid, text) VALUES ('delete', old.id, old.text);
-END;
-CREATE TRIGGER IF NOT EXISTS unit_line_fts_au_old AFTER UPDATE OF text, flags ON unit_line
-WHEN (old.flags & 1) = 0 BEGIN
-  INSERT INTO unit_fts(unit_fts, rowid, text) VALUES ('delete', old.id, old.text);
-END;
-CREATE TRIGGER IF NOT EXISTS unit_line_fts_au_new AFTER UPDATE OF text, flags ON unit_line
-WHEN (new.flags & 1) = 0 BEGIN
-  INSERT INTO unit_fts(rowid, text) VALUES (new.id, new.text);
-END;
-
 CREATE TABLE IF NOT EXISTS cmd_block (
   cmd_id      TEXT PRIMARY KEY,
   terminal_id TEXT NOT NULL,
@@ -126,7 +113,8 @@ CREATE TABLE IF NOT EXISTS cmd_block (
   ts_start_ns INTEGER,
   ts_end_ns   INTEGER,
   flags       TEXT NOT NULL DEFAULT '[]',
-  ctx         TEXT               -- JSON: Stapel beim C-Marker
+  ctx         TEXT,              -- JSON: Stapel vor dem C-Marker
+  companions  TEXT NOT NULL DEFAULT '[]'  -- JSON: Dateien laut Parser.companions (nur lokale Befehle)
 );
 CREATE INDEX IF NOT EXISTS cmd_block_term_idx ON cmd_block(terminal_id, c_off);
 

@@ -35,7 +35,7 @@ from ariadne.ingest.db import apply_schema, get_watermark, set_meta, set_waterma
 from ariadne.ingest.runner import InProcessRunner, Runner, RunResult
 from ariadne.ingest.seg_activity import activity_row, add_route
 from ariadne.ingest.seg_stream import TermStream, seg_event_from_record
-from ariadne.ingest.segmenter import SEG_KINDS, compute_layout
+from ariadne.ingest.segmenter import SEG_KINDS, CmdBlock, compute_layout
 from ariadne.ingest.unit_store import load_unit, save_unit, store_file_lines, sync_layout
 from ariadne.ingest.units import MAX_FILE_LINES_BYTES, Unit, file_lines, is_binary
 from ariadne.scope.api import ScopeChecker
@@ -224,6 +224,8 @@ class Pipeline:
                 ts.force_feed()
             if ts.dirty:
                 layout = compute_layout(tid, ts.events, ts.stream_end, closed=ts.closed)
+                for b in layout.blocks:
+                    b.companions = self._companions(ts, b)
                 res = sync_layout(self.conn, ts, layout,
                                   activity=lambda b, lay: activity_row(b, lay, self.scope))
                 ts.dirty = False
@@ -242,6 +244,24 @@ class Pipeline:
             if silent:
                 self._provisional(ts, stats)
 
+    def _companions(self, ts: TermStream, block: CmdBlock) -> tuple[str, ...]:
+        """Dateien, die ein lokaler Befehl laut den Parsern schreibt (Architektur 4.2)."""
+        if not block.argv or not block.local:
+            return ()
+        key = (block.cmd_id, block.text, block.cwd)
+        hit = ts.companions.get(key)
+        if hit is not None:
+            return hit
+        out: list[str] = []
+        for p in self.registry:
+            try:
+                paths = p.companions(list(block.argv), block.cwd or "")
+            except Exception:  # noqa: BLE001 - ein defekter Parser verhindert keine Verknüpfung
+                continue
+            out += [x for x in paths if isinstance(x, str) and x and x not in out]
+        ts.companions[key] = tuple(out[:64])
+        return ts.companions[key]
+
     def _provisional(self, ts: TermStream, stats: Stats) -> None:
         pending = ts.pending_lines()
         rows = self.conn.execute(
@@ -256,7 +276,7 @@ class Pipeline:
             if parsed == psig:
                 continue
             unit = load_unit(self.conn, uid, extra_lines=extra)
-            if unit is None:
+            if unit is None or not unit.lines:
                 continue
             self._parse(unit, psig, parsed, stats, provisional=True)
 
@@ -279,14 +299,16 @@ class Pipeline:
             flags.append("not_stored")
         lines = file_lines(data) if data is not None else None
         if data is not None and lines is None:
-            flags.append("too_large" if len(data) > MAX_FILE_LINES_BYTES and not is_binary(data) else "binary")
+            big = len(data) > MAX_FILE_LINES_BYTES and not is_binary(data)
+            flags.append("too_large" if big else "binary")
         path = h.get("path") if isinstance(h.get("path"), str) else None
         context = self._file_context(h, path)
         sig = f"file:{rec.id}"
         row = {
             "unit_id": uid, "kind": "file", "terminal_id": None, "cmd_id": h.get("produced_by_cmd"),
             "span_id": None, "start_off": None, "end_off": None, "argv": "[]", "cmd_text": None,
-            "exit_code": None, "cwd": None, "context": json.dumps(context, ensure_ascii=False, sort_keys=True),
+            "exit_code": None, "cwd": None,
+            "context": json.dumps(context, ensure_ascii=False, sort_keys=True),
             "path": path, "mime": h.get("mime"), "sniff": h.get("sniff"), "blob_id": blob_id,
             "sha256": h.get("sha256"), "size": h.get("size"), "ts_utc_ns": rec.ts_utc_ns, "ts_end_ns": None,
             "state": "final", "flags": json.dumps(sorted(flags)), "sig": sig, "line_count": 0, "vis_count": 0,
@@ -295,7 +317,8 @@ class Pipeline:
         save_unit(self.conn, row)
         if lines:
             count, vis = store_file_lines(self.conn, uid, lines)
-            self.conn.execute("UPDATE unit SET line_count = ?, vis_count = ? WHERE unit_id = ?", (count, vis, uid))
+            self.conn.execute("UPDATE unit SET line_count = ?, vis_count = ? WHERE unit_id = ?",
+                              (count, vis, uid))
         unit = load_unit(self.conn, uid, data=data)
         if unit is not None:
             self._parse(unit, sig, None, stats)
@@ -333,8 +356,8 @@ class Pipeline:
                 continue
             if r.error is not None:
                 stats.failures += 1
-                conn.execute("INSERT OR REPLACE INTO parse_failure(unit_id, parser_id, parser_version, reason, "
-                             "ts_utc_ns) VALUES (?, ?, ?, ?, ?)",
+                conn.execute("INSERT OR REPLACE INTO parse_failure(unit_id, parser_id, parser_version, "
+                             "reason, ts_utc_ns) VALUES (?, ?, ?, ?, ?)",
                              (unit.unit_id, r.parser_id, r.parser_version, r.error[:200], self.clock()))
                 log.warning("Parser %s fehlgeschlagen (%s)", r.parser_id, r.error.split(":", 1)[0])
                 continue

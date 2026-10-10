@@ -12,7 +12,7 @@ laufen mit ``sqlite3`` wie mit ``sqlcipher3``.
   verschlüsselt). Keine Sicht liest daraus; überall sonst stehen HMAC-Kennungen.
 * ``generation`` und ``projection_delta`` sind der Änderungsfeed.
 
-Sichten zeigen Secret-Werte nur maskiert.
+Sichten zeigen Secret-Werte nur maskiert (:data:`MASK`, wörtlich im SQL).
 """
 
 from __future__ import annotations
@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS projection_delta (
 CREATE INDEX IF NOT EXISTS projection_delta_gen ON projection_delta(generation);
 """
 
-VIEWS_SQL = f"""
+VIEWS_SQL = """
 CREATE VIEW IF NOT EXISTS v_host AS
 SELECT e.entity_id AS host_id, e.label, e.scope, e.claim_state, e.knowledge, e.access, e.work,
        e.work_reason, e.progress, json_extract(e.attrs_json, '$.os') AS os,
@@ -246,14 +246,14 @@ FROM entity e WHERE e.type = 'service';
 CREATE VIEW IF NOT EXISTS v_claim AS
 SELECT c.claim_key, c.subject_identifier, c.entity_id, c.predicate,
        CASE WHEN c.is_secret THEN NULL ELSE c.value_json END AS value_json,
-       CASE WHEN c.is_secret THEN '{MASK}' ELSE c.value_text END AS value_text,
+       CASE WHEN c.is_secret THEN '••••••••' ELSE c.value_text END AS value_text,
        c.confidence, c.state, c.trust, c.parser_id, c.sources, c.from_target, c.suspect, c.scope,
        c.conflict_key, c.first_unit, c.last_unit, c.first_ts, c.last_ts, c.is_secret
 FROM claim c;
 
 CREATE VIEW IF NOT EXISTS v_mention AS
 SELECT m.mention_id, m.unit_id, m.parser_id, m.value_type,
-       CASE WHEN m.is_secret THEN '{MASK}' ELSE m.value END AS value,
+       CASE WHEN m.is_secret THEN '••••••••' ELSE m.value END AS value,
        m.span_json, m.attrs_json, m.ts_utc_ns, m.from_target, m.suspect, m.is_secret, m.scope_verdict,
        u.terminal_id, u.title, u.kind AS unit_kind
 FROM mention m LEFT JOIN obs_unit u ON u.unit_id = m.unit_id;

@@ -1,0 +1,4 @@
+Listening on 0.0.0.0 4444
+Connection received on 192.168.56.101 49154
+sh: 0: can't access tty; job control turned off
+$ 

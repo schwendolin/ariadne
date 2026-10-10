@@ -1,0 +1,6 @@
+tool = "winPEAS über nc"
+source = "nachgestellt (make_crafted.py)"
+note = "Windows-CRLF durch ONLCR als \r\r\n, Farben, CP437-Bytes"
+cols = 80
+rows = 24
+marks = "none"

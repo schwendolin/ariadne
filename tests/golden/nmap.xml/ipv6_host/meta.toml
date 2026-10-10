@@ -1,0 +1,10 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -6 -sV -oX scans/v6.xml fd00:56::101"
+source = "nachgestellt"
+note = "IPv6-Ziel mit MAC aus Neighbor Discovery"
+
+[unit]
+kind = "file"
+path = "scans/v6.xml"
+sniff = "xml:nmaprun"

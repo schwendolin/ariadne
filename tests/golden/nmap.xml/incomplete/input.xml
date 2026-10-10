@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.94SVN scan initiated Wed Oct  8 15:10:02 2026 as: nmap -O -v -oX scans/sweep.xml 192.168.56.100-104 -->
+<nmaprun scanner="nmap" args="nmap -O -v -oX scans/sweep.xml 192.168.56.100-104" start="1791465002" startstr="Wed Oct  8 15:10:02 2026" version="7.94SVN" xmloutputversion="1.05">
+<scaninfo type="syn" protocol="tcp" numservices="1000" services="1,3-4,6-7,9,13,17,19-26"/>
+<verbose level="1"/>
+<debugging level="0"/>
+<host><status state="down" reason="no-response" reason_ttl="0"/>
+<address addr="192.168.56.100" addrtype="ipv4"/>
+</host>
+<host starttime="1791465003" endtime="1791465008"><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="192.168.56.101" addrtype="ipv4"/>
+<address addr="08:00:27:63:7E:E7" addrtype="mac" vendor="Oracle VirtualBox virtual NIC"/>
+<hostnames>
+<hostname name="ms2.lab" type="user"/>
+<hostname name="metasploitable.lab" type="PTR"/>
+</hostnames>
+<ports><extraports state="closed" count="997">
+<extrareasons reason="reset" count="997" proto="tcp" ports="1,3-4,6-7,9,13,17,19-20"/>
+</extraports>
+<port protocol="tcp" portid="21"><state state="open" reason="syn-ack" reason_ttl="64"/><service name="ftp" method="table" conf="3"/></port>
+<port protocol="tcp" portid="22"><state state="open" reason="syn-ack" reason_ttl="64"/><service name="ssh" method="table" conf="3"/></port>
+<port protocol="tcp" portid="445"><state state="filtered" reason="no-response" reason_ttl="0"/><service name="microsoft-ds" method="table" conf="3"/></port>
+</ports>
+<os><portused state="open" proto="tcp" portid="21"/>
+<portused state="closed" proto="tcp" portid="1"/>
+<osmatch name="Linux 2.6.9 - 2.6.33" accuracy="100" line="55543">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="2.6.X" accuracy="100"><cpe>cpe:/o:linux:linux_kernel:2.6</cpe></osclass>
+</osmatch>
+<osmatch name="Linux 2.6.22" accuracy="95" line="55011">
+<osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="2.6.X" accuracy="95"><cpe>cpe:/o:linux:linux_kernel:2.6.22</cpe></osclass>
+</osmatch>
+</os>
+<uptime seconds="1203" lastboot="Wed Oct  8 14:50:05 2026"/>
+<distance value="1"/>
+<times srtt="410" rttvar="160" to="100000"/>
+</host>
+<host><status state="down" reason="no-response" reason_ttl="0"/>
+<address addr="192.168.56.103" addrtype="ipv4"/>
+</host>
+<host starttime="1791465003" endtime="1791465010"><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="192.168.56.104" addrtype="ipv4"/>
+<address addr="08:00:27:AA:BB:CC" addrtype="mac" vendor="Oracle VirtualBox virtual NIC"/>
+<hostnames>
+</hostnames>
+<ports><extraports state="closed" count="999">
+<extrareasons reason="reset" count="999" proto="tcp" ports="1,3-4"/>
+</extraports>
+<port protocol="tcp" portid="3389"><state state="open" reason="syn-ack" reason_ttl="128"/><service name="ms-wb

@@ -1,0 +1,6 @@
+tool = "diverse"
+source = "nachgestellt (make_crafted.py)"
+note = "kaputtes UTF-8, Überlänge, Surrogate, C1, Latin-1, abgeschnittenes Zeichen am Ende"
+cols = 80
+rows = 24
+marks = "none"

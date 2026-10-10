@@ -211,9 +211,13 @@ class NmapTextParser:
             yield Obs(svc, "service.name", name, span, confidence=conf, attrs=sus)
         if tunnel in ("ssl", "tls"):
             yield Obs(svc, "service.tunnel", "ssl", span, confidence=conf, attrs=sus)
-        if not has_version or ver_col is None or len(text) <= ver_col:
+        if not has_version or ver_col is None:
             return
-        vtext = text[ver_col:].strip()
+        svc_end = m.end(4)  # type: ignore[attr-defined]
+        if svc_end < ver_col and text[ver_col - 1 : ver_col] == " ":
+            vtext = text[ver_col:].strip()  # Spalte wie im Kopf ausgerichtet
+        else:
+            vtext = text[svc_end:].strip()  # verschobene Spalten: Rest nach dem Dienst
         if not vtext:
             return
         product, version, extra = split_version(vtext)

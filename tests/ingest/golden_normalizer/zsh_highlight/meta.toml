@@ -1,0 +1,6 @@
+tool = "zsh 5.9 im PTY, nachgebaute autosuggestions- und syntax-highlighting-Widgets"
+source = "echt: PTY-Aufnahme mit capture.py"
+note = "Prompt-Echo mit Neuzeichnen (Farben, grauer Vorschlag, Backspace, Cursor zurück), PROMPT_SP-Markierung (#) ohne Zeilenende"
+cols = 80
+rows = 24
+marks = "osc133"

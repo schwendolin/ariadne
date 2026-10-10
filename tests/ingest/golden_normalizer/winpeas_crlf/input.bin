@@ -1,0 +1,9 @@
+[1;36m�??????????? Basic System Information[0m
+[1;34m╔══════════╣ [1;32mBasic System Information[0m
+[1;90m   Check if the Windows versions is vulnerable to some known exploit[0m
+    Hostname: [1;33mDC01[0m
+    ProductName: Windows Server 2019 Standard
+    [1;31mAlwaysInstallElevated set to 1 in HKLM![0m
+    DefaultPassword               :  [1;31mP@ssw0rd2024![0m
+
+[1;35m  [*] Done[0m

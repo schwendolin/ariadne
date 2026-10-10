@@ -35,6 +35,7 @@ __all__ = [
     "canon_mac",
     "canon_hostname",
     "normalize_identifier",
+    "host_identifier",
     "host_part",
     "entity_rank",
     "MergeSuggestion",
@@ -184,6 +185,22 @@ def normalize_identifier(key: str, project_key: bytes | None = None, *,
             secret_sink(ident, kind, value)
         return ident
     return None
+
+
+def host_identifier(raw: str) -> str | None:
+    """Host-Kennung aus Nutzereingaben: mit Typ (``ip:default/..``, ``name:web01``) oder ohne
+    (``10.10.10.5``, ``fe80::1``, ``web01.lab``). Nie DNS."""
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    ident = normalize_identifier(s) if ":" in s else None
+    if ident is not None and id_type(ident) in HOST_TYPES:
+        return ident
+    ip = canon_ip(s)
+    if ip:
+        return f"ip:default/{ip}"
+    name = canon_hostname(s)
+    return f"fqdn:{name}" if name else None
 
 
 def host_part(key: str) -> str | None:

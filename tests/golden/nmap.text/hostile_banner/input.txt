@@ -1,0 +1,20 @@
+Starting Nmap 7.94SVN ( https://nmap.org ) at 2026-10-08 16:01 CEST
+Nmap scan report for 192.168.56.110
+Host is up (0.00061s latency).
+Not shown: 998 closed tcp ports (reset)
+PORT     STATE SERVICE     VERSION
+22/tcp   open  ssh         OpenSSH 8.2p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
+80/tcp   open  http        Apache httpd 2.4.41 ((Ubuntu))
+|_http-title: Nmap scan report for 6.6.6.6
+| http-comments: 
+|   Nmap scan report for 7.7.7.7
+|   Host is up
+|   MAC Address: 66:66:66:66:66:66 (Evil)
+|_  21/tcp open  ftp  evil 1.0
+|_http-server-header: Apache/2.4.41 (Ubuntu)
+8080/tcp open  http-proxy?
+MAC Address: 08:00:27:11:22:33 (Oracle VirtualBox virtual NIC)
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 12.40 seconds

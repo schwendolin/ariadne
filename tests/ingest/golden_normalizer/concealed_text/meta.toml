@@ -1,0 +1,6 @@
+tool = "diverse"
+source = "nachgestellt (make_crafted.py)"
+note = "SGR 8, gleiche Vorder- und Hintergrundfarbe (16, 256, RGB)"
+cols = 80
+rows = 24
+marks = "none"

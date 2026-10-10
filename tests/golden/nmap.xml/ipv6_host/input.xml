@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.94SVN scan initiated Wed Oct  8 15:20:44 2026 as: nmap -6 -sV -oX scans/v6.xml fd00:56::101 -->
+<nmaprun scanner="nmap" args="nmap -6 -sV -oX scans/v6.xml fd00:56::101" start="1791465644" startstr="Wed Oct  8 15:20:44 2026" version="7.94SVN" xmloutputversion="1.05">
+<scaninfo type="syn" protocol="tcp" numservices="1000" services="1,3-4,6-7,9,13,17,19-26"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<host starttime="1791465645" endtime="1791465660"><status state="up" reason="nd-response" reason_ttl="0"/>
+<address addr="fd00:56::101" addrtype="ipv6"/>
+<address addr="08:00:27:63:7E:E7" addrtype="mac" vendor="Oracle VirtualBox virtual NIC"/>
+<hostnames>
+<hostname name="ms2.lab" type="PTR"/>
+</hostnames>
+<ports><extraports state="closed" count="998">
+<extrareasons reason="reset" count="998" proto="tcp" ports="1,3-4"/>
+</extraports>
+<port protocol="tcp" portid="22"><state state="open" reason="syn-ack" reason_ttl="64"/><service name="ssh" product="OpenSSH" version="4.7p1 Debian 8ubuntu1" extrainfo="protocol 2.0" ostype="Linux" method="probed" conf="10"><cpe>cpe:/a:openbsd:openssh:4.7p1</cpe><cpe>cpe:/o:linux:linux_kernel</cpe></service></port>
+<port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="64"/><service name="http" product="Apache httpd" version="2.2.8" extrainfo="(Ubuntu) DAV/2" method="probed" conf="10"><cpe>cpe:/a:apache:http_server:2.2.8</cpe></service></port>
+</ports>
+<times srtt="330" rttvar="120" to="100000"/>
+</host>
+<runstats><finished time="1791465660" timestr="Wed Oct  8 15:21:00 2026" summary="Nmap done at Wed Oct  8 15:21:00 2026; 1 IP address (1 host up) scanned in 16.02 seconds" elapsed="16.02" exit="success"/><hosts up="1" down="0" total="1"/>
+</runstats>
+</nmaprun>
