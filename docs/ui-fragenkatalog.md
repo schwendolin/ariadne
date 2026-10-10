@@ -3,6 +3,8 @@
 > Brainstorming zur Web-Oberfläche, Stand 2026-10-09. Jede Frage hat Optionen und eine Empfehlung. Grundlage sind die [Architektur, Abschnitt 7](architektur.md#7-web-oberfläche-und-karte) und deine bisherigen Antworten. Ein klickbarer Prototyp mit Beispieldaten zeigt die empfohlene Richtung.
 >
 > **So antworten:** «Empfehlungen passen, ausser B2: C, F4: B».
+>
+> **Stand 2026-10-10:** Der erste Prototyp war zu überladen. Gewählt ist das Layout «Karte und Arbeitsliste» ([Prototyp](ui/prototyp-karte-liste.html), Entscheide E86 bis E88). Es ersetzt die Empfehlung zu A1 (Cockpit mit Schubladen) und beantwortet B2 (Hosts nach Netzsegmenten) und B9 (Session abspielen ist dabei). Offen bleiben F4 und die Fragen, die der Prototyp nicht berührt.
 
 ## A. Gesamtbild
 

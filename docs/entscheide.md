@@ -91,6 +91,9 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 | E69 | 2026-10-09 | Parser-Reihenfolge nach Verbreitung im Lab, Tests mit nachgestellten Outputs, bis echte vorliegen | kein Testmaterial zur Hand | Nutzer + KI | fest | A5.6 |
 | E67 | 2026-10-08 | Scope-Warnung: v0.1 nach dem Befehlsstart, ab v0.2 vor dem Ausführen | so gewünscht; gestaffelt | Nutzer + KI | fest | F7.4 |
 | E68 | 2026-10-08 | Befehlsvorlagen nur mit typisierten Platzhaltern und Kontext-Encodern | aus Zieldaten gefüllte Befehle sind sonst ein Weg zur Codeausführung auf Kali | KI-Vorschlag | vorläufig | A6.1 |
+| E86 | 2026-10-10 | Layout «Karte und Arbeitsliste»: links die Karte, rechts eine Spalte «Als Nächstes» (Klären, Bestätigen, Denkanstösse), die bei Auswahl eines Hosts dessen Detail zeigt; Terminals, Zeitachse und Findings als Reiter. Ersetzt das Cockpit mit Schubladen (UI A1) | Nutzer fand den ersten Prototyp «sehr überladen und unübersichtlich»; von zwei ruhigen Varianten gewählt. Referenz: [Prototyp](ui/prototyp-karte-liste.html) | Nutzer | fest | UI A1, A7.4 |
+| E87 | 2026-10-10 | Gestaltungsregel «Ruhe zuerst»: im Startzustand höchstens etwa 25 Bedienelemente, Karte mindestens 70 % der Fläche, jede Zahl nur einmal, Farbe nur für Zugriff, Faden und Handlungsbedarf, Konfidenz und Scope nur als Ausnahme, Host-Karten mit einem Hinweis und mehr erst bei Hover, Auswahl oder Zoom | aus dem Feedback zum ersten Prototyp abgeleitet und an beiden Varianten gemessen | KI-Vorschlag | vorläufig | UI A3, A7.5 |
+| E88 | 2026-10-10 | Sammelbestätigung nimmt nur Werte im Scope, ohne KI-Werte und ohne niedrige Konfidenz; Konflikte, Merges und Kontexte immer einzeln | ein UI-Review fand, dass «Alle annehmen» sonst feindliche und KI-Werte mitnimmt | KI-Vorschlag | vorläufig | UI C2, web-api.md |
 
 ## Sicherheit und Daten
 
