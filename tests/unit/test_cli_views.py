@@ -52,3 +52,15 @@ def test_empty_views():
         assert render_view(what, [])
     assert render_search([]) == ["Keine Treffer."]
     assert "Verwaiste Entscheide: keine" in render_reparse({})[-1]
+
+
+def test_context_label():
+    from ariadne.ingest.queries import context_label
+
+    assert context_label({"kind": "local", "host": "local"}) == "Kali"
+    assert context_label({"kind": "su", "host": "local", "user": "root"}) == "Kali (root)"
+    assert context_label({"kind": "revshell"}) == "? [revshell]"
+    assert context_label({"kind": "unknown"}) == "?"
+    assert context_label({"kind": "unknown", "host": "ip:default/10.10.10.3"}) == "10.10.10.3"
+    assert context_label({"kind": "ssh", "host": "name:web01", "user": "www"}) == "web01 (www) [ssh]"
+    assert context_label(None) == "Kali"

@@ -200,6 +200,10 @@ def cmd_status(paths: Paths, args: argparse.Namespace) -> int:
         rec = "an, wartet (gesperrt)"
     say(f"REC:      {rec}")
     say(f"Terminals: {st['terminals']} verbunden, {st['recording']} nehmen auf")
+    ing = st.get("ingest") or {}
+    if ing.get("active"):
+        err = f", letzter Fehler: {s(ing['last_error'], 60)}" if ing.get("last_error") else ""
+        say(f"Auswertung: aktiv ({s(ing.get('runs', 0), 10)} Durchgänge{err})")
     return 0
 
 

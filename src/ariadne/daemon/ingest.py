@@ -233,6 +233,8 @@ class IngestService:
 
     def _job(self, snap: tuple[int, dict[str, Any]]) -> Stats | None:
         self._queued = False
+        if self._stopping.is_set():
+            return None
         try:
             st = self._ensure(snap)
             stats = st.pipeline.process_new()

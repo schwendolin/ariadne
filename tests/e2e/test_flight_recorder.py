@@ -151,17 +151,19 @@ class Lab:
             assert time.monotonic() < deadline, "Daemon antwortet nicht"
             time.sleep(0.05)
 
-    def stop_daemon(self) -> None:
+    def stop_daemon(self) -> int | None:
+        """``ariadne daemon stop``, notfalls SIGTERM. Gibt den Exit-Code zurück."""
         if self.daemon is None:
-            return
+            return None
         with contextlib.suppress(Exception):
             self.cli("daemon", "stop", check=False)
         try:
-            self.daemon.wait(timeout=15)
+            rc = self.daemon.wait(timeout=15)
         except subprocess.TimeoutExpired:
             self.daemon.send_signal(signal.SIGTERM)
-            self.daemon.wait(timeout=10)
+            rc = self.daemon.wait(timeout=10)
         self.daemon = None
+        return rc
 
     def wait_status(self, needle: str, timeout: float = 10.0) -> str:
         deadline = time.monotonic() + timeout
@@ -289,6 +291,20 @@ def test_flight_recorder(lab: Lab) -> None:
         ks = lab.cli("show", "keysteps")
         assert re.search(rf"foothold\s+{re.escape(TARGET)}\s+Callback über nc", ks), ks
 
+        # Callback-Kandidat verwerfen, Loot ausdrücklich importieren
+        inbox = lab.cli("show", "inbox")
+        line = r"^    ([0-9a-f]{12})  " + re.escape(TARGET) + r"  access\.callback = nc:4444"
+        cb = re.search(line, inbox, re.M)
+        assert cb, inbox
+        out = lab.cli("reject", cb.group(1), "--reason", "Test")
+        assert f"Verworfen: {TARGET} access.callback = nc:4444" in out
+        loot = lab.base / "passwd"
+        loot.write_text("root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33::/var/www:/usr/sbin/nologin\n")
+        out = lab.cli("import", str(loot), "--host", TARGET)
+        assert "Importiert:" in out and "verschlüsselt gespeichert" in out
+        assert re.search(rf"{re.escape(TARGET)}\s+root:x:0:0", lab.cli("search", "root:x:0:0"))
+        assert "Warteliste leer." in lab.cli("show", "pending")
+
         assert "in Ordnung" in lab.cli("verify")
         rep = lab.cli("reparse")
         assert "Neu: 0, entfallen: 0, geändert: 0" in rep and "Verwaiste Entscheide: keine" in rep, rep
@@ -302,7 +318,8 @@ def test_flight_recorder(lab: Lab) -> None:
         c.close(force=True)
 
     assert "Projekt geschlossen" in lab.cli("project", "close")
-    lab.stop_daemon()
+    assert lab.stop_daemon() == 0
+    assert not lab.paths.ctl_sock.exists() and not lab.paths.term_sock.exists()
 
     # ---- Journal direkt prüfen (eigene Entsperrung, Daemon ist aus) ---------------
     op = OperatorVault(lab.paths.operator_dir).unlock(PASSPHRASE)

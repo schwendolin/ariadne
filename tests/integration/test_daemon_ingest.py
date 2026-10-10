@@ -213,3 +213,25 @@ def test_show_without_project_and_bad_view(paths, operator):
         assert st["ingest"]["active"] and st["ingest"]["last_error"] is None
 
     run(paths, operator, scenario)
+
+
+def test_scope_update_reaches_projection(paths, operator):
+    from ariadne.project.settings import default_settings
+    from ariadne.store.api import AppendItem
+
+    async def scenario(d: Daemon) -> None:
+        shim, term, ws = await _start(paths)
+        await term.command(f"nmap -sV {TARGET}", ms2("text").replace(b"\n", b"\r\n"), cwd=str(ws))
+        await term.mark("A", cwd=str(ws))
+        await term.acked()
+        hosts = {h["label"]: h for h in (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]}
+        assert hosts[TARGET]["scope"] == "in"
+        toml = default_settings(name="lame", profile="lab", include=["10.10.10.0/24"])
+        toml = toml.replace("exclude = []", f'exclude = ["{TARGET}"]')
+        d.submit(AppendItem("d.scope.update", {"version": 2, "toml": toml}, origin="cli"))
+        hosts = {h["label"]: h for h in (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]}
+        assert d.project.settings_version == 2
+        assert hosts[TARGET]["scope"] == "excluded"
+        await shim.close()
+
+    run(paths, operator, scenario)

@@ -58,7 +58,10 @@ def _json(text: Any, default: Any) -> Any:
 
 
 def context_label(ctx: dict[str, Any] | None) -> str:
-    """Kurzbezeichnung einer Kontextstufe: ``Kali``, ``10.10.10.3 (root)``, ``? [revshell]``."""
+    """Kurzbezeichnung einer Kontextstufe: ``Kali``, ``10.10.10.3 (root)``, ``? [revshell]``.
+
+    Die Art ``unknown`` sagt nichts Zusätzliches und wird weggelassen.
+    """
     ctx = ctx or {}
     kind = ctx.get("kind")
     host = ctx.get("host")
@@ -73,7 +76,7 @@ def context_label(ctx: dict[str, Any] | None) -> str:
         base = "?"
     if user and (kind not in (None, "local") or base != "Kali"):
         base += f" ({user})"
-    if kind not in (None, "local", "su"):
+    if kind not in (None, "local", "su", "unknown"):
         base += f" [{kind}]"
     return base
 
