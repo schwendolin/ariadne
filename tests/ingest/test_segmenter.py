@@ -314,7 +314,7 @@ def test_companions_only_for_local_commands(env):
             return iter(())
 
         def companions(self, argv, cwd):
-            return [f"{cwd}/{a[3:]}.xml" for a in argv if a.startswith("-oA")] + [a for a in argv if a == "boom"]
+            return [f"{cwd}/{a[3:]}.xml" for a in argv if a.startswith("-oA")]
 
     t = env.term
     t.open()
@@ -325,3 +325,50 @@ def test_companions_only_for_local_commands(env):
     got = dict(env.rows("SELECT cmd_id, companions FROM cmd_block"))
     assert json.loads(got[f"{TID}@{c}"]) == ["/home/kali/p/scan.xml"]
     assert json.loads(got[f"{TID}@{c2}"]) == []
+
+
+def test_flags_altscreen_and_forged_marker(env):
+    t = env.term
+    t.open()
+    c = t.start("vim notes", b"\x1b[?1049h\x1b[H\x1b[2Jhidden in vim\x1b[?1049l")
+    t.end(0)
+    c2 = t.start("ssh root@10.10.10.3", b"evil banner\r\n")
+    t._append("term.marker_forged", {"stream_off": t.off, "reason": "bad_nonce"}, stream_off=t.off)
+    t.out(b"more\r\n")
+    t.end(0)
+    env.pipeline().process_new()
+    flags = {(r[0], r[1]): json.loads(r[2]) for r in env.rows("SELECT cmd_id, kind, flags FROM unit "
+                                                                "WHERE cmd_id IS NOT NULL")}
+    assert "altscreen" in flags[(f"{TID}@{c}", "command")]
+    assert "marker_forged" in flags[(f"{TID}@{c2}", "segment")]
+    vim = [u for u in units(env) if u[4] == f"{TID}@{c}" and u[3] - u[2] > 20][0]
+    unit = load_unit(env.conn, vim[0])
+    assert "hidden in vim" not in [ln.text for ln in unit.lines]  # Schlussbild nie an Parser
+    assert ("hidden in vim", 8) in [(r[2], r[3]) for r in lines_of(env, vim[0])]
+
+
+def test_output_after_close_is_ignored(env):
+    t = env.term
+    t.open()
+    t.command("id", b"uid=0\r\n")
+    t.close()
+    t.out(b"late bytes\r\n")
+    t.mark("A")
+    p = env.pipeline()
+    p.process_new()
+    t.out(b"even later\r\n")
+    p.process_new()
+    assert ("late bytes",) not in env.rows("SELECT text FROM unit_line")
+
+
+def test_decision_before_rec_start_applies_from_start():
+    def ev(seq, kind, off, **h):
+        h.setdefault("terminal_id", TID)
+        return SegEvent(seq, kind, off, seq, h, "op")
+
+    evs = [ev(1, "term.ctx_snapshot", 500, stack=[{"kind": "local", "host": "local"},
+                                                   {"kind": "ssh", "opened_at": 400, "candidate": "x"}]),
+           ev(2, "d.ctx.set", 100, from_off=100, host="ip:default/10.10.10.8")]
+    lay = compute_layout(TID, evs, 900)
+    assert [(s.start, s.stage.get("host")) for s in lay.spans] == [(500, "ip:default/10.10.10.8")]
+    assert [(u.kind, u.start) for u in lay.units] == [("segment", 500)]

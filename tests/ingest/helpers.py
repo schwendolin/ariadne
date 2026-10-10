@@ -36,9 +36,7 @@ class TermSim:
                              stream_off=stream_off, ts_utc_ns=self.tick(0.01))
 
     def open(self, stack: list[dict[str, Any]] | None = None) -> None:
-        self._append("term.open", {"shell": "zsh", "rows": self.rows, "cols": self.cols, "shim_version": "1",
-                                   "stream_off": self.off} if False else
-                     {"shell": "zsh", "rows": self.rows, "cols": self.cols, "shim_version": "1"},
+        self._append("term.open", {"shell": "zsh", "rows": self.rows, "cols": self.cols, "shim_version": "1"},
                      origin="daemon", stream_off=self.off)
         self._append("term.bind", {"project_id": "p1"}, origin="daemon", stream_off=self.off)
         self.snapshot(stack)
@@ -94,12 +92,12 @@ class TermSim:
     def end(self, exit: int = 0, *, fg: bool = True) -> None:
         self.mark("D", fg=fg, exit=exit, cwd="/home/kali")
 
-    def decision(self, kind: str, **header: Any) -> None:
-        if kind == "d.ctx.set":
+    def decision(self, event_kind: str, **header: Any) -> None:
+        if event_kind == "d.ctx.set":
             header.setdefault("from_off", self.off)
         else:
             header.setdefault("stream_off", self.off)
-        self._append(kind, {k: v for k, v in header.items() if v is not None}, origin="webui",
+        self._append(event_kind, {k: v for k, v in header.items() if v is not None}, origin="webui",
                      stream_off=header.get("stream_off", header.get("from_off")))
 
     def gap(self, lost: int, reason: str = "rec_off") -> None:

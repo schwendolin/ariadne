@@ -1,7 +1,8 @@
 """Auswertungs-Pipeline: Journal -> Einheiten -> Parser -> Projektion (Architektur 5.4, 5.10).
 
 :meth:`Pipeline.process_new` verarbeitet alle Journal-Events nach dem
-Wasserstand ``ingest`` in einer Transaktion (inkrementell und idempotent):
+Wasserstand ``ingest`` (inkrementell und idempotent; eine Transaktion pro
+Durchgang, grosse Rückstände in Abschnitten):
 
 1. ``term.*`` und ``d.ctx.*`` gehen an den Segmenter des Terminals
    (:mod:`ariadne.ingest.seg_stream`), ``file.observed`` wird eine Datei-Einheit,
@@ -17,8 +18,14 @@ Wasserstand ``ingest`` in einer Transaktion (inkrementell und idempotent):
 
 Ohne Projector oder ohne Parser (Import fehlt) läuft alles andere trotzdem;
 geparst wird dann nicht. Der Projector teilt sich die Verbindung und damit die
-Transaktion. :meth:`Pipeline.reparse` baut alles in einer neuen Verbindung neu
-auf; den Dateitausch macht der Aufrufer.
+Transaktion. Fehler eines Parsers oder der Projektion einer Einheit werden zu
+``parse_failure`` und blockieren die übrigen Einheiten nicht.
+:meth:`Pipeline.reparse` baut alles in einer neuen Verbindung neu auf; den
+Dateitausch macht der Aufrufer.
+
+Einbindung in den Daemon (noch offen): ``process_new`` blockiert (Worker bis
+60 s pro Einheit) und gehört deshalb in einen eigenen Thread mit eigener
+Verbindung; Aufruf nach jedem Commit und zusätzlich periodisch (Stille).
 """
 
 from __future__ import annotations
@@ -31,8 +38,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ariadne.ingest.db import apply_schema, get_watermark, set_meta, set_watermark
-from ariadne.ingest.runner import InProcessRunner, Runner, RunResult
+from ariadne.ingest.db import apply_schema, get_meta, get_watermark, set_meta, set_watermark
+from ariadne.ingest.runner import Runner, RunResult
 from ariadne.ingest.seg_activity import activity_row, add_route
 from ariadne.ingest.seg_stream import TermStream, seg_event_from_record
 from ariadne.ingest.segmenter import SEG_KINDS, CmdBlock, compute_layout
@@ -47,6 +54,7 @@ log = logging.getLogger("ariadne.ingest")
 
 SILENCE_NS = 10 * 60 * 1_000_000_000
 WATERMARK = "ingest"
+BATCH_VOLUME = 50_000  # Events plus Ausgabe/64 Bytes pro Transaktion (begrenzt gepufferte Zeilen)
 
 
 @dataclass
@@ -86,18 +94,20 @@ def _auto_projector(conn: Any, project_key: bytes, scope: ScopeChecker | None) -
 
 class Pipeline:
     def __init__(self, journal: Any, blobs: Any, conn: Any, *, project_key: bytes,
-                 scope: ScopeChecker | None, runner: Runner | None = None, projector: Any = None,
+                 scope: ScopeChecker | None, runner: Runner, projector: Any = None,
                  registry: Sequence[Any] | None = None,
                  projector_factory: Callable[[Any], Any] | None = None,
                  clock: Callable[[], int] = time.time_ns, silence_ns: int = SILENCE_NS) -> None:
-        """``projector=None`` sucht ``ariadne.ingest.projection.Projector``, ``False`` schaltet ab.
+        """``runner`` ist im Daemon ein :class:`~ariadne.ingest.runner.SubprocessRunner`
+        (wer Schlüssel hält, parst nicht); ``InProcessRunner`` nur für Tests.
+        ``projector=None`` sucht ``ariadne.ingest.projection.Projector``, ``False`` schaltet ab.
         ``registry=None`` lädt ``ariadne.parsers.registry.default_registry()``."""
         self.journal = journal
         self.blobs = blobs
         self.conn = conn
         self.project_key = project_key
         self.scope = scope
-        self.runner: Runner = runner if runner is not None else InProcessRunner()
+        self.runner: Runner = runner
         self.clock = clock
         self.silence_ns = silence_ns
         self.projector_factory = projector_factory
@@ -128,37 +138,27 @@ class Pipeline:
         return get_watermark(self.conn, WATERMARK)
 
     def process_new(self) -> Stats:
-        """Verarbeitet alle neuen Journal-Events (eine Transaktion pro Durchgang)."""
+        """Verarbeitet alle neuen Journal-Events.
+
+        Grosse Rückstände (Reparse) laufen in Abschnitten mit je einer
+        Transaktion, damit der Speicher begrenzt bleibt. ``rebuild()`` des
+        Projectors läuft einmal am Ende.
+        """
         stats = Stats()
         conn = self.conn
         try:
-            wm = get_watermark(conn, WATERMARK)
-            if not self._loaded:
-                for (tid,) in conn.execute("SELECT terminal_id FROM seg_term WHERE closed = 0").fetchall():
-                    self._term(tid, wm)
-                self._loaded = True
-            decisions: list[EventRecord] = []
-            files: list[EventRecord] = []
-            last = wm
-            for rec in self.journal.iter_events(wm):
-                last = rec.seq
-                stats.events += 1
-                self._route(rec, wm, decisions, files, stats)
-            self._finish_terms(stats)
-            for rec in files:
-                self._file_unit(rec, stats)
-            if self.projector is not None:
-                for rec in decisions:
-                    self.projector.apply_decision(rec)
-                    stats.decisions += 1
-                if stats.units_parsed or stats.units_removed or stats.decisions or stats.units_provisional:
-                    gen = self.projector.rebuild()
-                    if isinstance(gen, int):
-                        stats.generation = gen
-                        set_meta(conn, "generation", str(gen))
-            for ts in self.terms.values():
-                ts.save()
-            set_watermark(conn, WATERMARK, last)
+            while True:
+                more = self._batch(stats)
+                if not more:
+                    break
+            if self.projector is not None and (
+                    stats.units_parsed or stats.units_removed or stats.decisions or stats.units_provisional
+                    or get_meta(conn, "rebuild_pending") == "1"):
+                gen = self.projector.rebuild()
+                if isinstance(gen, int):
+                    stats.generation = gen
+                    set_meta(conn, "generation", str(gen))
+                set_meta(conn, "rebuild_pending", "0")
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -166,6 +166,46 @@ class Pipeline:
             self._loaded = False
             raise
         return stats
+
+    def _batch(self, stats: Stats) -> bool:
+        """Ein Abschnitt in einer Transaktion. ``True``, wenn noch Events warten."""
+        conn = self.conn
+        wm = get_watermark(conn, WATERMARK)
+        if not self._loaded:
+            for (tid,) in conn.execute("SELECT terminal_id FROM seg_term WHERE closed = 0").fetchall():
+                self._term(tid, wm)
+            self._loaded = True
+        decisions: list[EventRecord] = []
+        files: list[EventRecord] = []
+        last = wm
+        volume = 0
+        more = False
+        for rec in self.journal.iter_events(wm):
+            if volume >= BATCH_VOLUME:
+                more = True
+                break
+            last = rec.seq
+            stats.events += 1
+            volume += 1 + (len(rec.body) // 64 if rec.kind == "term.out" and rec.body else 0)
+            self._route(rec, wm, decisions, files, stats)
+        self._finish_terms(stats)
+        for rec in files:
+            self._file_unit(rec, stats)
+        if self.projector is not None:
+            for rec in decisions:
+                stats.decisions += 1
+                try:
+                    self.projector.apply_decision(rec)
+                except Exception as exc:  # noqa: BLE001 - Analyse darf nie dauerhaft hängen bleiben
+                    stats.failures += 1
+                    log.warning("Projektion: Entscheid %s nicht angewendet (%s)", rec.seq, type(exc).__name__)
+        for ts in self.terms.values():
+            ts.save()
+        set_watermark(conn, WATERMARK, last)
+        if more:
+            set_meta(conn, "rebuild_pending", "1")
+            conn.commit()
+        return more
 
     def reparse(self, new_conn: Any) -> Pipeline:
         """Baut alles in ``new_conn`` neu auf und gibt die neue Pipeline zurück."""
@@ -223,7 +263,8 @@ class Pipeline:
             if silent:
                 ts.force_feed()
             if ts.dirty:
-                layout = compute_layout(tid, ts.events, ts.stream_end, closed=ts.closed)
+                layout = compute_layout(tid, ts.events, ts.stream_end, closed=ts.closed,
+                                        alt_offsets=ts.alt_offsets)
                 for b in layout.blocks:
                     b.companions = self._companions(ts, b)
                 res = sync_layout(self.conn, ts, layout,
@@ -257,7 +298,8 @@ class Pipeline:
             try:
                 paths = p.companions(list(block.argv), block.cwd or "")
             except Exception:  # noqa: BLE001 - ein defekter Parser verhindert keine Verknüpfung
-                continue
+                log.warning("companions() von %s fehlgeschlagen", getattr(p, "id", "?"))
+                paths = []
             out += [x for x in paths if isinstance(x, str) and x and x not in out]
         ts.companions[key] = tuple(out[:64])
         return ts.companions[key]
@@ -361,9 +403,17 @@ class Pipeline:
                              (unit.unit_id, r.parser_id, r.parser_version, r.error[:200], self.clock()))
                 log.warning("Parser %s fehlgeschlagen (%s)", r.parser_id, r.error.split(":", 1)[0])
                 continue
-            self.projector.apply_unit(unit, parser_id=r.parser_id, parser_version=r.parser_version,
-                                      trust=p.trust, auto_eligible=bool(p.auto_eligible),
-                                      journal_seq=journal_seq, items=r.items)
+            try:
+                self.projector.apply_unit(unit, parser_id=r.parser_id, parser_version=r.parser_version,
+                                          trust=p.trust, auto_eligible=bool(p.auto_eligible),
+                                          journal_seq=journal_seq, items=r.items)
+            except Exception as exc:  # noqa: BLE001 - ein Fehler der Projektion blockiert nicht alles
+                stats.failures += 1
+                conn.execute("INSERT OR REPLACE INTO parse_failure(unit_id, parser_id, parser_version, "
+                             "reason, ts_utc_ns) VALUES (?, ?, ?, ?, ?)",
+                             (unit.unit_id, r.parser_id, r.parser_version, f"projection:{type(exc).__name__}",
+                              self.clock()))
+                log.warning("Projektion von %s fehlgeschlagen (%s)", r.parser_id, type(exc).__name__)
         if provisional:
             conn.execute("UPDATE unit SET parsed_sig = ?, state = 'provisional' WHERE unit_id = ?",
                          (sig, unit.unit_id))

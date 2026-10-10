@@ -49,7 +49,7 @@ def scenario(t: TermSim):
     yield lambda: t.out(b"\x1b[?1049h\x1b[H\x1b[2Jvim on target\x1b[?1049lroot@lame:~# exit\r\n", chunk=5)
     yield lambda: (t.end(0), t.prompt())
     yield lambda: t.decision("d.ctx.set", from_off=c["g"] + 3, to_off=c["g"] + 40, host="ip:default/1.2.3.4")
-    yield lambda: t.command("cat notes", "Größe: 10.10.10.9 ✓\r\n".encode() * 3, exit=1)
+    yield lambda: t.command("cat notes", "Länge: 10.10.10.9 ✓ €\r\n".encode() * 3, exit=1)
     yield lambda: t.prompt()
 
 
@@ -65,7 +65,9 @@ def _journal_with(steps_until: int | None = None):
 
 def _pipe(journal, conn, projector=None, **kw):
     from ariadne.ingest.pipeline import Pipeline
+    from ariadne.ingest.runner import InProcessRunner
 
+    kw.setdefault("runner", InProcessRunner())
     return Pipeline(journal, None, conn, project_key=b"k" * 32, scope=None,
                     projector=projector if projector is not None else StubProjector(conn),
                     registry=[StubParser()], clock=lambda: 0, **kw)
@@ -287,3 +289,38 @@ def test_with_real_projection_and_parsers(tmp_path):
     assert st.failures == 0 and st.units_parsed >= 1 and st.generation is not None
     assert conn.execute("SELECT COUNT(*) FROM parse_failure").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM observation").fetchone()[0] > 0
+
+
+def test_small_batches_equal_single_pass(tmp_path, monkeypatch):
+    from ariadne.ingest import pipeline as pl
+
+    j = _journal_with()
+    one = sqlite3.connect(tmp_path / "one.db")
+    _pipe(j, one).process_new()
+    monkeypatch.setattr(pl, "BATCH_VOLUME", 5)
+    small = sqlite3.connect(tmp_path / "small.db")
+    proj = StubProjector(small)
+    st = _pipe(j, small, projector=proj).process_new()
+    assert dump(small) == dump(one)
+    assert st.events == len(list(j.iter_events())) and [c for c in proj.calls if c[0] == "rebuild"] == [
+        ("rebuild", 1)]
+
+
+def test_projection_errors_do_not_block_analysis(env):
+    class Picky(StubProjector):
+        def apply_unit(self, unit, **kw):
+            if kw["parser_id"] == "stub.high":
+                raise ValueError("kaputt")
+            return super().apply_unit(unit, **kw)
+
+        def apply_decision(self, rec):
+            raise KeyError("x")
+
+    t = env.term
+    t.open()
+    t.command("nmap 10.10.10.3", b"22/tcp open ssh\r\n")
+    env.journal.append("d.claim.confirm", {"claim_key": "abc"}, origin="webui")
+    p = env.pipeline(projector=Picky(env.conn))
+    st = p.process_new()
+    assert st.failures == 2 and p.watermark == len(list(env.journal.iter_events()))
+    assert env.rows("SELECT parser_id, reason FROM parse_failure") == [("stub.high", "projection:ValueError")]

@@ -3,7 +3,7 @@
 Liest eine Anfrage als JSON von stdin::
 
     {"unit": Unit.to_dict(), "parsers": [{"id", "version", "factory": "modul:Klasse"}],
-     "paths": [...], "allowed": ["ariadne.parsers."]}
+     "paths": [...], "allowed": ["ariadne.parsers.", "exaktes.modul"]}
 
 und schreibt JSON-Lines nach stdout, pro passendem Parser (höchste Priorität
 zuerst)::
@@ -86,7 +86,7 @@ def _load(spec: dict[str, Any], allowed: tuple[str, ...]) -> Any:
     if not isinstance(factory, str) or ":" not in factory:
         raise ImportError("factory")
     mod_name, _, qual = factory.partition(":")
-    if not mod_name.startswith(allowed):
+    if not any(mod_name == a or (a.endswith(".") and mod_name.startswith(a)) for a in allowed):
         raise ImportError("not_allowed")
     obj: Any = importlib.import_module(mod_name)
     for part in qual.split("."):

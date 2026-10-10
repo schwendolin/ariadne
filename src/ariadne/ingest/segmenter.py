@@ -25,7 +25,9 @@ Regeln:
 * Einheiten sind maximale Bereiche mit gleichem (Befehl, Kontextspanne). Lokale
   Bytes vor einem Befehl (Prompt A..C, Reste nach dem letzten D) gehören zum
   nächsten Befehl derselben Spanne. Lokal ergibt ``command``, remote
-  ``segment``; ohne Befehl immer ``segment``.
+  ``segment``; ohne Befehl immer ``segment``. Flags der Einheit: ``partial``,
+  ``truncated``, ``gap``, ``altscreen`` und ``marker_forged`` (ein ungültiger
+  Marker lag im Bereich).
 """
 
 from __future__ import annotations
@@ -56,7 +58,7 @@ __all__ = [
 
 SEG_KINDS = frozenset({
     "term.open", "term.mark", "term.ctx_snapshot", "term.gap", "term.close", "term.resize",
-    "d.ctx.set", "d.ctx.push", "d.ctx.pop", "d.ctx.accept", "d.keystep.mark",
+    "term.marker_forged", "d.ctx.set", "d.ctx.push", "d.ctx.pop", "d.ctx.accept", "d.keystep.mark",
 })
 LOCAL_KINDS = frozenset({"local", "su"})
 _INF = 1 << 62
@@ -410,9 +412,10 @@ def _replay(tid: str, events: Sequence[SegEvent], blocks: Sequence[CmdBlock], re
             mark = ev.header.get("mark")
             if mark == "C" or (mark == "D" and ev.header.get("fg_shell") is True):
                 items.append((ev.off, ev.seq, ev))
-    items.sort(key=lambda x: (x[0], x[1]))
-    tr = _Tracked()
     start = rec_start if rec_start is not None else 0
+    # Entscheide vor Aufnahmebeginn wirken ab dem Beginn (nach dem Schnappschuss dort)
+    items = sorted(((max(off, start), seq, ev) for off, seq, ev in items), key=lambda x: (x[0], x[1]))
+    tr = _Tracked()
     states: list[tuple[int, tuple[tuple[int, Stage], ...]]] = [(start, tr.state())]
     overlays: list[_Overlay] = []
     for off, seq, ev in items:
@@ -504,6 +507,13 @@ def _spans(tid: str, states: list[tuple[int, tuple[tuple[int, Stage], ...]]], ov
 # --------------------------------------------------------------------------- Einheiten
 
 
+def _flag_ranges(units: Sequence[UnitPlan], offsets: Sequence[int], flag: str) -> None:
+    for u in units:
+        lo = bisect.bisect_left(offsets, u.start)
+        if lo < len(offsets) and offsets[lo] < (u.end if u.end is not None else _INF):
+            u.flags.add(flag)
+
+
 def _units(tid: str, blocks: Sequence[CmdBlock], spans: Sequence[CtxSpan], gaps: Sequence[int],
            start: int, stream_end: int, closed: bool) -> list[UnitPlan]:
     if not spans or stream_end <= start:
@@ -564,18 +574,17 @@ def _units(tid: str, blocks: Sequence[CmdBlock], spans: Sequence[CtxSpan], gaps:
             u.end = None
         if u.block is not None:
             u.flags |= u.block.flags & {"partial", "truncated", "gap"}
-        lo = bisect.bisect_left(gaps, u.start)
-        if lo < len(gaps) and gaps[lo] < (u.end if u.end is not None else _INF):
-            u.flags.add("gap")
+    _flag_ranges(units, gaps, "gap")
     return units
 
 
 def compute_layout(terminal_id: str, events: Sequence[SegEvent], stream_end: int, *,
-                   closed: bool = False) -> Layout:
+                   closed: bool = False, alt_offsets: Iterable[int] = ()) -> Layout:
     """Befehle, Kontextspannen und Einheiten eines Terminals aus seinen Ereignissen.
 
     ``events`` sind die Segmenter-Ereignisse in seq-Reihenfolge, ``stream_end``
-    das Ende der bisher empfangenen Bytes.
+    das Ende der bisher empfangenen Bytes, ``alt_offsets`` die Anfänge von
+    Alternate-Screen-Abschnitten (Flag ``altscreen``).
     """
     evs = sorted(events, key=lambda e: e.seq)
     blocks, rec_start = _blocks(terminal_id, evs)
@@ -588,4 +597,8 @@ def compute_layout(terminal_id: str, events: Sequence[SegEvent], stream_end: int
     spans = _spans(terminal_id, states, overlays, end)
     gaps = sorted(e.off for e in evs if e.kind == "term.gap" and e.off is not None)
     units = _units(terminal_id, blocks, spans, gaps, start, end, closed)
+    forged = sorted(e.off for e in evs if e.kind == "term.marker_forged" and e.off is not None)
+    _flag_ranges(units, forged, "marker_forged")  # starkes Indiz für ein feindliches Ziel
+    if alt_offsets:
+        _flag_ranges(units, sorted(alt_offsets), "altscreen")
     return Layout(terminal_id, blocks, spans, units, rec_start, end, closed)

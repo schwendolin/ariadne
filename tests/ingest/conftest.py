@@ -34,7 +34,9 @@ class Env:
 
     def pipeline(self, conn=None, **kw):
         from ariadne.ingest.pipeline import Pipeline
+        from ariadne.ingest.runner import InProcessRunner
 
+        kw.setdefault("runner", InProcessRunner())
         kw.setdefault("projector", self.projector)
         kw.setdefault("registry", [StubHighParser(), StubParser()])
         return Pipeline(self.journal, self.blobs, conn or self.conn, project_key=b"k" * 32, scope=self.scope,

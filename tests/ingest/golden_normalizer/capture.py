@@ -9,7 +9,6 @@ isoliertem HOME und ohne Netz. Ergebnis: ``<fall>/input.bin``.
 
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 import time
@@ -119,5 +118,4 @@ def main(name: str) -> None:
 
 
 if __name__ == "__main__":
-    os.umask(0o077)
     main(sys.argv[1])

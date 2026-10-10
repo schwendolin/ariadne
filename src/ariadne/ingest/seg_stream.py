@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from ariadne.ingest.normalizer import Normalizer, NormLine, colmap_to_json, sgr_to_json
+from ariadne.ingest.normalizer import FLAG_ALTSCREEN, Normalizer, NormLine
 from ariadne.ingest.segmenter import SEG_KINDS, SegEvent, event_offset
 
 __all__ = ["TermStream", "BOUNDARY_KINDS", "INF"]
@@ -75,6 +75,7 @@ class TermStream:
         self.norm_prompt = False
         self.dirty = False  # Layout neu rechnen
         self.lines: list[tuple[int, NormLine]] = []  # endgültige Zeilen, noch nicht gespeichert
+        self.alt_offsets: set[int] = set()  # Anfänge von Alternate-Screen-Abschnitten
         self.max_n = -1  # höchste gespeicherte Zeilennummer
         self.prev_rows: dict[str, dict[str, Any]] = {}
         self.companions: dict[tuple[Any, ...], tuple[str, ...]] = {}
@@ -93,6 +94,9 @@ class TermStream:
         end = off + length
         if end <= self.stream_end:
             return  # schon gesehen
+        if self.finished:  # nach term.close: nichts mehr normalisieren
+            self.stream_end = end
+            return
         if data is not None:
             if off < self.stream_end:
                 data = data[self.stream_end - off :]
@@ -153,6 +157,9 @@ class TermStream:
     def _feed_bytes(self, stop: int) -> None:
         norm = self.norm
         assert norm is not None
+        if self.finished:
+            self.pending.clear()
+            return
         while self.pending and self.pending[0].off < stop:
             ch = self.pending[0]
             take = stop - ch.off
@@ -166,6 +173,10 @@ class TermStream:
 
     def _advance(self, limit: int) -> None:
         """Füttert alle Bytes vor ``limit`` und wendet dabei fällige Grenzen an."""
+        if self.finished:
+            self.bounds.clear()
+            self.pending.clear()
+            return
         while True:
             nxt = self.bounds[0] if self.bounds else None
             if nxt is None or (nxt.off or 0) > limit:
@@ -221,6 +232,8 @@ class TermStream:
         for ln in lines:
             self.lines.append((self.next_n, ln))
             self.next_n += 1
+            if ln.flags & FLAG_ALTSCREEN:
+                self.alt_offsets.add(ln.raw_start)
         self.dirty = True
 
     def take_lines(self) -> list[tuple[int, NormLine]]:
@@ -295,6 +308,9 @@ class TermStream:
             ts._index_chunk(int(off), int(t))
         top = conn.execute("SELECT MAX(n) FROM unit_line WHERE terminal_id = ?", (terminal_id,)).fetchone()
         ts.max_n = int(top[0]) if top and top[0] is not None else -1
+        ts.alt_offsets = {int(r[0]) for r in conn.execute(
+            "SELECT DISTINCT raw_start FROM unit_line WHERE terminal_id = ? AND (flags & ?) != 0",
+            (terminal_id, FLAG_ALTSCREEN))}
         if row is None:
             return ts
         ts.operator_id = row[0]

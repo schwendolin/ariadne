@@ -259,7 +259,11 @@ class SubprocessRunner:
     def __init__(self, *, timeout: float = 60.0, mem_limit: int = 1 << 30, cpu_limit: int = 30,
                  max_output: int = 64 << 20, max_line: int = 4 << 20, max_input: int = 96 << 20,
                  python: str | None = None, extra_paths: Iterable[str] = (),
-                 allowed_prefixes: Iterable[str] = ("ariadne.parsers.",)) -> None:
+                 allowed_prefixes: Iterable[str] = ("ariadne.parsers.",),
+                 trust_registry: bool = True) -> None:
+        """``allowed_prefixes``: Module, die der Worker laden darf. Mit ``trust_registry``
+        zusätzlich genau die Module der übergebenen Parser (Registry und Plugin-Allowlist
+        des Daemons sind vertrauenswürdig)."""
         self.timeout = timeout
         self.mem_limit = mem_limit
         self.cpu_limit = cpu_limit
@@ -269,14 +273,17 @@ class SubprocessRunner:
         self.python = python or sys.executable
         self.extra_paths = [str(p) for p in extra_paths]
         self.allowed_prefixes = tuple(allowed_prefixes)
+        self.trust_registry = trust_registry
 
     def run(self, unit: Unit, parsers: Sequence[Parser]) -> list[RunResult]:
         specs = [{"id": str(p.id), "version": str(p.version), "factory": parser_factory(p)} for p in parsers]
         if not specs:
             return []
         n_lines = len(unit.lines)
-        req = {"unit": unit.to_dict(), "parsers": specs, "paths": self.extra_paths,
-               "allowed": list(self.allowed_prefixes)}
+        allowed = list(self.allowed_prefixes)
+        if self.trust_registry:
+            allowed += sorted({s["factory"].split(":", 1)[0] for s in specs})
+        req = {"unit": unit.to_dict(), "parsers": specs, "paths": self.extra_paths, "allowed": allowed}
         payload = json.dumps(req, ensure_ascii=False, separators=(",", ":")).encode()
         if len(payload) > self.max_input:
             return [RunResult(s["id"], s["version"], 0, [], "too_large") for s in specs]

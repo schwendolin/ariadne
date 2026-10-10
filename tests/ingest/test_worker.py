@@ -97,8 +97,15 @@ def test_exit_timeout_flood_and_invalid_output():
 
 
 def test_disallowed_factory_is_not_imported():
-    r = SubprocessRunner(extra_paths=[ROOT], timeout=20).run(unit(), [wp.EchoParser()])
+    r = SubprocessRunner(extra_paths=[ROOT], timeout=20, trust_registry=False).run(unit(), [wp.EchoParser()])
     assert r[0].error.startswith("load:ImportError:not_allowed")
+    ok = SubprocessRunner(extra_paths=[ROOT], timeout=20).run(unit(), [wp.EchoParser()])
+    assert ok[0].error is None  # Module der übergebenen Parser sind erlaubt
+    out = io.BytesIO()
+    req = {"unit": unit().to_dict(), "parsers": [{"id": "x", "version": "1", "factory": "os:system"}],
+           "allowed": ["ariadne.parsers."]}
+    assert worker.main([], io.BytesIO(json.dumps(req).encode()), out) == 0
+    assert b"not_allowed" in out.getvalue()
 
 
 def test_worker_main_rejects_garbage():
