@@ -285,3 +285,29 @@ def test_files_are_ciphertext(sql_store, tmp_path):
     assert sql_store.blobs.verify() == []
     bf.write_bytes(b"kaputt")
     assert sql_store.blobs.verify()
+
+
+def test_stream_end_and_verify_head(store):
+    j = store.journal
+    assert j.stream_end("t1") == 0 and j.verify_head()
+    j.append_many([out_item(0, b"abc"), out_item(3, b"defg"), out_item(0, b"x", tid="t2")])
+    assert j.stream_end("t1") == 7 and j.stream_end("t2") == 1 and j.stream_end("t3") == 0
+    j.append("d.note.set", {"subject": "ip:default/10.0.0.1", "text": "n"})
+    assert j.verify_head()
+
+
+def test_journal_reader_sees_commits_readonly(sql_store):
+    from ariadne.store.journal import JournalReader
+
+    j = sql_store.journal
+    j.append_many([out_item(0, b"abc")])
+    reader = JournalReader(open_db(sql_store.path, sql_store.key, readonly=True))
+    try:
+        assert [r.kind for r in reader.iter_events()] == ["term.out"]
+        j.append("d.note.set", {"subject": "ip:default/10.0.0.1", "text": "n"})
+        assert [r.kind for r in reader.iter_events(1)] == ["d.note.set"]
+        assert reader.get(1).body == b"abc" and reader.stream_end("t1") == 3
+        with pytest.raises(Exception):  # nur lesend
+            reader.conn.execute("DELETE FROM meta")
+    finally:
+        reader.close()
