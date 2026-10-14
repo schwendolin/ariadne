@@ -1,12 +1,22 @@
 # Konzept: vom Terminal und vom Browser zur Karte
 
-> Stand 2026-10-14, Vorschlag. Antwort auf deine Nachricht vom 2026-10-14 («irgendwie muss das ganze simpler zu bedienen sein ...»). Grundlage sind drei Rechercheberichte (Auswertung, Browser, Bedienung), [VISION](../VISION.md), die [Lösungsarchitektur](architektur.md), das [Entscheidungsprotokoll](entscheide.md), [entwicklung.md](entwicklung.md) und der Code unter `src/ariadne`. Entschieden ist davon nichts, bis du die Fragen in Abschnitt 6 beantwortet hast.
+> Stand 2026-10-14, Vorschlag. Antwort auf deine Nachricht vom 2026-10-14 («irgendwie muss das ganze simpler zu bedienen sein ...»). Grundlage sind drei Rechercheberichte (Auswertung, Browser, Bedienung), [VISION](../VISION.md), die [Lösungsarchitektur](architektur.md), das [Entscheidungsprotokoll](entscheide.md), [entwicklung.md](entwicklung.md) und der Code unter `src/ariadne`. Entschieden ist davon nichts, bis du die Fragen in Abschnitt 7 beantwortet hast.
 >
-> Kennzeichnung: **gebaut** heisst im v0.1-Backend vorhanden und getestet. **geplant** heisst in der Architektur beschrieben, aber noch nicht gebaut. **Vorschlag** heisst neu in diesem Dokument.
+> Kennzeichnung: **gebaut** heisst im v0.1-Backend vorhanden und getestet. **geplant** heisst in der Architektur beschrieben, aber noch nicht gebaut. **Vorschlag** heisst neu in diesem Dokument. Alle Aussagen über den heutigen Code sind am 2026-10-14 gegen `src/ariadne` geprüft, die Zahlen zur Inbox mit den Test-Helfern nachgemessen.
 
 ## 1 Kurzfassung
 
-Nach dem Einrichten startet jede neue zsh- oder bash-Shell mit einem eigenen Shim, auch in parallelen Fenstern, Tabs und tmux-Panes; das ist heute schon so. Neu ist die Bedienung: Pro Auftrag tippst du einen Befehl, `ariadne start lame 10.10.10.3`, und solange ein Projekt aktiv ist, nehmen alle Terminals auf, REC wird zu einer Pause mit Ablaufzeit. Jede Ausgabe und jede Befehlsgrenze bekommt die Zeit aus dem Shim, alle Terminals laufen in einer Zeitachse, und die Reihenfolge stimmt auf etwa eine Millisekunde; Tastendrücke speichert Ariadne weiterhin nicht, nur den Zeitpunkt jedes Enter. Vom Verlauf zur Datenbank führt eine Kette mit festen Stufen (Rohverlauf, Einheit, Beobachtung, Claim, Entität, Sichten), in der jeder Wert auf seine Zeile zeigt und alles neu berechenbar ist. Damit sich die Karte von selbst füllt, schlage ich eine Drei-Spuren-Regel vor: Werte aus anerkannten Parsern im Scope kommen ohne Klick auf die Karte, Unsicheres bleibt still, und nur KI-Werte, echte Widersprüche und unklare Kontexte brauchen deinen Entscheid. Findings schlägt Ariadne aus Regeln und KI mit einem Belegpaket aus der Zeitachse vor, zum Finding macht sie erst dein Urteil. Für den Browser empfehle ich einen Aufzeichnungs-Proxy vor einem eigenen Firefox-Profil (`ariadne browser`): Jede Anfrage wird eine Einheit, Web-Parser machen daraus einen Web-Baum unter dem Service, und Ariadne schickt selbst keine einzige Anfrage. Die KI bekommt als Kontext nie den Rohverlauf, sondern ein verdichtetes Lagebild mit Zeitachse und maskierten Secrets.
+**Bedienung.** Dass jedes Terminal aufgenommen wird, ist schon gebaut: Jede neue zsh- oder bash-Shell startet mit einem eigenen Shim, auch in parallelen Fenstern, Tabs und tmux-Panes. Umständlich ist der Rest. Heute braucht es nach jedem Login `ariadne unlock`, `ariadne project open` und `ariadne rec on`. Vorschlag: ein Befehl `ariadne start lame 10.10.10.3` pro Auftrag und nach jedem Neustart, mit einmal Passphrase. Solange ein Projekt aktiv ist, nehmen alle Terminals auf. Den REC-Knopf ersetzt eine Pause pro Terminal, die nach 10 Minuten von selbst endet.
+
+**Zeitstempel.** Der Shim stempelt jede gelesene Ausgabe schon heute auf die Nanosekunde. Die Auswertung benutzt aber die Speicherzeit im Daemon und liegt damit bis etwa 250 ms daneben. Vorschlag: überall die Shim-Zeit, auch für Befehlsanfang und -ende. Realistisch ist dann etwa 1 ms Genauigkeit in der VM, und die Reihenfolge über alle Terminals stimmt. Von deinen Eingaben speichert Ariadne die lokale Befehlszeile, aber nie einzelne Tastendrücke. In Remote-Shells kommt nur der Zeitpunkt jedes Enter dazu.
+
+**Vom Verlauf zur Datenbank und zur Karte.** Eine Kette mit festen Stufen: Rohverlauf, Einheit (ein Befehl), Beobachtung, Claim, Entität, Karte. Jeder Wert zeigt auf seine Zeile, alles lässt sich neu berechnen. Das Fundament steht. Was heute stört: Ein einziger nmap-Lauf auf Metasploitable2 (nachgestellte Testeingabe) erzeugt 86 Einträge zum Bestätigen, eine Reverse Shell wird als ein grosser Block ausgewertet, und Fundstücke wie Hashes erscheinen nicht auf der Karte. Vorschlag: Werte aus bekannten Tool-Parsern im Scope kommen ohne Klick auf die Karte, mit Rückgängig. Deinen Entscheid brauchen nur KI-Werte, echte Widersprüche und unklare Zuordnungen. Findings schlägt Ariadne mit Belegen vor, zum Finding macht sie erst dein Urteil.
+
+**Browser.** Vorschlag: ein Aufzeichnungs-Proxy vor einem eigenen Firefox-Testprofil (`ariadne browser`). Jede Anfrage deines Browsers wird mit Antwort, Ziel-IP und Zeit gespeichert. Parser machen daraus Seiten, Formulare, Kommentare und Admin-Bereiche unter dem Webdienst auf der Karte. Ariadne schickt selbst keine einzige Anfrage. Der Proxy sitzt aber im Datenweg und baut die Verbindungen für den Browser auf; ob das für dich noch «passiv» ist, ist Frage 7.
+
+**KI.** Sie sieht nie den ganzen Rohverlauf, sondern ein verdichtetes Lagebild mit Zeitachse und maskierten Secrets. Werte aus der KI gelten nur mit wörtlichem Zitat und brauchen immer deinen Entscheid.
+
+Risiken (Passwörter in der Aufnahme, fremde Seiten im Testbrowser, Speicherplatz, falsche Fakten, Recht im Kundenauftrag) stehen gesammelt in Abschnitt 6.
 
 ## 2 Bedienung in drei Schritten
 
@@ -14,16 +24,24 @@ Das Aufnehmen selbst ist schon automatisch (**gebaut**). Die Zeile in `.zshrc` b
 
 Umständlich ist der Alltag drumherum:
 
-- REC steht nach jedem Start des Daemons auf aus und wird nicht gespeichert (`daemon/core.py`, `rec_on = False`). Nach jedem Login braucht es `ariadne unlock`, `ariadne project open` und `ariadne rec on`. Fehlt `rec on`, verwirft der Shim alles.
-- Nach einem Projektwechsel nehmen schon offene Terminals nie wieder auf. Für das neue Projekt öffnest du neue Fenster.
+- REC steht nach jedem Start des Daemons auf aus und wird nicht gespeichert (`daemon/core.py`, `rec_on = False`). Nach jedem Login braucht es `ariadne unlock`, `ariadne project open` und `ariadne rec on`. Fehlt `rec on`, schickt der Shim nichts an den Daemon, und die Ausgabe ist verloren.
+- `F12 r` schaltet REC heute für alle Terminals gleichzeitig um, nicht für eines.
+- Ein Terminal ist ab dem ersten REC an sein Projekt gebunden. Nach einem Projektwechsel nimmt es erst wieder auf, wenn das alte Projekt wieder aktiv ist. Für das neue Projekt öffnest du neue Fenster.
 
 ### 2.1 Der neue Ablauf (Vorschlag)
 
 | Schritt | Du tippst | Ariadne macht |
 |---|---|---|
-| 1 einmal | `ariadne setup` | RC-Zeile und systemd-Dienst (gebaut), neu auch Operator-Tresor (heute separat `ariadne init`), `doctor`, Desktop-Kürzel für Screenshots, Firefox-Testprofil |
-| 2 pro Auftrag | `ariadne start lame 10.10.10.3`, später nur `ariadne start` | fragt einmal pro Anmeldung die Passphrase (per `getpass`, nie in der Web-UI, E74), legt das Projekt an oder öffnet es, schaltet die Aufnahme für alle Terminals ein, auch für offene, und merkt sich «lame aktiv» über Neustarts |
-| 3 arbeiten | fast nichts: selten `F12 k` (Schlüsselschritt) oder `F12 r` (Pause), am Ende `ariadne export` und `ariadne stop` | nimmt alles auf, füllt Karte und Zeitachse, schlägt Schlüsselschritte und Findings vor |
+| 1 einmal | Installation per `pipx`, dann `ariadne setup`, danach offene Terminals einmal neu öffnen | RC-Zeile und systemd-Dienst (gebaut), neu auch Operator-Tresor mit Passphrase und Recovery-Code (heute separat `ariadne init`), `doctor`, Desktop-Kürzel für Screenshots, Firefox-Testprofil |
+| 2 pro Auftrag und nach jedem Neustart der VM | `ariadne start lame 10.10.10.3`, danach nur `ariadne start` | fragt die Passphrase (per `getpass`, nie in der Web-UI, E74), legt das Projekt an oder öffnet es, schaltet die Aufnahme für alle Terminals ein, auch für schon offene, und merkt sich «lame aktiv» über Neustarts |
+| 3 arbeiten | fast nichts: selten `F12 k` (Schlüsselschritt) oder `F12 r` (Pause), für Webseiten `ariadne browser`, am Ende `ariadne export` und `ariadne stop` | nimmt alles auf, füllt Karte und Zeitachse, schlägt Schlüsselschritte und Findings vor |
+
+**Was trotzdem bei dir bleibt.** Damit die drei Schritte ehrlich sind:
+
+- Nach jedem Neustart der VM einmal `ariadne start` mit Passphrase. Ohne das bleibt der Tresor zu, und die Terminals puffern nur im RAM (Frage 3).
+- Zielseiten öffnest du im Testbrowser von Ariadne, nicht in deinem normalen Firefox. Was im normalen Browser passiert, sieht Ariadne nicht.
+- Pro Lab-Abend eine Handvoll Klärungen in der Spalte «Als Nächstes»: KI-Werte, echte Widersprüche, neue Namen ausserhalb des Scopes, Kontext bei Pivots.
+- Schlüsselschritte bestätigen (Ariadne schlägt sie vor) und Findings übernehmen und bewerten. Das ist Absicht: Ein Fakt ist kein Finding (Grundsatz 10).
 
 Der Fenstertitel zeigt den Zustand:
 
@@ -34,10 +52,18 @@ Der Fenstertitel zeigt den Zustand:
 | `[-- kein Projekt]` | nichts auf der Platte, nur ein kurzer Vorlauf im RAM |
 | `[REC! gesperrt]` | Projekt aktiv, Tresor nach einem Neustart noch gesperrt, Puffer im RAM bis `ariadne start` |
 
-- **REC wird zur Pause.** `F12 r` pausiert nur dieses Terminal, standardmässig für 10 Minuten. Danach nimmt es von selbst wieder auf. Die Pause erscheint als Lücke (`term.gap`, Grund `pause`) in Zeitachse und Export. Eine Pause ohne Ende würde den häufigsten Fehler zurückbringen: ein Fenster, in dem gerade keine Aufnahme lief.
-- **Ohne Projekt** landet nichts auf der Platte. Jedes Terminal hält aber 15 Minuten Vorlauf im RAM (höchstens 8 MiB, wie der heutige Puffer mit `MADV_DONTDUMP`). `ariadne start` fragt: «Vorlauf vorhanden: T1 12 min (nmap 10.10.10.3). Übernehmen?» So rettest du die Minuten, bevor dir eingefallen ist, dass Ariadne laufen sollte (Frage 2).
-- **Projektwechsel:** Ein offenes Terminal wechselt mit dem nächsten gültigen D-Marker ins neue Projekt, also erst, wenn sicher die lokale Shell oben steht. Terminals mit offener Remote-Stufe bleiben beim alten Projekt und fragen nach. Das ändert E28.
-- **Lücken, die bleiben:** Der äussere Shim um einen tmux-Client nimmt heute dessen Bildschirm doppelt auf (die Pause aus Architektur 3.9 ist nicht gebaut). Root-Terminal aus dem Menü und `sudo -i` laufen ohne Befehlsgrenzen, bis `ariadne setup --root` kommt (v0.2).
+- **REC wird zur Pause.** `F12 r` pausiert nur dieses Terminal, standardmässig für 10 Minuten. Danach nimmt es von selbst wieder auf. Die Pause erscheint als Lücke (`term.gap` mit dem neuen Grund `pause`) in Zeitachse und Export. Eine Pause ohne Ende würde den häufigsten Fehler zurückbringen: ein Fenster, in dem gerade keine Aufnahme lief.
+- **Ohne Projekt** landet nichts auf der Platte. Jedes Terminal hält aber 15 Minuten Vorlauf im RAM, höchstens 8 MiB. Der Vorlauf liegt wie der heutige Ausfallpuffer des Shims (32 MiB, `mmap` mit `MADV_DONTDUMP`) nur im Arbeitsspeicher und nie in einem Coredump. Bei knappem RAM kann der Kernel ihn in den Swap auslagern; `doctor` prüft darum verschlüsselten Swap oder zram. `ariadne start` fragt: «Vorlauf vorhanden: T1 12 min (nmap 10.10.10.3). Übernehmen?» So rettest du die Minuten, bevor dir eingefallen ist, dass Ariadne laufen sollte (Frage 2).
+- **Projektwechsel:** Ein offenes Terminal wechselt mit dem nächsten gültigen D-Marker ins neue Projekt, also erst, wenn sicher die lokale Kali-Shell oben steht. Terminals mit offener Remote-Stufe bleiben beim alten Projekt und fragen nach. Das ändert E28.
+
+**Was «alle Terminals» heute nicht abdeckt.** Diese Lücken bleiben auch mit dem neuen Ablauf, bis sie gebaut sind:
+
+- Ein Root-Terminal aus dem Kali-Menü startet als root mit `/root/.zshrc`, ohne Shim. Es wird gar nicht aufgenommen. Für Ariadne arbeitest du in normalen Terminals und mit `sudo befehl`.
+- `sudo -i` oder `su` in einem aufgenommenen Terminal: Die Ausgabe wird aufgenommen, aber ohne Befehlsgrenzen, bis `ariadne setup --root` kommt (v0.2).
+- Andere Shells als zsh und bash (fish, sh) starten keinen Shim, fish kommt in v0.2.
+- Terminals, die schon vor `ariadne setup` offen waren, bleiben ohne Shim.
+- Der äussere Shim um einen tmux-Client nimmt dessen Bildschirm heute doppelt auf (die Pause aus Architektur 3.9 ist nicht gebaut). Die Panes selbst sind sauber erfasst.
+- Grafische Werkzeuge (Burp, Wireshark, BloodHound) sind keine Terminals. Für sie gibt es Importe, Screenshots und für das Web den Recorder aus Abschnitt 4.
 
 ### 2.2 Zeitstempel: was «haargenau» realistisch heisst
 
@@ -45,7 +71,7 @@ Der Fenstertitel zeigt den Zustand:
 
 **Vorschlag:** Jedes Ereignis aus dem Shim, auch die Marker, trägt beide Uhren. Jeder OUT-Rahmen bekommt einen Zeitindex (pro `read()` Offset und Mikrosekunden, etwa 10 Byte), damit jede Ausgabezeile ihre eigene Zeit hat (Protokollversion 2, ausgehandelt im `HELLO`). Segmenter, Aktivitätsprotokoll und Zeitachse rechnen mit der Shim-Zeit, sortiert nach `(boot_id, mono_ns)`, angezeigt nach Wanduhr. Der Daemon prüft die Plausibilität und setzt sonst `time_suspect`.
 
-Realistisch heisst das: Auflösung in Nanosekunden, Genauigkeit in der VM etwa 1 ms. Die monotone Uhr springt nie, darum stimmt die Reihenfolge über alle Terminals auch, wenn die Wanduhr springt (NTP, Pause der VM, `ntpdate` auf den DC). Die absolute Uhrzeit ist nur so gut wie NTP. Und gemessen wird, wann die Bytes am Terminal ankamen, nicht wann das Ziel etwas tat: `python3 exploit.py | tee log` puffert und gibt alles am Ende aus, da hilft `python3 -u` oder `stdbuf -oL`.
+Realistisch heisst das: Auflösung in Nanosekunden, Genauigkeit in der VM etwa 1 ms. Die monotone Uhr springt nie, darum stimmt die Reihenfolge über alle Terminals auch, wenn die Wanduhr springt (NTP, Zeitabgleich mit dem Host, Pause der VM, `ntpdate` auf den DC). Die absolute Uhrzeit ist nur so gut wie NTP. Beim Einschalten der Aufnahme schreibt der Daemon heute schon `clock.check` mit dem NTP-Status (gebaut); das Ereignis `system.clock_jump` für Sprünge während der Arbeit ist definiert, wird aber noch nicht erzeugt. Und gemessen wird, wann die Bytes am Terminal ankamen, nicht wann das Ziel etwas tat: `python3 exploit.py | tee log` puffert und gibt alles am Ende aus, da hilft `python3 -u` oder `stdbuf -oL`.
 
 ### 2.3 Eingaben
 
@@ -56,12 +82,13 @@ Realistisch heisst das: Auflösung in Nanosekunden, Genauigkeit in der VM etwa 1
 | Passwortabfrage ohne Echo (sudo, ssh, su) | nie | Die Tasten erscheinen nicht im Output |
 | rohe Tastendrücke | nie | E26 |
 | Befehl in Reverse Shell, evil-winrm, `mysql>` | Text ja, Tasten nein | Der Text steht im Echo, also im Output. Neu (**Vorschlag**): Pro Enter schreibt der Shim eine Eingabemarke mit Zeit, Offset und dem Ergebnis des Echo-Vergleichs, ohne Inhalt (Abschnitt 3.5) |
+| alles, was du in einer einfachen Reverse Shell ohne PTY tippst | ja | In einer nackten `nc`-Shell echot dein eigenes Terminal jede Taste. Auch ein Passwort für `sudo -S` steht dann sichtbar im Output und damit in der Aufnahme |
 
-Ariadne schreibt also mit, was auf dem Bildschirm stand und an welcher Stelle du Enter gedrückt hast. Was du tippst, ohne dass es erscheint, sieht Ariadne nicht. Das ist Absicht: Ein Passwort ohne Echo stünde sonst im Klartext im unveränderlichen Journal, bis du es mit `ariadne redact` von Hand entfernst (Frage 3).
+Ariadne schreibt also mit, was auf dem Bildschirm stand und an welcher Stelle du Enter gedrückt hast. Was du tippst, ohne dass es erscheint, sieht Ariadne nicht. Das ist Absicht: Ein Passwort ohne Echo stünde sonst im Klartext im unveränderlichen Journal, bis du es mit `ariadne redact` von Hand entfernst (Frage 4). Umgekehrt gilt: Was sichtbar ist, wird gespeichert. Eigene Passwörter schützt nur der Redaktor, und nur, wenn sie in deiner Secret-Liste stehen (`ariadne secrets add`).
 
 ### 2.4 Speicher in der langsamen VM
 
-Gemessen (Bericht Bedienung, Container): 60 Befehle pro Stunde ergeben 0,23 MB Journal, eine Stunde Fortschrittsbalken aber 25 MB, weil jede Journalzeile rund 600 Byte Zusatz kostet. Fasst der Writer OUT-Stücke zu einer Zeile pro Sekunde zusammen und kommen zstd und ein Speicherwächter dazu (Architektur 8.6, geplant), landet ein Lab-Abend mit drei Terminals geschätzt bei 3 bis 10 MB.
+Gemessen (Bericht Bedienung, im Container, nicht in der Kali-VM): 60 Befehle pro Stunde ergeben 0,23 MB Journal, eine Stunde Fortschrittsbalken aber 25 MB, weil jede Journalzeile rund 600 Byte Zusatz kostet. Fasst der Writer OUT-Stücke zu einer Zeile pro Sekunde zusammen und kommen zstd und ein Speicherwächter dazu (Architektur 8.6, geplant), landet ein Lab-Abend mit drei Terminals geschätzt bei 3 bis 10 MB Journal. Der Zeitindex aus 2.2 wandert in die zusammengefasste Zeile mit, die Genauigkeit bleibt. Nicht eingerechnet sind `derived.db` mit Zeilen und Suchindex (nicht gemessen), Screenshots und die Bodies aus dem Browser. Gerade der Browser kann ein Vielfaches kosten (Abschnitt 6).
 
 ### 2.5 Beispiel: ein Lab-Abend mit Lame
 
@@ -71,15 +98,15 @@ Projekt `lame`, Ziel 10.10.10.3, Kali auf tun0 mit 10.10.14.5. Uhrzeiten erfunde
 |---|---|---|
 | 18:58 | VM starten, Terminal öffnen. Titel `[-- kein Projekt]`. `ariadne start lame 10.10.10.3`, Passphrase | Projekt angelegt, Titel `[REC lame]` |
 | 19:02:11 | T1: `nmap -Pn -sV -sC -oA scans/lame 10.10.10.3` | liest `scans/lame.xml` von selbst. Host und vier Services stehen nach dem Scan auf der Karte, ohne Bestätigen. Rechts unter «Als Nächstes»: Versionen von vsftpd 2.3.4 und Samba recherchieren |
-| 19:15:40 | neuer Tab T2: `nc -lvnp 4444` | T2 nimmt sofort auf, Spurname «listener», Stapel `Kali › ?` |
-| 19:17:03 | T3: Samba-Exploit (usermap_script, CVE-2007-2447) mit Callback auf T2 | |
+| 19:15:40 | neuer Tab T2: `nc -lvnp 4444` | T2 nimmt sofort auf, die Kontextregeln erkennen den Listener, Stapel `Kali › ?` |
+| 19:17:03 | T3: Samba-Exploit für usermap_script (CVE-2007-2447) mit Callback auf 10.10.14.5:4444 | |
 | 19:17:05 | | Callback von 10.10.10.3 in T2. Kontext wird `lame (auto)`. «Als Nächstes»: «Schlüsselschritt Foothold?» |
-| 19:17:21 | T2: `id`, dann `F12 k` und Enter | Eingabemarke, Befehl «remote, bestätigt». `uid=0(root)` ergibt Zugriff root, der Faden läuft von Kali nach lame |
-| 19:25 | T2: `cat /etc/shadow` | Hashes werden Secrets am Host lame, überall maskiert |
+| 19:17:21 | T2: `id`, dann `F12 k`, `f`, Enter | Eingabemarke, Befehl «remote, bestätigt». `uid=0(root)` ergibt Zugriff root, der Faden läuft von Kali nach lame |
+| 19:25 | T2: `cat /etc/shadow` | Die `$1$`-Hashes (MD5-crypt, wie auf Lame und Metasploitable2 üblich) werden Secrets am Host lame, überall maskiert |
 | 19:40 | T3: `F12 r` | `[PAUSE 9:59 lame]`, Lücke in der Zeitachse, 19:50 geht es weiter |
-| 20:10 | `ariadne export`, dann `ariadne stop` | Writeup-Gerüst mit drei Terminal-Spuren und Belegen auf die Millisekunde |
+| 20:10 | `ariadne export`, dann `ariadne stop` | Writeup-Gerüst mit drei Terminal-Spuren und Belegen auf die Millisekunde; `stop` schliesst und sperrt das Projekt |
 
-Für Ariadne getippt hast du an diesem Abend drei Befehle und zwei Tasten. Kein `rec on`, kein `tee`, keine Zeitnotizen, kein Import der nmap-Datei, kein Bestätigen in der Inbox.
+Für Ariadne getippt hast du an diesem Abend drei Befehle, einmal die Passphrase und zwei Tastenkürzel. Kein `rec on`, kein `tee`, keine Zeitnotizen, kein Import der nmap-Datei, kein Bestätigen in der Inbox. Der Foothold kam hier über Samba, nicht über vsftpd: Die Hintertür von vsftpd 2.3.4 ist auf Lame zwar vorhanden, ihr Port 6200 ist aber von aussen nicht erreichbar.
 
 ## 3 Vom Terminal zur Karte
 
@@ -106,7 +133,7 @@ flowchart LR
 | Beobachtung | Subjekt, Prädikat, Wert, Zeilenbereich | tcp/21 `service.version` 2.3.4, Zeile 5 | gebaut mit 4 Parsern: `nmap.xml`, `nmap.text`, `regex.net`, `listener.callback` |
 | Claim | alle Beobachtungen desselben Werts, mit Konfidenz und Zustand | «Port 21 hat 2.3.4», 2 Quellen | gebaut |
 | Entität | Kennungen per Union-Find zusammengefasst | Host 10.10.10.3 mit 4 Services | gebaut für Host und Service; Konto, Secret und URL nur dünn |
-| Sichten | Karte, Arbeitsliste, Zeitachse, Findings, Lagebild | grauer Host wird farbig | Karte und Inbox als Daten gebaut; Web-API, Regeln, Findings und Lagebild fehlen (`web/`, `rules/`, `ai/` leer) |
+| Sichten | Karte, Arbeitsliste, Zeitachse, Findings, Lagebild | grauer Host wird farbig | Karte, Inbox und Zeitachse als Daten gebaut, sichtbar über `ariadne show`; Web-API, Regeln, Findings, Lagebild und Export fehlen (`web/`, `rules/`, `ai/`, `export/` leer) |
 
 Jede Stufe leitet nur aus der vorigen ab und schreibt nie zurück. Deine Entscheide stehen selbst im Journal. Darum kann `ariadne reparse` alles neu rechnen, und nichts von dir geht verloren.
 
@@ -124,7 +151,7 @@ Ein Wort zur **Konfidenz**: Sie misst, wie sicher Ariadne einen Wert richtig gel
 
 ### 3.3 Wo es heute hakt
 
-Gemessen mit den Golden-Eingaben und Test-Helfern. Beide Eingaben sind nachgestellt, nicht echt.
+Gemessen mit den Golden-Eingaben und Test-Helfern, die MS2-Zahlen am 2026-10-14 in dieser Prüfung nachgemessen. Beide Eingaben sind nachgestellt, nicht echt.
 
 | Befund | Beleg | Wirkung |
 |---|---|---|
@@ -134,7 +161,8 @@ Gemessen mit den Golden-Eingaben und Test-Helfern. Beide Eingaben sind nachgeste
 | Scheinkonflikte | `split_version` in `parsers/nmap_text.py`; Kardinalität `one` in `ontology.py` | laut Code: «distccd v1 (...)» ergibt im Text Produkt «distccd v1» ohne Version, im XML «distccd» mit Version «v1». Lame 445: «3.X - 4.X» gegen das genauere «3.0.20-Debian» |
 | Kali wird Zielhost | `regex.net` plus Projektion | MS2: `ftp-syst` meldet «Connected to 192.168.56.102», das ist Kali; es entsteht ein Host im Scope |
 | Remote-Shell ist eine einzige Einheit, ohne argv | Docstring `ingest/segmenter.py`, `SILENCE_NS` in `ingest/pipeline.py` | `cat /etc/passwd`, `sudo -l`, `cat config.php` landen in einem Block, der erst nach Sitzungsende oder 10 Minuten Stille geparst wird. Werkzeugparser greifen nicht |
-| Loot bleibt unsichtbar, Ontologie zu schmal | `ingest/projection.py` lädt nur Mentions `ip` und `url`; `ontology.py` | `$6$...` aus `/etc/shadow` erscheint nirgends. Es fehlen uid, sudo-Regeln, Fundorte von Secrets, Credential-Tests, Formulare |
+| Loot bleibt unsichtbar, Ontologie zu schmal | `ingest/projection.py` lädt nur Mentions `ip` und `url`; `ontology.py` | Ein `$1$...`-Hash aus `/etc/shadow` erkennt `regex.net` zwar, er landet aber nur als Mention in der Datenbank und in der Volltextsuche, nicht auf Karte oder Listen. Es fehlen uid, sudo-Regeln, Fundorte von Secrets, Credential-Tests, Formulare |
+| Kontext aus dem Callback nur als Vorschlag | `_ctx_items` in `ingest/proj_build.py` | Die Inbox meldet «Kontext klären» schon mit dem Callback-Host als Vorschlag. Übernehmen musst du ihn von Hand mit `F12 h` |
 
 ### 3.4 Automatisch oder Entscheid: die Drei-Spuren-Regel (Vorschlag)
 
@@ -166,15 +194,15 @@ Zusammen ergibt das diese Arbeitsteilung:
 | Belegpaket für ein Finding zusammenstellen | Finding übernehmen, Schwere setzen |
 | Unsicheres als Nebel oder Zähler zeigen | Scope erweitern, Merges mit unterschiedlichem Scope |
 
-Das ändert E42 («Vorschlag vor Automatik») und macht die Sammelbestätigung (E88) meist überflüssig (Frage 4). E45 bleibt: Echte Widersprüche löst Ariadne nie selbst auf.
+Das ändert E42 («Vorschlag vor Automatik») und macht die Sammelbestätigung (E88) meist überflüssig (Frage 5). E45 bleibt: Echte Widersprüche löst Ariadne nie selbst auf.
 
 ### 3.5 Die übrigen Bausteine (Vorschlag)
 
 - **Remote-Befehle schneiden.** Kommt ein Enter allein (nicht in einem Paste-Burst, nicht im Alternate Screen), schreibt der Shim `term.input_mark {stream_off, t_shim_ns, echo_match}`, ohne Tasteninhalt; der Echo-Vergleich ist in A5.13 schon geplant. Stimmt das Echo, schneidet der Segmenter dort eine Einheit `remote_cmd` heraus, Befehlstext aus der Echo-Zeile, Herkunft «remote, bestätigt», `cmd_id = <terminal>@<Offset der Marke>`. Vorläufig geparst wird nach 3 s Ruhe statt nach 10 Minuten. Ohne passendes Echo (Passwortabfrage, `stty raw -echo`) bleibt das Segment wie heute.
 - **Evidenzgruppen.** Gruppenschlüssel ist die `cmd_id`; Dateien kommen über `file.observed.produced_by_cmd` (gebaut) in dieselbe Gruppe. Innerhalb einer Gruppe zählt das Maximum, noisy-OR nur zwischen Gruppen. Liegt die strukturierte Datei desselben Tools vor, gelten Textwerte als Nebenbeleg ohne eigene Konflikte.
 - **Arten von Prädikaten.** `fakt` (wie heute), `zustand` (der neueste Wert gilt, ältere bleiben als Verlauf), `version` (der spezifischere Wert gewinnt, wenn er im Bereich liegt; «vsftpd» gegen «ProFTPD» bleibt ein Konflikt), `menge` (nie ein Konflikt).
-- **Eigene Adressen.** Quell-IPs aus `net.route` und die lokalen Interfaces (gelesen aus `/sys/class/net`, ohne Befehl und ohne Paket) werden nie Host-Entitäten.
-- **Secrets als Claims.** crypt, NetNTLMv2, krb5, Private Keys und JWT aus Einheiten mit Zielkontext werden Secret-Claims am Kontext-Host, gespeichert als HMAC wie heute.
+- **Eigene Adressen.** Quell-IPs aus `net.route` (gebaut) und die Adressen der lokalen Interfaces werden nie Host-Entitäten. Die Adressen liest der Daemon aus `/proc/net/fib_trie` und `/proc/net/if_inet6`, also beim eigenen Kernel, ohne Befehl und ohne Paket.
+- **Secrets als Claims.** crypt, NetNTLMv2, krb5, Private Keys und JWT aus Einheiten mit Zielkontext werden Secret-Claims am Kontext-Host. Wie heute ist der Claim-Schlüssel ein HMAC, der Klartext liegt nur in der verschlüsselten Tabelle `secret_value`, und alle Ansichten zeigen `••••••••`.
 - **Kontext aus dem Callback.** Passt genau ein erster Callback auf eine Listener-Stufe, liegt seine IP im Scope und ist sie nicht Loopback, setzt Ariadne den Host automatisch, sichtbar als `(auto)`. `F12 h` überschreibt. Weil `d.ctx.set` schon heute rückwirkend wirkt (gebaut), lässt sich ein falscher Kontext nachträglich korrigieren. `F12 h` braucht es dann nur noch bei Pivots, NAT oder Port-Forwards über 127.0.0.1 (Frage 5). Dazu kommt der Parser `shell.context` für `id`, `whoami`, `hostname`, `ip a` und Prompts.
 - **Ontologie v2.** Konten (`identity.uid`, `.groups`, `.shell`, `.privileged`, `.sudo`), Secrets (`secret.kind`, `secret.found_in`), Credential-Tests (`cred.result`), Hinweise (`hint.sudo`, `hint.suid`, `hint.cron`, `hint.exploit`, `hint.misconfig` statt `hint.finding`), URLs (Abschnitt 4.2). `VERSION = 2` löst ein Reparse-Angebot aus.
 

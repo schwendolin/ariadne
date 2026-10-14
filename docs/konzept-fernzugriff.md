@@ -210,7 +210,7 @@ flowchart TD
 | **A** SSH direkt | F1 ja | sshd auf der Kali, Nutzung des Wegs (VPN, Freigabe) | keine | ja, gehärtet | 1 bis 2 h |
 | **B** Tailscale + SSH | F1 nein, F2 ja, F3 ja | ausgehender Overlay-Tunnel | Tailscale (Metadaten, Inhalt Ende-zu-Ende verschlüsselt) | nein, nur im Tailnet | 1 bis 2 h |
 | **C** eigener Server + SSH | wie B, wenn Tailscale blockiert oder unerwünscht | ausgehende SSH-Verbindung | dein Server (sieht nur Chiffrat) | nein, sshd nur auf 127.0.0.1 | 2 bis 4 h plus Serverpflege |
-| **E** Browser in der Kali | immer möglich, Pflicht solange F3 offen | nichts | keine | nein | 10 min |
+| **E** Browser in der Kali | immer möglich, Pflicht solange kein anderer Weg erlaubt ist | nichts | keine | nein | 10 min |
 
 Nie, egal was die Prüfliste ergibt:
 
@@ -230,7 +230,7 @@ passwd                                          # Standardpasswort ersetzen, vor
 sudo apt update && sudo apt install -y openssh-server age nftables   # nur mit Internet; ohne Internet siehe Abschnitt 7 (Offline-Bundle)
 ```
 
-sshd-Einstellungen als eigene Datei. Debian liest `sshd_config.d/*.conf` vor der Hauptdatei, und bei sshd gilt der erste Wert. Damit gewinnt diese Datei.
+sshd-Einstellungen als eigene Datei. Die Hauptdatei von Debian bindet `sshd_config.d/*.conf` ganz oben ein, und bei sshd gilt der erste Wert. Damit gewinnt diese Datei.
 
 ```bash
 sudo tee /etc/ssh/sshd_config.d/10-ariadne.conf >/dev/null <<EOF
@@ -297,6 +297,7 @@ Host kali-sl kali-sl-ui
   UseKeychain yes
 ```
 
+- `User` ist dein Benutzer in der Kali (`kali`, `vmuser` oder was `whoami` dort zeigt).
 - `HostKeyAlias` speichert den Hostkey unter einem festen Namen. Wechselt später die Adresse (Tailscale, eigener Server), bleibt die Prüfung dieselbe.
 - `ExitOnForwardFailure` bricht ab, wenn auf dem Mac schon etwas Port 7330 belegt. Sonst würdest du mit einem fremden Programm reden.
 - Nie `-g` oder `GatewayPorts` auf dem Mac: Dann wäre Port 7330 für alle im selben WLAN offen.
@@ -326,7 +327,7 @@ Der Dauer-Privatmodus ist Absicht: Er schreibt weder Verlauf noch Sitzungswieder
 
 ### 4.3 Weg A: SSH direkt
 
-**Kali.** Optional ein Limit für neue SSH-Verbindungen, falls Mitstudierende im Netz sind. OpenSSH ab 9.8 bremst auffällige Quellen schon selbst (PerSourcePenalties, `ssh -V` zeigt die Version). Kommen alle über dieselbe NAT-Adresse, sperrt das auch dich; dann in `journalctl -u ssh` nach «penalty» suchen. Ist die Quell-IP deines Wegs bekannt und nur deine (z. B. ein VPN-Pool), schränke `AllowUsers` ein: `AllowUsers kali@10.20.0.0/16`.
+**Kali.** Ein eigenes Firewall-Limit für SSH brauchst du meist nicht: OpenSSH ab 9.8 bremst auffällige Quellen schon selbst (PerSourcePenalties, `ssh -V` zeigt die Version). Kommen alle über dieselbe NAT-Adresse, sperrt das auch dich; dann in `journalctl -u ssh` nach «penalty» suchen. Ist die Quell-IP deines Wegs bekannt und nur deine (z. B. ein VPN-Pool), schränke `AllowUsers` darauf ein, z. B. `AllowUsers kali@10.20.0.0/16` (Pool nur als Beispiel).
 
 ```bash
 sudo systemctl enable --now ssh
@@ -357,7 +358,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7330/api/v1/status
 1. Mac: `ariadne-mac start` (Tunnel auf, Code über SSH holen, Firefox-Profil mit Anmeldung öffnen).
 2. Am Ende: `ariadne-mac stop` (Sitzungen widerrufen, Sicherung holen, Tunnel zu).
 
-Bis der Helfer existiert, von Hand: `ssh -f kali-sl-ui`, dann in der Kali `ariadne ui --code` (**geplant**) und den Code im Mac-Browser eintippen.
+Bis der Helfer existiert, von Hand: `ssh -f kali-sl-ui`, dann `ssh -t kali-sl '$HOME/.local/bin/ariadne ui --code'` (**geplant**) und den Code im Mac-Browser eintippen. Der Code erscheint so im Terminal des Macs, nicht auf dem Konsolenbild der Kali, und die Aufnahme sieht ihn nicht.
 
 ### 4.4 Weg B: Tailscale als Transport für SSH
 
@@ -491,7 +492,7 @@ Host kali-sl kali-sl-ui
   HostName 127.0.0.1
   Port 2222
   ProxyJump rendezvous
-  (Rest wie in 4.2)
+  # Rest wie in 4.2
 ```
 
 Erster Login mit Fingerprint-Vergleich wie bei Weg A. Ohne `HostKeyAlias` würde SSH hier den Hostkey unter `[127.0.0.1]:2222` ablegen.
@@ -640,11 +641,11 @@ Den Inhalt von `ariadne-recovery.key` in den Passwortmanager übernehmen oder au
 **Mit Netzweg (A, B, C), vom Mac aus nach jeder Session.** Das Archiv entsteht auf der Kali, wird dort verschlüsselt und direkt in den SSH-Kanal geschrieben. Eine Zwischendatei gibt es nicht.
 
 ```bash
-ssh kali-sl 'set -o pipefail; $HOME/.local/bin/ariadne daemon stop; tar -C "$HOME" -czf - .local/share/ariadne/operator .config/ariadne ariadne | age -R "$HOME/.config/ariadne/backup-recipients.txt"' > ~/Ariadne-Backups/kali-sl-$(date -u +%Y%m%dT%H%M%SZ).tar.gz.age
+ssh kali-sl 'set -o pipefail; $HOME/.local/bin/ariadne daemon stop >&2; tar -C "$HOME" -czf - .local/share/ariadne/operator .config/ariadne ariadne | age -R "$HOME/.config/ariadne/backup-recipients.txt"' > ~/Ariadne-Backups/kali-sl-$(date -u +%Y%m%dT%H%M%SZ).tar.gz.age
 age -d -i ~/.config/ariadne-backup/mac.key ~/Ariadne-Backups/DATEI.tar.gz.age | tar -tzf - | head
 ```
 
-`ariadne daemon stop` schliesst das offene Projekt (Checkpoint der Datenbanken, Schlüssel verworfen, **gebaut**). Erst danach sind die SQLCipher-Dateien in einem stimmigen Zustand. Die zweite Zeile prüft, ob die Sicherung lesbar ist und `operator/` sowie `ariadne/<slug>/.vault` enthält.
+`ariadne daemon stop` schliesst das offene Projekt (Checkpoint der Datenbanken, Schlüssel verworfen, **gebaut**). Erst danach sind die SQLCipher-Dateien in einem stimmigen Zustand. Das `>&2` ist wichtig: Ohne es landet die Meldung von `daemon stop` im Datenstrom und macht die `.age`-Datei unbrauchbar. Die zweite Zeile prüft, ob die Sicherung lesbar ist und `operator/` sowie `ariadne/<slug>/.vault` enthält.
 
 **Ohne Netzweg (E), in der Kali.** Dieselbe Pipeline in eine Datei, die du über die Datei-Übertragung von SmartLearn (falls die Lehrperson einen Abgabeblock einrichtet) oder über OneDrive (falls freigeschaltet) holst. Lehrpersonen sehen dort nur Chiffrat, Grösse und Zeitpunkt.
 
@@ -664,13 +665,12 @@ Fehlt in der VM das Paket `age` und gibt es kein Internet, geht diese Notlösung
 
 ```bash
 age -d -i ~/.config/ariadne-backup/mac.key DATEI.tar.gz.age | ssh kali-sl 'tar -C "$HOME" -xpzf - && chmod -R go-rwx "$HOME/.local/share/ariadne" "$HOME/ariadne" "$HOME/.config/ariadne"'
-ssh -t kali-sl '$HOME/.local/bin/ariadne unlock'
-ssh -t kali-sl '$HOME/.local/bin/ariadne project open SLUG && $HOME/.local/bin/ariadne verify'
+ssh -t kali-sl '$HOME/.local/bin/ariadne unlock && $HOME/.local/bin/ariadne project open SLUG && $HOME/.local/bin/ariadne verify'
 ```
 
 4. Den Kettenkopf, den `verify` zeigt, mit dem Wert vergleichen, den das Schliessen vor der Sicherung ausgegeben hat.
 
-Ohne Netzweg: Datei über die Datei-Übertragung in die VM bringen. Entschlüsseln geht dann nur mit dem Recovery-Schlüssel in der VM; danach die Schlüsseldatei sofort löschen und den Recovery-Schlüssel als verbraucht betrachten (neuen erzeugen). Das ist der Grund, warum ich einen Netzweg für die Sicherung klar bevorzuge.
+Ohne Netzweg: Datei über die Datei-Übertragung in die VM bringen. Entschlüsseln muss dann in der VM passieren, also muss ein privater Schlüssel hinein. Nimm dafür den Recovery-Schlüssel, lösche die Schlüsseldatei gleich danach, betrachte den Schlüssel als verbraucht und erzeuge einen neuen. Den Klartext über die Datei-Übertragung zu schicken, wäre schlechter, denn dann läge er bei der Plattform. Das ist der Grund, warum ich einen Netzweg für die Sicherung klar bevorzuge.
 
 ### 6.6 Rhythmus
 
@@ -691,7 +691,7 @@ Grundsatz: Ariadne prüft und warnt, ändert aber keine Systemdienste. sshd, nft
 | `ariadne remote check` | prüft Bindung von 7330, `sshd -T` (R10), lauschende Dienste ausser Loopback, Passwortanmeldung, nftables-Tabelle (B), `ListenAddress` (C), Swap, open-vm-tools, Python; Ausgabe wie `doctor` (ok, warn, fail) und die Ergebnistabelle aus 3.4 | Fixtures mit Ausgaben von `sshd -T` und `ss` ergeben erwartete Warnungen | v0.1 | 5 bis 8 h |
 | `ariadne backup` und `restore` | Stream mit Manifest (Version, Kettenköpfe, Hashes), mit `pyrage` an `backup.recipients`; Ausgabe auf ein Terminal verweigert; `--to-file` für die Datei-Übertragung; Eintrag in die Registry; Restore prüft Manifest und Version, legt Ordner mit 0700 an, ruft `verify` | Runde: sichern, in leeres HOME zurückspielen, `verify` ok, gleicher Kettenkopf; Canary: kein markierter Klartext in der `.age`-Datei; ältere Version wird abgelehnt; fehlende Empfänger ergeben Fehler | **v0.1, vorgezogen aus v0.2** (Architektur 8.9) | 15 bis 25 h |
 | Mac-Helfer `ariadne-mac` | zsh-Skript unter `packaging/mac/`: `start` (Port-Prüfung mit `lsof`, Tunnel, Code holen, Startdatei 0600 in `$TMPDIR`, Firefox-Profil, Datei nach 10 s löschen), `stop` (widerrufen, sichern, Tunnel zu), `unlock`, `backup`, `restore` | shellcheck; Test auf Linux mit einem lokalen sshd im Container; Weiterleitung von `file://` auf `http://127.0.0.1` in Firefox unter macOS zu verifizieren | v0.1 | 4 bis 6 h |
-| Einrichtungsskript für die Kali | `packaging/smartlearn/kali-setup.sh --weg a|b|c`: sshd-Datei, Filter für B, `ListenAddress` und Tunnel-Unit für C, Empfänger der Sicherung; idempotent, zeigt jede Änderung vor dem Schreiben | Lauf im Container `kalilinux/kali-rolling`, zweimal hintereinander ohne Unterschied | v0.1 | 3 bis 5 h |
+| Einrichtungsskript für die Kali | `packaging/smartlearn/kali-setup.sh` mit `--weg a`, `b` oder `c`: sshd-Datei, Filter für B, `ListenAddress` und Tunnel-Unit für C, Empfänger der Sicherung; idempotent, zeigt jede Änderung vor dem Schreiben | Lauf im Container `kalilinux/kali-rolling`, zweimal hintereinander ohne Unterschied | v0.1 | 3 bis 5 h |
 | E2E über einen echten Tunnel | sshd im Container, `ssh -L` auf denselben Port, Playwright meldet sich an, SSE läuft, nach Abbruch und Neuaufbau des Tunnels verbindet die UI mit Backoff neu und das Token gilt weiter | Marker `remote` | v0.1 | 6 bis 10 h |
 | `ariadne doctor` ausbauen | erkennt VMware (`systemd-detect-virt`), unverschlüsselten Swap, open-vm-tools, warnt bei Nicht-Loopback | Fixtures | v0.2 (Teile in `remote check` schon v0.1) | 3 bis 5 h |
 | Offline-Bundle | nur nötig, wenn F2 nein: Installation ohne Internet über die Datei-Übertragung | Install-Test mit `--network none` (geplant) | v0.2, **vorziehen, falls F2 nein** | wie geplant |
