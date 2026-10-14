@@ -51,12 +51,13 @@ from ariadne.ingest.units import MAX_FILE_LINES_BYTES, Unit, file_lines, is_bina
 from ariadne.scope.api import ScopeChecker
 from ariadne.store.api import EventRecord
 
-__all__ = ["Pipeline", "Stats", "Interrupted", "SILENCE_NS", "WATERMARK"]
+__all__ = ["Pipeline", "Stats", "Interrupted", "SILENCE_NS", "WATERMARK", "REPARSE_PENDING"]
 
 log = logging.getLogger("ariadne.ingest")
 
 SILENCE_NS = 10 * 60 * 1_000_000_000
 WATERMARK = "ingest"
+REPARSE_PENDING = "reparse_pending"  # meta: derived.db muss neu gebaut werden (Redaktion)
 BATCH_VOLUME = 50_000  # Events plus Ausgabe/64 Bytes pro Transaktion (begrenzt gepufferte Zeilen)
 
 
@@ -135,7 +136,9 @@ class Pipeline:
         conn.commit()
         self.terms: dict[str, TermStream] = {}
         self._loaded = False
-        self.needs_reparse = False
+        # Bedarf nach system.redaction steht in derived.db (gleiche Transaktion wie der
+        # Wasserstand): Bricht der Neuaufbau ab, holt ihn die nächste Pipeline nach.
+        self.needs_reparse = get_meta(conn, REPARSE_PENDING) == "1"
 
     # ------------------------------------------------------------------ öffentlich
     @property
@@ -228,6 +231,10 @@ class Pipeline:
                        projector_factory=self.projector_factory, clock=self.clock, silence_ns=self.silence_ns,
                        should_stop=self.should_stop)
         new.process_new()
+        # Die neue Datei enthält die Redaktion schon; ihr eigener Bedarf ist erledigt.
+        set_meta(new_conn, REPARSE_PENDING, "0")
+        new_conn.commit()
+        new.needs_reparse = False
         return new
 
     # ------------------------------------------------------------------ Verteilung
@@ -262,7 +269,10 @@ class Pipeline:
         elif kind == "net.route":
             add_route(self.conn, rec.seq, rec.header)
         elif kind == "system.redaction":
-            self.needs_reparse = True  # FTS enthält den Klartext noch: derived.db neu bauen
+            # FTS enthält den Klartext noch: derived.db neu bauen. Der Vermerk wird mit dem
+            # Wasserstand committed und erst nach dem Dateitausch gelöscht.
+            self.needs_reparse = True
+            set_meta(self.conn, REPARSE_PENDING, "1")
 
     # ------------------------------------------------------------------ Terminals
     def _finish_terms(self, stats: Stats) -> None:

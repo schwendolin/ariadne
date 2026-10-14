@@ -67,7 +67,7 @@ def spawn_detached(paths: Paths | None = None, timeout: float = 3.0) -> bool:
     env = {k: v for k, v in os.environ.items() if k not in ("ARIADNE_TERMINAL_ID", "NOTIFY_SOCKET")}
     try:
         subprocess.Popen(
-            [sys.executable, "-m", "ariadne.daemon"],
+            [sys.executable, "-I", "-m", "ariadne.daemon"],
             stdin=subprocess.DEVNULL, stdout=fd, stderr=fd, close_fds=True,
             start_new_session=True, env=env, cwd="/",
         )

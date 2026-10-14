@@ -324,3 +324,34 @@ def test_projection_errors_do_not_block_analysis(env):
     st = p.process_new()
     assert st.failures == 2 and p.watermark == len(list(env.journal.iter_events()))
     assert env.rows("SELECT parser_id, reason FROM parse_failure") == [("stub.high", "projection:ValueError")]
+
+
+def test_redaction_reparse_need_survives_new_pipeline(tmp_path):
+    """Bricht der Neuaufbau nach ``system.redaction`` ab, holt ihn die nächste Pipeline nach."""
+    from ariadne.ingest.db import get_meta
+    from ariadne.ingest.pipeline import REPARSE_PENDING
+
+    j = MemoryJournal()
+    t = TermSim(j)
+    t.open()
+    t.command("cat creds", b"password: Hunter2Secret!\r\n")
+    t.prompt()
+    conn = sqlite3.connect(tmp_path / "derived.db")
+    p = _pipe(j, conn)
+    p.process_new()
+    assert not p.needs_reparse
+    seq = next(r.seq for r in j.iter_events() if r.kind == "term.out" and b"Hunter2" in (r.body or b""))
+    j.redact(seq, label="x", replacement=b"*" * 10, reason="test")
+    p.process_new()
+    assert p.needs_reparse and get_meta(conn, REPARSE_PENDING) == "1"
+    # Neustart (Projekt geschlossen, Daemon gestoppt, Fehler im Neuaufbau): Bedarf bleibt
+    p2 = _pipe(j, conn)
+    p2.process_new()
+    assert p2.needs_reparse
+    new = sqlite3.connect(tmp_path / "derived.reparse.db")
+    rebuilt = p2.reparse(new)
+    assert not rebuilt.needs_reparse and get_meta(new, REPARSE_PENDING) == "0"
+    assert new.execute("SELECT count(*) FROM unit_line WHERE text LIKE '%Hunter2%'").fetchone()[0] == 0
+    assert not _pipe(j, new).needs_reparse  # nach dem Tausch: kein Endlos-Neuaufbau
+    for c in (conn, new):
+        c.close()

@@ -54,7 +54,7 @@ def test_install_and_remove(paths, shell_src, no_systemctl):
     assert "init.bash" in (paths.home / ".bashrc").read_text()
     unit = (paths.config_dir.parent / "systemd" / "user" / "ariadned.service").read_text()
     for line in ("Type=notify", "UMask=0077", "LimitCORE=0", "NoNewPrivileges=yes", "Restart=on-failure",
-                 f"ExecStart={sys.executable} -m ariadne.daemon"):
+                 f"ExecStart={sys.executable} -I -m ariadne.daemon", "WorkingDirectory=/"):
         assert line in unit
     assert ("daemon-reload",) in no_systemctl
 

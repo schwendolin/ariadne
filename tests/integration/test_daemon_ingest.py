@@ -201,6 +201,51 @@ def test_import_and_redaction_rebuilds_index(paths, operator, tmp_path):
     run(paths, operator, scenario)
 
 
+class _FlakyReparse(IngestService):
+    """Der erste Neuaufbau scheitert (Platte voll); der Bedarf darf nicht verloren gehen."""
+
+    fails = 1
+
+    def _reparse_job(self, snap: Any) -> dict[str, Any]:
+        if self.fails:
+            self.fails -= 1
+            raise OSError("No space left on device")
+        return super()._reparse_job(snap)
+
+
+def test_redaction_reparse_retried_after_failure(paths, operator):
+    async def scenario(d: Daemon) -> None:
+        shim, term, ws = await _start(paths)
+        await term.command("cat notes.txt", b"geheimnis-vom-ziel-42\r\n", cwd=str(ws))
+        await term.mark("A", cwd=str(ws))
+        await term.acked()
+        assert (await ctl_ok(paths.ctl_sock, "search", text="geheimnis-vom-ziel-42"))["items"]
+        outs = sorted(d.project.journal.iter_events(kinds=["term.out"]), key=lambda r: r.stream_off)
+        stream = b"".join(r.body or b"" for r in outs)
+        start = stream.index(b"geheimnis-vom-ziel-42")
+        end = start + len(b"geheimnis-vom-ziel-42")
+        for r in outs:
+            if r.stream_off < end and r.stream_off + len(r.body or b"") > start:
+                await ctl_ok(paths.ctl_sock, "redact", seq=r.seq, label="fremd", reason="Test")
+        assert d.ingest is not None
+        for _ in range(3):
+            await d.ingest.sync()
+        assert isinstance(d.ingest, _FlakyReparse) and d.ingest.fails == 0
+        assert not (await ctl_ok(paths.ctl_sock, "search", text="geheimnis-vom-ziel-42"))["items"]
+        await shim.close()
+
+    async def main() -> None:
+        d = Daemon(paths, check_peer_comm=False, operator=operator, batch_interval=0.02,
+                   clock_check=_fake_clock, ingest=_FlakyReparse(debounce=0.05, periodic=0))
+        await d.start()
+        try:
+            await scenario(d)
+        finally:
+            await d.stop()
+
+    asyncio.run(main())
+
+
 def test_show_without_project_and_bad_view(paths, operator):
     async def scenario(d: Daemon) -> None:
         r = await ctl(paths.ctl_sock, "show", what="hosts")

@@ -122,7 +122,10 @@ def unit_text() -> str:
         "Description=Ariadne Daemon (Flugschreiber für Pentests)\n\n"
         "[Service]\n"
         "Type=notify\n"
-        f"ExecStart={exe} -m ariadne.daemon\n"
+        # -I: weder Arbeitsordner noch PYTHON*-Variablen im sys.path. Sonst lädt der
+        # Prozess, der alle Schlüssel hält, z. B. eine json.py aus dem Home (Loot).
+        f"ExecStart={exe} -I -m ariadne.daemon\n"
+        "WorkingDirectory=/\n"
         "UMask=0077\n"
         "LimitCORE=0\n"
         "NoNewPrivileges=yes\n"

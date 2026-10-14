@@ -1,6 +1,45 @@
 # Konzept: Ariadne vom Mac aus, Kali in SmartLearn
 
-> Stand 2026-10-14, Vorschlag, nach einer Red-Team-Prüfung überarbeitet. Antwort auf deine Nachrichten vom 2026-10-14 («ich würde es cool finden wenn ich von remote (extern) auf da ariadne dashboard zugreifen kann ...» und «die kali läuft nicht auf der vm auf meinem mac sonder auf einer entfernten vm im smartlearn netz der schule»). Grundlage sind zwei Rechercheberichte (Umgebung SmartLearn, Zugangswege), eine Red-Team-Prüfung (Angriffe aus Lab-Netz, Schule, Internet, vom Mac und über Zielseiten), [VISION](../VISION.md), die [Lösungsarchitektur](architektur.md) (7.1 bis 7.3, 8, 9), die [HTTP-API](web-api.md) (1.1, 3, 12), das [Entscheidungsprotokoll](entscheide.md), das [Konzept Terminal und Web](konzept-terminal-und-web.md) und der Code unter `src/ariadne/daemon` und `src/ariadne/web`. Entschieden ist davon nichts, bis du die Fragen in Abschnitt 9 beantwortet hast.
+## Auf einen Blick
+
+Deine Kali läuft in SmartLearn, du bedienst sie über die Webkonsole im Browser. Dein Mac kommt nicht an die Kali heran, die Kali aber ins Internet.
+
+**Dein Weg jetzt: Weg E.** Ariadne läuft in der Kali, das Dashboard öffnest du im Firefox der Kali. Das geht sofort und ohne Erlaubnis. Den Webserver dafür bringt v0.1; bis dahin nutzt du die Kommandozeile.
+
+**Dein Zielweg: Weg B, erst wenn die Schule schriftlich zustimmt.** Tailscale baut von der Kali aus ein privates, verschlüsseltes Netz zum Mac und ist nur die Leitung. Darin trägt SSH (verschlüsselte Fernanmeldung) `http://127.0.0.1:7330` vom Mac-Browser zur Kali. Ariadne lauscht weiter nur auf `127.0.0.1`, also nur für Programme der Kali.
+
+**Was du als Nächstes tust**
+
+1. Webkonsole in Chrome oder Safari öffnen, in einem eigenen Profil ohne Erweiterungen (Firefox tippt dort doppelt).
+2. In der Kali `passwd`, dann die Prüfliste 3.2. Sie bestätigt das Internet und zeigt bei `issuer`, ob die Schule HTTPS mitliest.
+3. Auf dem Mac `fdesetup status`. Erwartet: `FileVault is On.` (Plattenverschlüsselung).
+4. Ticket an die Schule (3.5), vor allem: Ist Tailscale aus der Lab-VM erlaubt?
+5. Sicherung einrichten (6.3), dann nach jeder Session sichern (6.4).
+
+**Sicherheitsregeln**
+
+- Im Lab-Netz lauscht nur, was du für eine Übung startest. Ariadne bleibt auf `127.0.0.1`, SSH bleibt aus, kein Übungs-Webserver im Home-Ordner. Prüfen mit `sudo ss -tulpn`.
+- Kein Tunnel und keine Tunnel-Probe ohne schriftliches Ja der Schule.
+- Die Schule kann Bildschirm, Tastatur und Speicher der VM sehen. Darum nur Lab-Daten.
+- Passphrase nie unter Firefox oder mit Browser-Erweiterungen in die Webkonsole tippen. Ab Weg B entsperrst du vom Mac aus: `ssh -t kali-sl unlock`.
+- Sicherung ausserhalb der VM, mit age verschlüsselt (Werkzeug für Dateiverschlüsselung). Die Schule kann die VM jederzeit zurücksetzen.
+- Vor jeder Pause `ariadne lock`. Das soll auch die Anmeldung im Dashboard beenden; sonst läuft sie nach 12 Stunden ab.
+
+**Was Ariadne zuerst bauen muss**
+
+Für Weg E (v0.1): den Webserver, der nur auf `127.0.0.1` startet und fremde Anfragen abweist, ablaufende Anmeldungen, `ariadne backup` und `restore`, die Selbstprüfung `ariadne remote check`. Für Weg B (v0.2): `ariadne remote serve` (der Mac-Schlüssel öffnet nur das Dashboard), Einrichtungsskript für die Kali, Mac-Helfer `ariadne-mac`.
+
+**Offene Fragen mit Empfehlung** (Abschnitt 9)
+
+1. F3, erlaubt die Schule Tailscale? Per Ticket fragen, Antwort schriftlich.
+2. Welcher Tunnel? Tailscale.
+3. Mac-Browser für Weg B? Firefox nur für Ariadne, Profil erreicht nur `127.0.0.1`.
+4. Wie lange gilt eine Anmeldung? Höchstens 12 Stunden, Ende auch mit dem Tunnel.
+5. Was darf der Mac-Schlüssel? Nur Ariadne, keine Shell.
+6. Wann sichern? Nach jeder Session.
+7. Was kommt in v0.1? Sicherung und Schutz des Webservers, Fernzugriff erst in v0.2.
+
+> Stand 2026-10-14, Vorschlag, nach einer Red-Team-Prüfung überarbeitet. Antwort auf deine Nachrichten vom 2026-10-14 («ich würde es cool finden wenn ich von remote (extern) auf da ariadne dashboard zugreifen kann ...» und «die kali läuft nicht auf der vm auf meinem mac sonder auf einer entfernten vm im smartlearn netz der schule»). Grundlage sind zwei Rechercheberichte (Umgebung SmartLearn, Zugangswege), eine Red-Team-Prüfung (Angriffe aus Lab-Netz, Schule, Internet, vom Mac und über Zielseiten), [VISION](../VISION.md), die [Lösungsarchitektur](architektur.md) (7.1 bis 7.3, 8, 9), die [HTTP-API](web-api.md) (1.1, 3, 12), das [Entscheidungsprotokoll](entscheide.md), das [Konzept Terminal und Web](konzept-terminal-und-web.md) und der Code unter `src/ariadne/daemon` und `src/ariadne/web`. Entschieden ist davon nichts, bis du die Fragen in Abschnitt 9 beantwortet hast. Nachgetragen am 2026-10-14: deine Antworten (Bedienung über die Webkonsole, F1 nein, F2 ja) und die Seite «Auf einen Blick».
 >
 > Kennzeichnung: **gebaut** heisst im v0.1-Backend vorhanden. **geplant** heisst in Architektur oder API beschrieben, aber noch nicht gebaut. **Vorschlag** heisst neu in diesem Dokument. Wichtig vorab: Den HTTP-Teil des Daemons gibt es noch nicht (`ariadne ui` gibt nur einen Hinweis aus, die UI läuft im Mock-Modus). Prüfliste, Ticket und Sicherung kannst du trotzdem schon jetzt machen.
 
@@ -19,9 +58,9 @@
 
 ## 1 Kurzfassung
 
-Deine Kali läuft als VM in SmartLearn auf VMware vSphere, und du siehst sie über die Webkonsole oder die VMware Remote Console (VMRC). Diese Konsole läuft über den Hypervisor, nicht über das Netz; dein Mac erreicht die Kali deshalb sehr wahrscheinlich gar nicht direkt. Die Lösung ist für alle Fälle dieselbe: Ariadne bleibt auf `127.0.0.1:7330`, und der Mac holt sich die Oberfläche über eine SSH-Portweiterleitung auf seinen eigenen `127.0.0.1:7330`. Token, Host- und Origin-Prüfung, CSP und «Entsperren nur per CLI» gelten damit unverändert. Verschieden ist nur die Zufahrt zum SSH-Dienst der Kali: ein offizieller Weg der Schule (Weg A), Tailscale (Weg B) oder ein eigener kleiner Server (Weg C). B und C sind ausgehende Tunnel und kommen nur mit schriftlicher Erlaubnis in Frage. Bis es einen erlaubten Weg gibt, bleibt der Browser in der Kali (Weg E); das ist die sichere Grundlinie, die heute schon geht. Ausgeschlossen sind ein eigener Netzport von Ariadne und öffentliche Tunnel-Dienste wie ngrok oder Cloudflare.
+Deine Kali läuft als VM in SmartLearn auf VMware vSphere, und du bedienst sie über die Webkonsole im Browser. Diese Konsole läuft über den Hypervisor, nicht über das Netz. Dein Mac erreicht die Kali nicht direkt (F1 nein), die Kali kommt aber ins Internet (F2 ja); beides hast du bestätigt. Die Lösung ist für alle Fälle dieselbe: Ariadne bleibt auf `127.0.0.1:7330`, und der Mac holt sich die Oberfläche über eine SSH-Portweiterleitung auf seinen eigenen `127.0.0.1:7330`. Token, Host- und Origin-Prüfung, CSP und «Entsperren nur per CLI» gelten damit unverändert. Verschieden ist nur die Zufahrt zum SSH-Dienst der Kali: ein offizieller Weg der Schule (Weg A), Tailscale (Weg B) oder ein eigener kleiner Server (Weg C). B und C sind ausgehende Tunnel und kommen nur mit schriftlicher Erlaubnis in Frage. Bis es einen erlaubten Weg gibt, bleibt der Browser in der Kali (Weg E); das ist die sichere Grundlinie, die heute schon geht. Ausgeschlossen sind ein eigener Netzport von Ariadne und öffentliche Tunnel-Dienste wie ngrok oder Cloudflare.
 
-Vier Regeln tragen die Sicherheit, alle aus der Red-Team-Prüfung:
+Vier Regeln tragen die Sicherheit des Fernzugriffs (A bis C), alle aus der Red-Team-Prüfung:
 
 1. **Eigene Hostkeys.** Kalis aus demselben Masterset haben vielleicht dieselben SSH-Hostkeys. Dann beweist der Fingerprint nichts, und ein Mitstudierender könnte sich als deine Kali ausgeben und beim Wiederherstellen deine entschlüsselte Sicherung empfangen. Du erzeugst die Hostkeys deshalb selbst neu, und SSH bricht bei jedem unbekannten Hostkey ab.
 2. **Ein Schlüssel, der nur Ariadne kann.** Der Mac-Schlüssel öffnet keine Shell, nur die Weiterleitung zu Ariadne und eine feste Befehlsliste (Code holen, entsperren, sperren, sichern). Schadsoftware auf dem Mac bekommt damit höchstens das Dashboard, nie die Kali.
@@ -30,7 +69,7 @@ Vier Regeln tragen die Sicherheit, alle aus der Red-Team-Prüfung:
 
 Weil die Schule die VM zurücksetzen und beim Archivieren löschen kann, gehört eine mit age verschlüsselte Sicherung ausserhalb der VM fest dazu; `ariadne backup` rückt von v0.2 nach v0.1. Auf SmartLearn gehören nur Lab-Daten, denn wer den Hypervisor betreibt, sieht Bildschirm, Tastatur und Arbeitsspeicher der VM.
 
-**Was du jetzt tust:** die Prüfliste (3.1 bis 3.4, etwa 5 Minuten), das Ticket an die Schule (3.5), Weg E nutzen und nach jeder Session eine Sicherung als Datei ziehen (6.4). **Ohne schriftliche Antwort der Schule:** kein sshd, kein Tunnel, keine Tunnel-Proben. Alles Weitere richten später zwei Skripte ein (Abschnitt 7).
+Was du jetzt tust, steht in «Auf einen Blick». Alles Weitere richten später zwei Skripte ein (Abschnitt 7).
 
 ## 2 Bild der Lösung
 
@@ -39,7 +78,7 @@ flowchart LR
   subgraph MAC["Dein Mac"]
     BR["Firefox-Profil ariadne, Insel<br/>http://127.0.0.1:7330"]
     SC["ssh -F ariadne.conf kali-sl-ui<br/>LocalForward 127.0.0.1:7330"]
-    VC["VMRC oder Webkonsole"]
+    VC["Webkonsole im Browser"]
     BR -->|"nur Loopback"| SC
   end
   subgraph SL["SmartLearn, VMware vSphere"]
@@ -69,7 +108,7 @@ flowchart LR
 
 So liest du das Bild:
 
-- **Konsole ist kein Netzweg.** Was du im VMRC-Fenster siehst, kommt vom ESXi-Host über Port 443. Dass du die Kali auf dem Mac siehst, heisst nicht, dass dein Mac sie über das Netz erreicht.
+- **Konsole ist kein Netzweg.** Was du in der Webkonsole siehst, kommt über vCenter und den ESXi-Host (Port 443). Darum siehst du die Kali, obwohl dein Mac sie über das Netz nicht erreicht.
 - **Ariadne lauscht nur auf Loopback.** `127.0.0.1` ist die Adresse «dieser Rechner selbst». Was dort lauscht, erreichen nur Prozesse auf derselben Maschine. Ziel-VMs und Mitstudierende sehen Port 7330 nie.
 - **Der dicke Pfeil ist immer SSH.** Eine SSH-Portweiterleitung (`ssh -L`) öffnet auf dem Mac einen Port `127.0.0.1:7330`. Was dort ankommt, trägt SSH verschlüsselt zur Kali, und dort verbindet sich der sshd-Prozess deines Benutzers mit `127.0.0.1:7330`. Für Ariadne sieht das aus wie ein lokaler Browser.
 - **Weg A, B und C unterscheiden sich nur in der Zufahrt zu sshd.** Das Sicherheitsmodell der Web-UI bleibt in allen drei Fällen gleich.
@@ -89,17 +128,17 @@ So liest du das Bild:
 
 ## 3 Erst prüfen und fragen
 
-Die Prüfliste beantwortet drei Fragen. Die Antworten wählen im Entscheidungsbaum (Abschnitt 4) den Weg.
+Drei Fragen wählen im Entscheidungsbaum (Abschnitt 4) den Weg. Zwei hast du am 2026-10-14 beantwortet:
 
-- **F1:** Erreicht der Mac die Kali direkt über einen Weg, den die Schule vorsieht?
-- **F2:** Darf die Kali ins Internet, und wohin?
-- **F3:** Erlauben die Schulregeln Tunnel-Software (Tailscale, `ssh -R`)?
+- **F1:** Erreicht der Mac die Kali direkt über einen Weg, den die Schule vorsieht? **Nein.** Vom Mac kommst du nicht per SSH an die Kali.
+- **F2:** Darf die Kali ins Internet, und wohin? **Ja, laut dir.** Bestätige es einmal mit Block 2 in 3.2: Die `curl`-Codes zeigen, ob alles offen ist oder nur eine Whitelist, die Zeile `issuer`, ob die Schule HTTPS aufbricht.
+- **F3:** Erlauben die Schulregeln Tunnel-Software (Tailscale, `ssh -R`)? **Offen.** Das lässt sich nicht messen, das fragst du (3.5).
 
-F1 und F2 misst du. F3 lässt sich nicht messen, die fragst du (3.5). Drei Regeln für die Prüfung: Scanne nichts (kein nmap, kein Ping-Sweep ins Lab-Netz). Starte sshd nicht, solange das Standardpasswort gilt. Tippe Passphrasen und Codes nie in die Webkonsole unter Firefox, denn sie gibt dort Eingaben doppelt weiter.
+Drei Regeln für die Prüfung: Scanne nichts (kein nmap, kein Ping-Sweep ins Lab-Netz). Starte sshd nicht, solange das Standardpasswort gilt. Tippe Passphrasen und Codes nie in die Webkonsole unter Firefox, denn sie gibt dort Eingaben doppelt weiter.
 
-### 3.1 Vorbereitung (30 Sekunden)
+### 3.1 Vorbereitung (etwa 2 Minuten)
 
-1. Öffne die Kali in der **VMRC** (Mac App Store, die gibb verlinkt sie) oder in der Webkonsole mit Chrome oder Safari.
+1. Öffne die Webkonsole in Chrome oder Safari, in einem eigenen Browserprofil ohne Erweiterungen. Eine Erweiterung, die die Seite lesen darf, sieht jede Taste, die du an die Kali schickst, auch die Passphrase von `ariadne unlock`. Die VMRC (Mac App Store) wäre die Alternative ohne Browser.
 2. Teste Copy/Paste: auf dem Mac `echo test` kopieren und im Kali-Terminal einfügen. Unter vSphere ist das standardmässig aus. Klappt es, sind die Zwischenablagen von Kali und Mac verbunden, und über Handoff landet alles auch auf deinem iPhone und iPad (Folge in 3.4). Klappt es nicht, tippst du die Befehle ab; sie sind bewusst kurz.
 
 ### 3.2 In der Kali (etwa 3 Minuten)
@@ -126,36 +165,32 @@ free -h; nproc; df -h ~; swapon --show; lsblk -f
 
 **Tunnel-Proben erst, wenn F3 «ja» ist.** Dann prüfst du, ob die Tunnel technisch gehen: `curl -sm8 -o /dev/null -w '%{http_code}\n' https://login.tailscale.com/` (200 oder 3xx: Weg B möglich) und `nc -vz -w5 github.com 22; nc -vz -w5 github.com 443` (succeeded: Weg C möglich). Vorher nicht: Ohne Erlaubnis brauchst du die Antwort nicht, und in den Logs der Firewall sehen solche Proben wie Tunnelversuche aus.
 
-### 3.3 Auf dem Mac (etwa 1 Minute)
+### 3.3 Auf dem Mac (30 Sekunden)
+
+```bash
+fdesetup status                      # FileVault an?
+```
+
+Eine Netzmessung vom Mac brauchst du nicht, F1 ist beantwortet. **Nur falls die Schule im Ticket doch einen offiziellen Weg nennt** (gibb-VPN `vpn.gibb.ch`, Portfreigabe; dann Weg A), misst du über diesen Weg:
 
 ```bash
 KALI=192.168.110.70                  # IP aus Schritt 1 in der Kali
 ifconfig | grep 'inet '              # liegt dein eigenes Netz in 192.168.110.0/24? dann ist die Messung wertlos
-route -n get $KALI                   # über welche Schnittstelle und welches Gateway?
-ping -c 3 $KALI
 nc -vz -G 5 $KALI 22                 # Timeout, refused oder succeeded?
-lsof -nP -iTCP -sTCP:ESTABLISHED | grep -i vmware   # wohin spricht die VMRC?
-lsof -nP -iTCP:7330 -sTCP:LISTEN     # muss leer sein
-fdesetup status                      # FileVault an?
 ```
 
 **Gegenprobe, nur wenn `nc` nicht in einen Timeout läuft.** Alle SmartLearn-Umgebungen haben vermutlich denselben Adressplan. Eine Antwort von `192.168.110.70` kann also von der Kali einer anderen Person kommen oder von einem Gerät in deinem Heimnetz. Lass in der Kali `sudo timeout 30 tcpdump -n -i eth0 'tcp port 22'` laufen (Schnittstelle aus Schritt 1) und wiederhole auf dem Mac `nc -vz -G 5 $KALI 22`. Siehst du in der Kali das Paket, ist es deine. Siehst du nichts, hast du jemand anderen erreicht.
-
-Nur wenn du für das gibb-VPN (`vpn.gibb.ch`, Check Point Mobile Access, MFA) berechtigt bist: verbinden, `netstat -rn -f inet | grep -E '^(10|192\.168)'` ansehen und die Mac-Befehle wiederholen.
 
 ### 3.4 Was die Ergebnisse bedeuten
 
 | Messung | Ergebnis | Bedeutung | Folge |
 |---|---|---|---|
-| Kali `ip route` | 192.168.110.x/24, Gateway .1 bis .4 | eigene SmartLearn-Umgebung hinter einer NAT-Firewall-VM | F1 sehr wahrscheinlich nein |
-| Mac `route`, `ping`, `nc` | Heimrouter als Gateway, Timeout | kein Netzweg (so erwartet) | **F1 nein** |
-| Mac `nc` | refused oder succeeded, Gegenprobe zeigt das Paket in deiner Kali | es gibt einen Netzweg zu deiner Kali | **F1 ja**, wenn der Weg offiziell ist (VPN, Freigabe der Lehrperson) |
-| Mac `nc` | refused oder succeeded, Gegenprobe zeigt nichts | fremdes Gerät mit derselben Adresse | F1 nein, und nie dorthin verbinden |
-| Mac `ifconfig` | eigenes Netz in 192.168.110.0/24 | jede Messung trifft dein Heimnetz | über ein anderes Netz wiederholen |
-| Mac `lsof … vmware` | Verbindung zu einem Host auf :443 | Konsole läuft über ESXi oder vCenter | bestätigt: Konsole ist kein Netzweg |
+| Mac `nc` (nur Weg A) | refused oder succeeded, Gegenprobe zeigt das Paket in deiner Kali | es gibt einen Netzweg zu deiner Kali | **F1 ja**, wenn der Weg offiziell ist (VPN, Freigabe der Lehrperson) |
+| Mac `nc` (nur Weg A) | refused oder succeeded, Gegenprobe zeigt nichts | fremdes Gerät mit derselben Adresse | F1 nein, und nie dorthin verbinden |
+| Mac `ifconfig` (nur Weg A) | eigenes Netz in 192.168.110.0/24 | jede Messung trifft dein Heimnetz | über ein anderes Netz wiederholen |
 | Mac `fdesetup status` | `FileVault is Off.` | Mac-Platte im Klartext | einschalten, bevor Lab-Daten auf den Mac kommen; der Mac-Helfer verlangt es (R13) |
 | Copy/Paste (3.1) | klappt | Kali-Zwischenablage landet auf dem Mac, in Clipboard-Verläufen und per Handoff auf deinen Apple-Geräten | «Kopieren ohne Anzeigen» nur bewusst benutzen; besser die Schule fragen, ob es abschaltbar ist |
-| `kali.org` | 200 oder 301 | HTTPS nach aussen offen | **F2 ja** |
+| `kali.org` | 200 oder 301 | HTTPS nach aussen offen | **F2 ja** (so erwartet) |
 | `kali.org` | 000 | gesperrt oder Timeout | **F2 nein**: offline betreiben, keine Cloud-KI |
 | `kali.org` | 403, Proxy-Seite, oder `*_proxy` gesetzt | Whitelist oder Filter | **F2 teilweise**: nötige Ziele freischalten lassen |
 | `api.anthropic.com` | 401 | API erreichbar, Schlüssel fehlt erwartungsgemäss | Claude-API technisch möglich |
@@ -175,9 +210,9 @@ Nur wenn du für das gibb-VPN (`vpn.gibb.ch`, Check Point Mobile Access, MFA) be
 
 | Frage | Antwort | Beleg |
 |---|---|---|
-| F1 Mac erreicht Kali direkt, offiziell | ja / nein | `nc`, Gegenprobe, Antwort der Schule |
-| F2 Kali ins Internet | ja / nein / nur Whitelist | `curl`-Codes, Proxy |
-| F3 Tunnel erlaubt | ja (schriftlich) / nein / offen | Ticket-Antwort |
+| F1 Mac erreicht Kali direkt, offiziell | **nein** | deine Angabe vom 2026-10-14; neu messen nur, wenn die Schule einen Weg nennt (Ticket-Frage 2) |
+| F2 Kali ins Internet | **ja** laut dir; nach 3.2: ja / nur Whitelist | `curl`-Codes, Proxy, `issuer` |
+| F3 Tunnel erlaubt | **offen**; später ja (schriftlich) / nein | Ticket-Antwort |
 | Nebenbefunde | TLS-Aufbruch, Gruppenumgebung, Copy/Paste, FileVault, Python, RAM, offene Dienste | |
 
 ### 3.5 Was du die Schule fragst
@@ -201,14 +236,13 @@ Am besten per Ticket unter ticket.gibb.ch, damit die Antwort schriftlich vorlieg
 
 ```mermaid
 flowchart TD
-  ST["Prüfliste gemacht, Antwort der Schule liegt vor"] --> Q1{"F1: Erreicht der Mac die Kali<br/>über einen offiziellen Weg?"}
-  Q1 -->|ja| WA["Weg A: SSH direkt"]
-  Q1 -->|nein| Q2{"F2: Darf die Kali ins Internet?"}
-  Q2 -->|nein| WE["Weg E: Browser in der Kali,<br/>Sicherung als Datei"]
-  Q2 -->|"ja oder Whitelist"| Q3{"F3: Erlaubt die Schule<br/>Tunnel-Software schriftlich?"}
+  Q1{"F1: Erreicht der Mac die Kali<br/>über einen offiziellen Weg?<br/>Stand: nein"} -->|"ja, nur falls die Schule<br/>einen Weg nennt"| WA["Weg A: SSH direkt"]
+  Q1 -->|nein| Q2{"F2: Darf die Kali ins Internet?<br/>Stand: ja, mit 3.2 bestätigen"}
+  Q2 -->|nein| WE["Weg E: Browser in der Kali,<br/>Sicherung als Datei<br/>Dein Weg jetzt"]
+  Q2 -->|"ja oder Whitelist"| Q3{"F3: Erlaubt die Schule<br/>Tunnel-Software schriftlich?<br/>Stand: offen"}
   Q3 -->|"nein oder noch offen"| WE
   Q3 -->|ja| Q4{"login.tailscale.com erreichbar<br/>und Tailscale für dich in Ordnung?"}
-  Q4 -->|ja| WB["Weg B: Tailscale als Transport für SSH"]
+  Q4 -->|ja| WB["Weg B: Tailscale als Transport für SSH<br/>Dein Zielweg"]
   Q4 -->|nein| Q5{"ausgehend TCP 22 oder 443<br/>zu einem eigenen Server?"}
   Q5 -->|ja| WC["Weg C: eigener Server, ssh -R"]
   Q5 -->|nein| WE
@@ -216,17 +250,17 @@ flowchart TD
 
 | Weg | Wann | Was die Schule erlauben muss | Dritte im Spiel | sshd im Lab-Netz sichtbar | Einrichtung |
 |---|---|---|---|---|---|
-| **A** SSH direkt | F1 ja | sshd auf der Kali, Nutzung des Wegs (VPN, Freigabe) | keine | ja, gehärtet, Port 22 nur aus dem Weg | 1 bis 2 h |
-| **B** Tailscale + SSH | F1 nein, F2 ja, F3 ja | ausgehender Overlay-Tunnel | Tailscale (Metadaten, Inhalt Ende-zu-Ende verschlüsselt) | nein, nur im Tailnet | 1 bis 2 h |
+| **A** SSH direkt | nur falls die Schule einen offiziellen Weg nennt (F1 heute nein) | sshd auf der Kali, Nutzung des Wegs (VPN, Freigabe) | keine | ja, gehärtet, Port 22 nur aus dem Weg | 1 bis 2 h |
+| **B** Tailscale + SSH | F1 nein, F2 ja, F3 ja: dein Zielweg | ausgehender Overlay-Tunnel | Tailscale (Metadaten, Inhalt Ende-zu-Ende verschlüsselt) | nein, nur im Tailnet | 1 bis 2 h |
 | **C** eigener Server + SSH | wie B, wenn Tailscale blockiert oder unerwünscht | ausgehende SSH-Verbindung | dein Server (sieht nur Chiffrat) | nein, sshd nur auf 127.0.0.1 | 2 bis 4 h plus Serverpflege |
-| **E** Browser in der Kali | immer möglich, Pflicht solange kein anderer Weg erlaubt ist | nichts | keine | nein | 10 min |
+| **E** Browser in der Kali | heute; Pflicht, solange kein anderer Weg erlaubt ist | nichts | keine | nein | 10 min |
 
 Nie, egal was die Prüfliste ergibt:
 
 - **D: öffentliche Tunnel-Dienste** (Cloudflare Tunnel, ngrok). Beide beenden TLS bei sich und sehen Token, aufgedeckte Credentials und Logzeilen im Klartext; Cloudflare Quick Tunnels können zudem kein SSE. Ariadne lehnt fremde Hostnamen ohnehin mit 421 ab (web-api.md 1.1), und das bleibt so.
 - **F: eigener TLS-Port von Ariadne auf der Lab-IP.** Angriffsfläche vor der Anmeldung für alle im Netz, MITM per ARP-Spoofing, Code-Sperre durch fremde Fehlversuche und ein nmap-Fingerabdruck «hier läuft Ariadne».
 
-**Meine Erwartung.** F1 ist bei SmartLearn sehr wahrscheinlich «nein»: Die Kali sitzt in einem privaten Netz hinter NAT, und alle Umgebungen haben denselben Adressplan. Realistisch heisst das: jetzt Weg E, und Weg B oder C erst, wenn die Schule Tunnel erlaubt. Gehen A und B beide, nimm A, weil kein Dritter beteiligt ist.
+**Dein Stand.** F1 nein und F2 ja heissen: jetzt Weg E, und Weg B, sobald die Schule Tunnel schriftlich erlaubt. Weg C nur, falls Tailscale blockiert ist oder du es nicht willst. Nennt die Schule doch einen offiziellen Weg, nimm A, weil kein Dritter beteiligt ist.
 
 Die Einrichtung ist für A, B und C gleich aufgebaut: erst die gemeinsamen Bausteine (4.2), dann der Weg (4.3 bis 4.5), erst ganz am Schluss startet sshd. Später macht das ein Skript (`kali-setup.sh`, Abschnitt 7); die Befehle hier zeigen, was es tut.
 
@@ -314,7 +348,7 @@ ssh-keygen -lf ~/.ssh/id_ed25519_kali_sl.pub                                    
 
 Den Schlüssel **nicht** in den macOS-Schlüsselbund legen (kein `ssh-add --apple-use-keychain`, kein `UseKeychain`). Sonst kann jedes Programm auf dem Mac `ssh` aufrufen und den Schlüssel ohne Passphrase benutzen.
 
-**Öffentlichen Schlüssel eintragen, eingeschränkt.** Am einfachsten, wenn die Kali ins Internet darf: Schlüssel in deinem GitHub-Konto hinterlegen und in der Kali abrufen. Sonst über die Datei-Übertragung von SmartLearn, Copy/Paste (falls an) oder Abtippen.
+**Öffentlichen Schlüssel eintragen, eingeschränkt.** Am einfachsten, weil die Kali ins Internet kommt: Schlüssel in deinem GitHub-Konto hinterlegen und in der Kali abrufen. Sonst über die Datei-Übertragung von SmartLearn, Copy/Paste (falls an) oder Abtippen.
 
 ```bash
 # Kali
@@ -512,8 +546,9 @@ Der Tunnel-Schlüssel liegt ohne Passphrase in der Kali. Wer die Disk liest oder
 Das ist das heutige Design der Architektur, ohne Netzweg und ohne Regelfrage. Alle Schutzschichten sind intakt, und die Karte ist live.
 
 - Auflösung der Kali an den Mac-Bildschirm anpassen: `xrandr` zeigt Ausgänge und Modi, dann z. B. `xrandr --output Virtual1 --mode 1920x1080`.
-- VMRC auf dem Mac im Vollbild, in Xfce das Terminal links und Firefox rechts (Super+Pfeil links/rechts), die Karte auf einem eigenen Arbeitsbereich.
-- Ob die VMRC unter macOS eine VM auf zwei Monitore verteilen kann, ist zu verifizieren. Das wäre der Zweitbildschirm ohne Netz.
+- Webkonsole im Vollbild des Browsers, in Xfce das Terminal links und Firefox rechts, die Karte auf einem eigenen Arbeitsbereich.
+- Die Webkonsole nur in Chrome oder Safari und in einem eigenen Profil ohne Erweiterungen (3.1): Bei Weg E tippst du die Passphrase von `ariadne unlock` durch diese Seite.
+- Die Webkonsole zeigt einen Bildschirm. Ob die VMRC unter macOS die VM auf zwei Monitore verteilt, ist zu verifizieren; das wäre der Zweitbildschirm ohne Netz.
 - Mit 4 GB RAM wird es eng, wenn Burp, Firefox und die Karte gleichzeitig laufen. Eine kleinere Karte oder die Tabellenansicht hilft.
 - Was auf der Konsole steht, sieht eine Lehrperson im Beobachtungsmodus von SmartLearn mit, also auch das Dashboard. Vor dem Unterricht den Präsentationsmodus einschalten.
 
@@ -538,7 +573,7 @@ Die Angreiferklassen aus Architektur 9.1 gelten weiter. Für den Fernzugriff zä
 - **Mitstudierende und Ziele im Lab-Netz (A1).** SmartLearn isoliert laut Hersteller jede Person in einer eigenen Umgebung. Sicher im selben Netz liegen die Ziel-VMs. Mitstudierende sind es bei Gruppenarbeit, und vielleicht teilen sich Umgebungen das Netz `wan0`. Das Konzept plant so, als wären sie da und würden angreifen.
 - **Schule und Plattform (A8, Vorschlag).** Wer vCenter und ESXi betreibt, sieht die Konsole samt Tastatur, kann Snapshots mit Arbeitsspeicher ziehen, die Disk lesen und über die VMware Tools Programme starten. Das ist eine Eigenschaft von vSphere, keine Aussage darüber, was die gibb tut. Dagegen hilft nur Datensparsamkeit.
 - **Angreifer im Internet.** Fremde Webseiten in deinem Alltagsbrowser, Angriffe auf Tailscale-Konto oder eigenen Server.
-- **Mac (A3 auf dem Mac).** Jedes Programm auf dem Mac erreicht den weitergeleiteten `127.0.0.1:7330`; dazu Erweiterungen, Zwischenablage, Bildschirmfreigabe und Sicherungen des Macs.
+- **Mac (A3 auf dem Mac).** Bei Weg E der Browser mit der Webkonsole, über den jede Taste an die Kali läuft. Bei den Wegen A bis C jedes Programm auf dem Mac, denn es erreicht den weitergeleiteten `127.0.0.1:7330`; dazu Erweiterungen, Zwischenablage, Bildschirmfreigabe und Sicherungen des Macs.
 - **Präparierte Zielseite (A1, A2).** Zieldaten erscheinen jetzt im Browser des Macs, der ins Internet darf.
 - **Kompromittierte Kali (A4).** Ein bösartiger PoC versucht, über den Fernzugriff auf den Mac zu kommen.
 
@@ -570,6 +605,7 @@ Die Angreiferklassen aus Architektur 9.1 gelten weiter. Für den Fernzugriff zä
 | Funnel oder Serve stellt die Kali ins Internet; eine Subnetz-Route öffnet das Lab-Netz ins Tailnet | Policy ohne `nodeAttrs`, nie `--advertise-routes` oder `--advertise-exit-node`; R3 lehnt `*.ts.net` ab | `remote check` liest `tailscale debug prefs`; T2, T14 | keins |
 | eigener Server (Weg C) wird übernommen | SSH Ende-zu-Ende, Hostkey der Kali geprüft, Server gepatcht | | Ausfall, Metadaten |
 | **Mac: Programme, Erweiterungen, Alltag** | | | |
+| Erweiterung im Browser der Webkonsole liest jede Taste an die Kali mit, bei Weg E auch die `unlock`-Passphrase | Webkonsole nur in Chrome oder Safari, eigenes Profil ohne Erweiterungen; ab Weg B `unlock` per `ssh -t` | Prüfliste 3.1 | Disziplin; Lücke im Browser |
 | Erweiterung im Ariadne-Profil liest Seite und Token | Privatmodus (Erweiterungen dort aus), Installation gesperrt | Helfer bricht ab bei Erweiterungen im Profil oder per `policies.json` erzwungenen; R9, T15 | keins |
 | Lücke oder Erweiterung schickt Daten ins Internet | Insel: alles ausser `127.0.0.1` geht an einen toten Proxy, DoH und WebRTC aus | Helfer schreibt `user.js` (R9), T10 | Übergabe an andere Programme (z. B. `mailto:`) |
 | Schadsoftware mit deinen Rechten benutzt deinen SSH-Schlüssel | Passphrase, nicht im Schlüsselbund, höchstens 4 h im Agent; der Schlüssel kann nur Tunnel und `remote serve`, keine Shell | Forced Command R11, T12, T13 | Dashboard bleibt erreichbar, ein Tastatur-Logger sieht die Passphrase von `unlock`; gegen einen übernommenen Mac hilft kein Konzept ganz |
@@ -667,7 +703,7 @@ age-keygen                                                      # Recovery-Schl�
 
 - Der Mac-Schlüssel liegt nur verschlüsselt auf der Platte. Time Machine oder ein Dieb finden darin nichts Brauchbares. Wer mag, nimmt stattdessen `age-plugin-se` (Secure Enclave, Touch ID).
 - Die Ausgabe des zweiten Befehls (`AGE-SECRET-KEY-…` und `# public key: age1…`) ausdrucken oder in den Passwortmanager übernehmen; so entsteht nie eine Datei. Geht das über die Zwischenablage, danach `pbcopy </dev/null`, sonst trägt Handoff sie auf deine anderen Apple-Geräte.
-- Die zwei öffentlichen Zeilen (`age1…`) kommen in der Kali nach `~/.config/ariadne/backup-recipients.txt` (Rechte 600), per Abtippen, Datei-Übertragung oder SSH.
+- Die zwei öffentlichen Zeilen (`age1…`) kommen in der Kali nach `~/.config/ariadne/backup-recipients.txt` (Rechte 600), per Abtippen oder Datei-Übertragung (SSH erst ab Weg B).
 - `~/Ariadne-Backups` liegt bewusst nicht im Schreibtisch oder in Dokumente (die iCloud synchronisieren kann) und nicht unter `~/Library/CloudStorage` (OneDrive, Dropbox, Google Drive). Der Helfer verweigert solche Ordner (R13). Sicherungen nie in einen synchronisierten Ordner oder einen Obsidian-Vault entpacken.
 
 ### 6.4 Sichern
@@ -685,7 +721,7 @@ Im Endzustand (Forced Command) wird daraus `ssh kali-sl backup > ~/Ariadne-Backu
 
 `ariadne daemon stop` schliesst das offene Projekt (Checkpoint der Datenbanken, Schlüssel verworfen, **gebaut**). Erst danach sind die SQLCipher-Dateien in einem stimmigen Zustand. Das `>&2` ist wichtig: Ohne es landet die Meldung von `daemon stop` im Datenstrom und macht die `.age`-Datei unbrauchbar. Die zweite Zeile fragt nach der Passphrase von `mac.key.age` und prüft, ob die Sicherung lesbar ist und `operator/` sowie `ariadne/<slug>/.vault` enthält.
 
-**Ohne Netzweg (E), in der Kali.** Dieselbe Pipeline in eine Datei, die du über die Datei-Übertragung von SmartLearn (falls die Lehrperson einen Abgabeblock einrichtet) oder über OneDrive (falls freigeschaltet) holst. Lehrpersonen sehen dort nur Chiffrat, Grösse und Zeitpunkt.
+**Ohne Netzweg (E, dein Weg heute), in der Kali.** Dieselbe Pipeline in eine Datei, die du über die Datei-Übertragung von SmartLearn (falls die Lehrperson einen Abgabeblock einrichtet) oder über OneDrive (falls freigeschaltet) holst. Lehrpersonen sehen dort nur Chiffrat, Grösse und Zeitpunkt.
 
 ```bash
 set -o pipefail
@@ -693,7 +729,7 @@ ariadne daemon stop
 tar -C "$HOME" -czf - .local/share/ariadne/operator .config/ariadne ariadne | age -R ~/.config/ariadne/backup-recipients.txt > ~/Abgabe/sicherung-$(date -u +%Y%m%dT%H%M%SZ).age
 ```
 
-Fehlt in der VM das Paket `age` und gibt es kein Internet, geht diese Notlösung nicht. Dann hilft erst `ariadne backup` (Abschnitt 7), denn Ariadne bringt mit `pyrage` schon alles mit.
+Fehlt in der VM das Paket `age`, holst du es mit `sudo apt install age`, denn die Kali kommt ins Internet. Ohne Internet hilft erst `ariadne backup` (Abschnitt 7), denn Ariadne bringt mit `pyrage` schon alles mit.
 
 ### 6.5 Wiederherstellen nach einem VM-Reset
 
@@ -738,7 +774,7 @@ Grundsatz: Ariadne prüft und warnt, ändert aber keine Systemdienste. sshd, nft
 | E2E über einen echten Tunnel | sshd im Container mit `10-ariadne.conf` und eingeschränktem Schlüssel, `ssh -L`, Playwright meldet sich an, SSE läuft; Tunnel weg, dann 401 und Anmeldeseite; Neuanmeldung geht | T13, Marker `remote` | v0.1 | 6 bis 10 h |
 | `ariadne doctor` ausbauen | erkennt VMware (`systemd-detect-virt`), unverschlüsselten Swap, open-vm-tools, warnt bei Nicht-Loopback | Fixtures | v0.2 (Teile in `remote check` schon v0.1) | 3 bis 5 h |
 | Hinweisregel Übungs-Webserver | Webserver (`http.server`, `php -S`, `updog`), dessen Wurzel Ariadne-Daten oder `~/.ssh` enthält | Regel-Fixture | v0.2 | 1 bis 2 h |
-| Offline-Bundle | nur nötig, wenn F2 nein: Installation ohne Internet über die Datei-Übertragung | Install-Test mit `--network none` (geplant) | v0.2, **vorziehen, falls F2 nein** | wie geplant |
+| Offline-Bundle | nur nötig, wenn F2 nein: Installation ohne Internet über die Datei-Übertragung | Install-Test mit `--network none` (geplant) | v0.2; nicht vorziehen, solange 3.2 dein F2 ja bestätigt | wie geplant |
 | Profil customer: Fernzugriff | `remote.allowed`, kürzere Tokens, Anmeldungen im Aktivitätsprotokoll | Policy-Tests | v0.3 | 4 bis 6 h |
 | Doku | Architektur 7.2 «Fernzugriff», 8.9, 9.1 (A8, A3 auf dem Mac); web-api.md 1.1 und 3; entwicklung.md | | v0.1 | 2 bis 3 h |
 
@@ -793,29 +829,31 @@ Alles in dieser Tabelle ist ein **Vorschlag** (Quelle «KI-Vorschlag» bzw. «Nu
 
 | Entscheid | heute | Vorschlag | Grund | Frage |
 |---|---|---|---|---|
-| E09 Zielumgebung | Kali in einer VM mit knapper Leistung | Kali als entfernte VM in SmartLearn (VMware vSphere), bedient vom Mac über Webkonsole oder VMRC; laut Netzplan 1 vCPU, 4 GB RAM, 32 GB Disk | deine Korrektur vom 2026-10-14 (Nutzer) und Recherche | |
+| E09 Zielumgebung | Kali in einer VM mit knapper Leistung | Kali als entfernte VM in SmartLearn (VMware vSphere), bedient vom Mac über die Webkonsole im Browser; kein Netzweg vom Mac zur Kali, die Kali kommt ins Internet; laut Netzplan 1 vCPU, 4 GB RAM, 32 GB Disk | deine Korrektur und Antworten vom 2026-10-14 (Nutzer) und Recherche | |
 | E60 kein Zweitbildschirm-Modus | fest | bleibt fest. Ergänzung: Ein Browser auf dem Mac über SSH-Weiterleitung ist eine normale Sitzung derselben UI und braucht keinen eigenen Modus; die UI zeigt nur die Herkunft der Sitzung | dein Wunsch ist erfüllbar, ohne E60 aufzugeben | |
 | E74 Entsperren nur per CLI | vorläufig | bleibt. Ergänzung: Entsperren per `ssh -t` vom Mac ist der empfohlene Weg, weil die Passphrase dann nicht über die VMware-Konsole läuft | A8 sieht Tastatureingaben der Konsole | |
 | E73 Profile lab und customer | vorläufig | Ergänzung: Auf SmartLearn nur Profil lab, nie Kundendaten; customer schaltet Fernzugriff standardmässig aus | A8 | |
 | E66 Claude API als Standard | fest | bleibt, in der SmartLearn-VM aber nur, wenn die Prüfliste «API erreichbar, kein TLS-Aufbruch» zeigt und die Schule Lab-Daten in der Cloud erlaubt; eigener API-Key mit tiefem Limit für diese VM | F2, Ticket-Frage 4 | |
-| E84 pipx, später Offline-Bundle | fest | Offline-Bundle nach vorne, falls F2 nein | ohne Internet keine Installation | 7 |
+| E84 pipx, später Offline-Bundle | fest | bleibt wie geplant, weil die Kali ins Internet kommt (F2 ja, Nutzer); nur falls 3.2 das widerlegt, Offline-Bundle nach vorne | ohne Internet keine Installation | 7 |
 | Architektur 8.9 Backups (v0.2) | v0.2 | **E91:** `ariadne backup` und `restore` in v0.1, age an Empfänger ausserhalb der VM, Operator-Tresor immer mit; Sicherungsschlüssel auf dem Mac nur mit Passphrase, Recovery-Schlüssel nie als Datei | VM kann jederzeit verschwinden | 6, 7 |
 | neu | | **E89:** Fernzugriff nur per SSH-Portweiterleitung auf denselben Port; der Daemon lauscht nur auf Loopback und erzwingt das (R1); kein eigener Netzport, keine öffentlichen Tunnel-Dienste, keine Host-Ausnahmen | ein Sicherheitsmodell für alle Wege | |
-| neu | | **E90:** Zugangsweg nach dem Entscheidungsbaum in 4.1 (A, B, C, sonst E); Tunnel nur mit schriftlicher Erlaubnis der Schule; in Prüfungen nur, was die Schule erlaubt | Regelkonformität | 1, 2 |
+| neu | | **E90:** Zugangsweg nach dem Entscheidungsbaum in 4.1 (A, B, C, sonst E; heute E, Ziel B); Tunnel nur mit schriftlicher Erlaubnis der Schule; in Prüfungen nur, was die Schule erlaubt | Regelkonformität | 1, 2 |
 | neu | | **E92:** Tokens als Hash gespeichert, an den Peer-Prozess gebunden; sie enden bei `lock`, `project close`, Daemon-Neustart und mit dem Tunnel; `ariadne ui --sessions` zeigt die Herkunft | vergessene und gestohlene Sitzungen | 4 |
 | neu | | **E93:** Insel-Profil auf dem Mac (Dauer-Privatmodus, keine Erweiterungen, nur `127.0.0.1` erreichbar); der Mac-Helfer startet nur dieses Profil und prüft es vor jedem Start | Erweiterungen, Abfluss ins Internet, Sync, Verlauf | 3 |
 | neu | | **E94:** Mac-Zugang mit einem eingeschränkten Schlüssel (Forced Command `ariadne remote serve`, Weiterleitung nur zu 7330, keine Shell) und mit selbst erzeugten Hostkeys; `StrictHostKeyChecking yes` | Schadsoftware auf dem Mac, geklonte Hostkeys | 5 |
-| VISION, offener Punkt 2 «VM-Details» | Hypervisor und Ressourcen unbekannt | teilweise geklärt: vSphere/ESXi, Konsole über den Hypervisor, keine Shared Folders, Datenaustausch über Datei-Übertragung oder Netz, Ressourcen laut Netzplan; offen bleiben Masterset, Internet, Gruppenumgebung, Hostkeys und Lebensdauer (Prüfliste, Ticket) | Recherche vom 2026-10-14 | |
+| VISION, offener Punkt 2 «VM-Details» | Hypervisor und Ressourcen unbekannt | teilweise geklärt: vSphere/ESXi, Konsole über den Hypervisor, keine Shared Folders, Datenaustausch über Datei-Übertragung oder Netz, Ressourcen laut Netzplan; Bedienung über die Webkonsole, kein Netzweg vom Mac, Internet ja (Nutzer); offen bleiben Masterset, Gruppenumgebung, Hostkeys und Lebensdauer (Prüfliste, Ticket) | Recherche vom 2026-10-14 | |
 | Architektur 9.1 | A1 bis A7 | A8 Plattformbetreiber neu; A3 gilt auch für Programme und Erweiterungen auf dem Mac | Abschnitt 5.2 | |
 
 ## 9 Fragen an dich
 
-1. **Schule fragen.** (a) Ticket unter ticket.gibb.ch mit den acht Fragen aus 3.5, Antwort schriftlich ablegen. (b) mündlich in der Lektion fragen. (c) nicht fragen und bei Weg E bleiben. **Empfehlung (a)**, weil nur eine schriftliche Erlaubnis dich bei Weg B oder C schützt und weil die Fragen zu Prüfungen und Hostkeys auch für Weg A zählen.
+**Schon beantwortet (2026-10-14):** Du bedienst die Kali über die Webkonsole. F1 nein, F2 ja (mit 3.2 einmal bestätigen). Damit fällt Weg A weg, solange die Schule keinen offiziellen Weg nennt. **Offen ist vor allem F3**, und die beantwortet nur die Schule (Frage 1). Die Fragen 2 bis 5 drehen sich vor allem um Weg B.
+
+1. **Schule fragen.** (a) Ticket unter ticket.gibb.ch mit den acht Fragen aus 3.5, Antwort schriftlich ablegen. (b) mündlich in der Lektion fragen. (c) nicht fragen und bei Weg E bleiben. **Empfehlung (a)**, weil nur eine schriftliche Erlaubnis dich bei Weg B schützt; die Antwort auf Ticket-Frage 3 ist F3. Die Fragen zu Prüfungen und zur Lebensdauer der VM zählen auch für Weg E.
 2. **Welcher Tunnel, falls erlaubt.** (a) Tailscale als Transport für SSH (Weg B). (b) eigener Server mit `ssh -R` (Weg C). (c) keiner, Weg E reicht mir. **Empfehlung (a)** fürs Studium: kein eigener Server zu pflegen, Inhalte Ende-zu-Ende verschlüsselt, Plan Personal reicht. (b) ist sauberer gegenüber Dritten und wird für Kundenaufträge ohnehin das Muster.
 3. **Browser auf dem Mac.** Welchen Browser nutzt du im Alltag? (a) Firefox nur für Ariadne, mit dem Insel-Profil, gestartet vom Mac-Helfer. (b) Insel-Profil in deinem Alltags-Firefox. (c) dein normaler Browser. **Empfehlung (a)**; (b) geht, wenn du sonst Firefox nutzt; (c) nie.
 4. **Sitzungsdauer.** (a) Token höchstens 12 h, endet bei `lock`, `project close`, Neustart und mit dem Tunnel; nach WLAN-Wechsel oder Zuklappen meldest du dich mit `ariadne-mac start` neu an. (b) wie (a), aber das Token überlebt einen Neuaufbau des Tunnels. (c) 12 h wie bisher geplant, ohne Widerruf bei `lock`. **Empfehlung (a)**: ein Befehl mehr nach dem Zuklappen, dafür ist ein gestohlenes Token wertlos.
 5. **Mac-Schlüssel.** (a) ein Schlüssel nur für Ariadne (Forced Command), Verwaltung über die Konsole. (b) zusätzlich ein zweiter Schlüssel mit Shell, ohne Agent, für Arbeit im Mac-Terminal. (c) ein Schlüssel mit voller Shell. **Empfehlung (a).** (b) ist bequem, weil Kopieren zwischen Mac und Kali dann einfach geht; dafür hat jedes Programm, das den zweiten Schlüssel nutzen kann, eine Shell auf der Kali.
-6. **Sicherung.** (a) nach jeder Session automatisch mit `ariadne-mac stop` auf den Mac, ohne Netzweg als Datei über die Datei-Übertragung. (b) von Hand, wenn du daran denkst. (c) keine. **Empfehlung (a).** Den Recovery-Schlüssel legst du in jedem Fall ausserhalb der VM und nie als Datei ab.
+6. **Sicherung.** (a) nach jeder Session: heute bei Weg E als Datei über die Datei-Übertragung, mit Weg B automatisch bei `ariadne-mac stop`. (b) von Hand, wenn du daran denkst. (c) keine. **Empfehlung (a).** Den Recovery-Schlüssel legst du in jedem Fall ausserhalb der VM und nie als Datei ab.
 7. **Roadmap.** (a) alles aus Abschnitt 7 für v0.1 in v0.1 (etwa 55 bis 90 h zusätzlich). (b) nur `backup`/`restore`, R1 bis R3 mit Middleware und `remote check` in v0.1; `remote serve`, Mac-Helfer und Tunnel-E2E in v0.2, bis dahin Weg E. (c) alles wie bisher geplant in v0.2. **Empfehlung (b)**: Die Sicherung brauchst du sofort, und vor der Antwort der Schule darfst du den Fernzugriff ohnehin nicht nutzen.
 
 ## 10 Quellen

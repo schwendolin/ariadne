@@ -1,18 +1,58 @@
 # Konzept: vom Terminal und vom Browser zur Karte
 
+## Auf einen Blick
+
+Ariadne schreibt mit, was du in Terminal und Testbrowser tust, und zeichnet daraus eine Karte der Ziele. Alles läuft in deiner Kali in SmartLearn, die du über die Webkonsole bedienst. Die Karte auf dem Mac regelt das [Konzept Fernzugriff](konzept-fernzugriff.md). Gebaut sind die Aufnahme der Terminals und ihre Auswertung bis zur Datenbank, der Rest ist Vorschlag.
+
+**Bedienung in drei Schritten**
+
+1. **Einmal:** Ariadne per `pipx` installieren, `ariadne setup`, offene Terminals neu öffnen.
+2. **Pro Auftrag und nach jedem Neustart der VM:** `ariadne start lame 10.10.10.3` (Projekt und Ziel), danach nur `ariadne start`. Dazu einmal die Passphrase, in der Webkonsole mit Chrome oder Safari ohne Erweiterungen, nie mit Firefox (dort kommen Tasten doppelt an).
+3. **Arbeiten:** Jedes Terminal nimmt auf, auch neue Tabs und tmux-Panes. `F12 r` pausiert ein Terminal für 10 Minuten, `F12 k` markiert einen Schlüsselschritt wie den ersten Zugang. Am Ende `ariadne export`, `ariadne stop` und eine Sicherung ausserhalb der VM.
+
+Heute braucht es statt Schritt 2 noch `ariadne unlock`, `ariadne project open` und `ariadne rec on`.
+
+**Vom Terminal zur Karte**
+
+Ausgabe (verschlüsselt gespeichert) → Befehl → Wert mit Verweis auf seine Zeile → Host oder Dienst auf der Karte.
+
+Die Werte liest ein Parser heraus, ein Leseprogramm für ein bestimmtes Tool. Beispiel: Aus der nmap-Zeile `21/tcp open ftp vsftpd 2.3.4` wird auf der Karte am Host 10.10.10.3 der Dienst «FTP, vsftpd 2.3.4».
+
+**Drei Spuren**
+
+- **Automatisch:** Werte bekannter Parser zu Zielen im Scope (deiner erlaubten Zielliste) kommen direkt auf die Karte, pro Befehl rückgängig. Nach einem nmap-Lauf auf Metasploitable2 bleiben laut Rechnung 0 statt heute 86 Bestätigungen.
+- **Still:** Unsicheres und Fremdes erscheint nur als Zähler und in der Suche.
+- **Entscheiden:** KI-Werte, echte Widersprüche und unklare Zuordnungen landen in der Spalte «Als Nächstes».
+
+**Browser**
+
+- `ariadne browser` öffnet in der Kali einen Testbrowser, ein eigenes Firefox-Profil.
+- Ein Aufzeichnungs-Proxy dazwischen leitet jede Anfrage ans Ziel weiter und speichert sie mit Antwort, Ziel-IP und Zeit. Ariadne schickt selbst nichts.
+- Daraus werden Seiten, Formulare, Kommentare und Admin-Bereiche unter dem Webdienst. Fremde Seiten werden nur gezählt.
+- Was du in einem anderen Browser tust, sieht Ariadne nicht.
+
+**Acht Fragen an dich** (Details in [Abschnitt 7](#7-fragen-an-dich), Antwort etwa «1a, 2a ...»)
+
+1. Wann aufnehmen? **(a)** Immer, solange ein Projekt aktiv ist.
+2. Ohne Projekt? **(a)** Die letzten 15 Minuten nur im Arbeitsspeicher halten.
+3. Entsperren? **(a)** Passphrase bei `ariadne start`, nicht automatisch.
+4. Eingaben? **(a)** Lokale Befehlszeile; in Remote-Shells pro Enter nur den Zeitpunkt.
+5. Selbst auf die Karte? **(a)** Parser-Werte im Scope und den Host einer Reverse Shell.
+6. KI? **(a)** In Labs automatisch, nur für Ausgaben ohne passenden Parser mit Wörtern wie pass oder admin.
+7. Browser? **(a)** Proxy mit Testbrowser in v0.2. Zählt das als passiv, obwohl der Proxy die Verbindungen aufbaut?
+8. Formulare? **(a)** Ganzer Inhalt, verschlüsselt, Passwörter maskiert.
+
 > Stand 2026-10-14, Vorschlag. Antwort auf deine Nachricht vom 2026-10-14 («irgendwie muss das ganze simpler zu bedienen sein ...»). Grundlage sind drei Rechercheberichte (Auswertung, Browser, Bedienung), [VISION](../VISION.md), die [Lösungsarchitektur](architektur.md), das [Entscheidungsprotokoll](entscheide.md), [entwicklung.md](entwicklung.md) und der Code unter `src/ariadne`. Entschieden ist davon nichts, bis du die Fragen in Abschnitt 7 beantwortet hast.
 >
 > Kennzeichnung: **gebaut** heisst im v0.1-Backend vorhanden und getestet. **geplant** heisst in der Architektur beschrieben, aber noch nicht gebaut. **Vorschlag** heisst neu in diesem Dokument. Alle Aussagen über den heutigen Code sind am 2026-10-14 gegen `src/ariadne` geprüft, die Zahlen zur Inbox mit den Test-Helfern nachgemessen.
 
 ## 1 Kurzfassung
 
-**Bedienung.** Dass jedes Terminal aufgenommen wird, ist schon gebaut: Jede neue zsh- oder bash-Shell startet mit einem eigenen Shim, auch in parallelen Fenstern, Tabs und tmux-Panes. Umständlich ist der Rest. Heute braucht es nach jedem Login `ariadne unlock`, `ariadne project open` und `ariadne rec on`. Vorschlag: ein Befehl `ariadne start lame 10.10.10.3` pro Auftrag und nach jedem Neustart; die Passphrase tippst du dabei einmal. Solange ein Projekt aktiv ist, nehmen alle Terminals auf. Den REC-Knopf ersetzt eine Pause pro Terminal, die nach 10 Minuten von selbst endet.
+Bedienung und Browser stehen oben in «Auf einen Blick», hier der Rest.
 
-**Zeitstempel.** Der Shim stempelt jede gelesene Ausgabe schon heute auf die Nanosekunde. Die Auswertung benutzt aber die Speicherzeit im Daemon und liegt damit bis etwa 250 ms daneben. Vorschlag: überall die Shim-Zeit, auch für Befehlsanfang und -ende. Realistisch ist dann etwa 1 ms Genauigkeit in der VM, und die Reihenfolge über alle Terminals stimmt. Von deinen Eingaben speichert Ariadne die lokale Befehlszeile, aber nie einzelne Tastendrücke. In Remote-Shells kommt nur der Zeitpunkt jedes Enter dazu.
+**Zeitstempel.** Der Shim (das Aufnahmeprogramm, mit dem jede neue Shell startet) stempelt jede gelesene Ausgabe schon heute auf die Nanosekunde. Die Auswertung benutzt aber die Speicherzeit im Daemon und liegt damit bis etwa 250 ms daneben. Vorschlag: überall die Shim-Zeit, auch für Befehlsanfang und -ende. Realistisch ist dann etwa 1 ms Genauigkeit in der VM, und die Reihenfolge über alle Terminals stimmt. Von deinen Eingaben speichert Ariadne die lokale Befehlszeile, aber nie einzelne Tastendrücke. In Remote-Shells kommt nur der Zeitpunkt jedes Enter dazu.
 
 **Vom Verlauf zur Datenbank und zur Karte.** Eine Kette mit festen Stufen: Rohverlauf, Einheit (ein Befehl), Beobachtung, Claim, Entität, Karte. Jeder Wert zeigt auf seine Zeile, alles lässt sich neu berechnen. Das Fundament steht. Was heute stört: Ein einziger nmap-Lauf auf Metasploitable2 (nachgestellte Testeingabe) erzeugt 86 Einträge zum Bestätigen, eine Reverse Shell wird als ein grosser Block ausgewertet, und Fundstücke wie Hashes erscheinen nicht auf der Karte. Vorschlag: Werte aus bekannten Tool-Parsern im Scope kommen ohne Klick auf die Karte, mit Rückgängig. Deinen Entscheid brauchen nur KI-Werte, echte Widersprüche und unklare Zuordnungen. Findings schlägt Ariadne mit Belegen vor, zum Finding macht sie erst dein Urteil.
-
-**Browser.** Vorschlag: ein Aufzeichnungs-Proxy vor einem eigenen Firefox-Testprofil (`ariadne browser`). Jede Anfrage deines Browsers wird mit Antwort, Ziel-IP und Zeit gespeichert. Parser machen daraus Seiten, Formulare, Kommentare und Admin-Bereiche unter dem Webdienst auf der Karte. Ariadne schickt selbst keine einzige Anfrage. Der Proxy sitzt aber im Datenweg und baut die Verbindungen für den Browser auf; ob das für dich noch «passiv» ist, ist Frage 7.
 
 **KI.** Sie sieht nie den ganzen Rohverlauf, sondern ein verdichtetes Lagebild mit Zeitachse und maskierten Secrets. Werte aus der KI gelten nur mit wörtlichem Zitat und brauchen immer deinen Entscheid.
 
@@ -38,7 +78,9 @@ Umständlich ist der Alltag drumherum:
 
 **Was trotzdem bei dir bleibt.** Damit die drei Schritte ehrlich sind:
 
-- Nach jedem Neustart der VM einmal `ariadne start` mit Passphrase. Ohne das bleibt der Tresor zu, und die Terminals puffern nur im RAM (Frage 3).
+- Nach jedem Neustart der VM einmal `ariadne start` mit Passphrase. Ohne das bleibt der Tresor zu, und die Terminals puffern nur im RAM (Frage 3). Die Passphrase tippst du über die Webkonsole von SmartLearn, in Chrome oder Safari ohne Erweiterungen oder in der VMware Remote Console, nie in Firefox: Dort kommen Eingaben doppelt an. Sobald es einen erlaubten SSH-Weg vom Mac gibt, entsperrst du besser von dort (`ssh -t kali-sl unlock`), dann läuft die Passphrase nicht über die Konsole ([Konzept Fernzugriff](konzept-fernzugriff.md), 3 und 5.3).
+- Einmal prüfen, ob `F12` über die Webkonsole in der Kali ankommt: `ariadne hotkey test` (gebaut). Auf der Mac-Tastatur braucht es oft `fn`. Kommt nichts an, stellst du einen anderen Präfix ein, etwa `ctrl-]` (Architektur 3.4).
+- Nach jeder Session eine verschlüsselte Sicherung aus der VM holen, denn die Schule kann die VM zurücksetzen oder löschen ([Konzept Fernzugriff](konzept-fernzugriff.md), 6.4).
 - Zielseiten öffnest du im Testbrowser von Ariadne, nicht in deinem normalen Firefox. Was im normalen Browser passiert, sieht Ariadne nicht.
 - Pro Lab-Abend eine Handvoll Klärungen in der Spalte «Als Nächstes»: KI-Werte, echte Widersprüche, neue Namen ausserhalb des Scopes, Kontext bei Pivots.
 - Schlüsselschritte bestätigen (Ariadne schlägt sie vor) und Findings übernehmen und bewerten. Das ist Absicht: Ein Fakt ist kein Finding (Grundsatz 10).
@@ -96,7 +138,7 @@ Projekt `lame`, Ziel 10.10.10.3, Kali auf tun0 mit 10.10.14.5. Uhrzeiten erfunde
 
 | Zeit | Du | Ariadne |
 |---|---|---|
-| 18:58 | VM starten, Terminal öffnen. Titel `[-- kein Projekt]`. `ariadne start lame 10.10.10.3`, Passphrase | Projekt angelegt, Titel `[REC lame]` |
+| 18:58 | Kali in SmartLearn starten, in der Webkonsole ein Terminal öffnen. Titel `[-- kein Projekt]`. `ariadne start lame 10.10.10.3`, Passphrase | Projekt angelegt, Titel `[REC lame]` |
 | 19:02:11 | T1: `nmap -Pn -sV -sC -oA scans/lame 10.10.10.3` | liest `scans/lame.xml` von selbst. Host und vier Services stehen nach dem Scan auf der Karte, ohne Bestätigen. Rechts unter «Als Nächstes»: Versionen von vsftpd 2.3.4 und Samba recherchieren |
 | 19:15:40 | neuer Tab T2: `nc -lvnp 4444` | T2 nimmt sofort auf, die Kontextregeln erkennen den Listener, Stapel `Kali › ?` |
 | 19:17:03 | T3: Samba-Exploit für usermap_script (CVE-2007-2447) mit Callback auf 10.10.14.5:4444 | |
@@ -314,7 +356,7 @@ Im Terminal sitzt der Shim zwischen Terminal und Shell. Im Browser übernimmt di
 5. **Aufnahme wie im Terminal:** an, solange das Projekt aktiv ist. In der Pause leitet der Recorder weiter, und der Daemon zählt nur die Lücke.
 6. **Rückfall:** `ariadne import` für HAR (DevTools, ZAP, mitmproxy) und Burp-XML («Save items» geht auch in der Community-Version).
 
-Im Alltag heisst das: Zielseiten öffnest du im Testbrowser, Recherche (Suchmaschine, Exploit-DB, Doku) im normalen Browser. Was du im Testbrowser per «Seitenquelltext anzeigen» oder in den DevTools unter «Netzwerk» siehst, hat der Recorder schon als Antwort gespeichert.
+Im Alltag heisst das: Zielseiten öffnest du im Testbrowser, Recherche (Suchmaschine, Exploit-DB, Doku) im normalen Browser, in der Kali oder auf dem Mac. Was du im Testbrowser per «Seitenquelltext anzeigen» oder in den DevTools unter «Netzwerk» siehst, hat der Recorder schon als Antwort gespeichert.
 
 Die Wege im Vergleich:
 
@@ -450,7 +492,7 @@ Ehrlich gesagt wird v0.2 damit deutlich grösser. Wenn es eng wird, würde ich d
 
 | Punkt | Berichte | Mein Vorschlag und warum |
 |---|---|---|
-| Reicht der Automodus? | Bedienung: «im Automodus für nmap.xml entfällt das Bestätigen»; Auswertung: greift kaum | Auswertung hat recht. Nachgemessen: Mit dem Standard (`nmap.xml`) werden 18 von 144 MS2-Claims `auto`, die Inbox bleibt bei 86. Der Fehler sitzt in der Regel «erste Beobachtung», darum die Drei-Spuren-Regel statt einer längeren Parserliste |
+| Reicht der Automodus? | Bedienung: «im Automodus für nmap.xml entfällt das Bestätigen»; Auswertung: greift kaum | Auswertung hat recht (Messung in 3.3). Der Fehler sitzt in der Regel «erste Beobachtung», darum die Drei-Spuren-Regel statt einer längeren Parserliste |
 | Browser zuerst über was? | Auswertung: HAR, dann Erweiterung; Browser: Recorder-Proxy in v0.2; Bedienung: Import v0.2, Verlauf v0.3, Erweiterung v0.4 | Recorder-Proxy. Er liefert exakte Grenzen, Ziel-IP und Bodies ohne Signatur und ohne Code im Browser; der Verlauf zeigt deutlich weniger |
 | Bleibt `F12 h` Pflicht? | Bedienung: ja, ein falscher Kontext vergiftet die Karte; Auswertung: automatisch aus dem Callback | automatisch, wenn eindeutig, sichtbar als `(auto)`. Das Risiko ist kleiner, weil `d.ctx.set` rückwirkend korrigiert und Pivots, NAT und Loopback ausgenommen sind |
 | Wozu die Eingabemarke? | Bedienung: nur Flag fürs Aktivitätsprotokoll; Auswertung: auch zum Schneiden | beides mit einem Ereignis |
@@ -483,7 +525,7 @@ Ehrlich gesagt wird v0.2 damit deutlich grösser. Wenn es eng wird, würde ich d
 **5 Daten in der Cloud-KI.**
 
 - **Gefahr:** Für Extraktion und Denkanstösse gehen Ausschnitte mit Zieldaten an die Claude API, auch Secrets, die Ariadne noch nicht erkannt hat. Pentest-Inhalte können eine Ablehnung (`refusal`) auslösen.
-- **Dagegen:** Cloud nur für Lab-Projekte, deren Scope in der Lab-Liste liegt (Leitplanke, Architektur 8.1). Bekannte Secrets werden vorher durch Platzhalter ersetzt. Im Kundenprofil ist die Cloud aus. Eine Ablehnung wird erkannt und protokolliert, nie umformuliert.
+- **Dagegen:** Cloud nur für Lab-Projekte, deren Scope in der Lab-Liste liegt (Leitplanke, Architektur 8.1). In SmartLearn vorher prüfen, ob die Schule HTTPS aufbricht; dann keine Cloud-KI ([Konzept Fernzugriff](konzept-fernzugriff.md), 3.2 und 3.4). Bekannte Secrets werden vorher durch Platzhalter ersetzt. Im Kundenprofil ist die Cloud aus. Eine Ablehnung wird erkannt und protokolliert, nie umformuliert.
 
 **6 Recht beim Mitschneiden im Kundenauftrag** (Laienhinweis, keine Rechtsberatung).
 
@@ -560,11 +602,11 @@ Acht Entscheide, jeder mit Empfehlung. Antworte zum Beispiel mit «1a, 2a, 3b ..
 
 ## 8 Quellen
 
-**Projekt, gelesen am 2026-10-14:** `VISION.md`; `docs/architektur.md` (3, 4.3 bis 4.5, 5.2 bis 5.13, 6.1 bis 6.4, 7.2, 7.5, 8.6, 9); `docs/entscheide.md` (E10, E11, E22, E23, E26, E28, E33, E42, E43, E45, E49, E66, E86 bis E88); `docs/entwicklung.md` (bekannte Grenzen).
+**Projekt, gelesen am 2026-10-14:** `VISION.md`; `docs/architektur.md` (3, 4.3 bis 4.5, 5.2 bis 5.13, 6.1 bis 6.4, 7.2, 7.5, 8.6, 9); `docs/entscheide.md` (E10, E11, E22, E23, E26, E28, E33, E42, E43, E45, E49, E66, E86 bis E88); `docs/entwicklung.md` (bekannte Grenzen); `docs/konzept-fernzugriff.md` (Umgebung SmartLearn, Webkonsole, Sicherung).
 
 **Code, gelesen am 2026-10-14** (unter `src/ariadne/`): `ingest/proj_build.py` (`_claim_decisions`, `_automode`, `_inbox`), `ingest/projection.py`, `ingest/pipeline.py`, `ingest/segmenter.py`, `project/settings.py`, `parsers/nmap_text.py`, `parsers/listener_callback.py`, `parsers/api.py`, `parsers/safe.py`, `ontology.py`, `events.py`, `_shim/relay.py`, `_shim/transport.py`, `_shim/markers.py`, `daemon/writer.py`, `daemon/core.py`, `store/journal.py`. Bei der Prüfung am selben Tag zusätzlich: `daemon/sources.py`, `daemon/terminal.py`, `_shim/ringbuf.py`, `_shim/launch.py`, `_shim/procutil.py`, `shell/init.zsh`, `ingest/schema_claims.py`, `ingest/claims.py`, `ingest/units.py`, `parsers/regex_net.py`, `cli/main.py`, `cli/views.py`.
 
-**Messungen, 2026-10-14** (Skripte im Scratchpad der Recherche-Session, nicht im Repo, Eingaben nachgestellt): `count_inbox.py` (MS2-Golden: 144 Claims, 86 Inbox-Einträge in einer Gruppe, 85 mit hoher Konfidenz, Kali-IP 192.168.56.102 als Host mit 0.64); `lame.py` (Lame nur Text: 21 Claims, 18 Einträge); `automode_ms2.py` (MS2 mit Automodus: `nmap.xml` allein 18 von 144 `auto`, mit `nmap.text` 143); `bench/journal_size.py` (Journalgrösse und CPU, Container mit 4 Kernen). Nachgemessen bei der Prüfung am 2026-10-14 mit `tests/projection/helpers.py` und den Golden-Eingaben `ms2_sv_sc`: 144 Claims, 86 Inbox-Einträge in einer Gruppe; Automodus mit `nmap.xml` 18 `auto`, mit `nmap.xml` und `nmap.text` 143 `auto` und 1 Eintrag (Kali-IP, Konfidenz 0.64). Die Lame-Zahlen sind nicht nachgemessen, im Repo gibt es keine Lame-Eingabe.
+**Messungen, 2026-10-14** (Skripte im Scratchpad der Recherche-Session, nicht im Repo, Eingaben nachgestellt): `count_inbox.py` (MS2-Golden: 144 Claims, 86 Inbox-Einträge in einer Gruppe, 85 mit hoher Konfidenz, Kali-IP 192.168.56.102 als Host mit 0.64); `lame.py` (Lame nur Text: 21 Claims, 18 Einträge); `automode_ms2.py` (MS2 mit Automodus: `nmap.xml` allein 18 von 144 `auto`, mit `nmap.text` 143); `bench/journal_size.py` (Journalgrösse und CPU, Container mit 4 Kernen). Bei der Prüfung am 2026-10-14 mit `tests/projection/helpers.py` und den Golden-Eingaben `ms2_sv_sc` nachgemessen: dieselben MS2-Werte, mit `nmap.xml` und `nmap.text` bleibt 1 Eintrag (Kali-IP, Konfidenz 0.64). Die Lame-Zahlen sind nicht nachgemessen, im Repo gibt es keine Lame-Eingabe.
 
 **Auswertung und Parser:**
 
