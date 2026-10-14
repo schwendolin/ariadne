@@ -240,6 +240,7 @@ def test_rec_gap_and_partial_command(env):
     t.prompt()
     c2 = t.start("cat big.log", b"before gap\r\n")
     t.snapshot()  # REC wieder an: Daemon schreibt Schnappschuss und Lücke
+    gap_at = t.off
     t.gap(500)
     t.out(b"after gap\r\n")
     t.end(0)
@@ -247,15 +248,32 @@ def test_rec_gap_and_partial_command(env):
     partial = block(env, f"{TID}@1000")
     assert partial["flags"] == ["partial"] and partial["d_off"] == first_d
     assert block(env, f"{TID}@{c}")["flags"] == []
+    # In der Lücke können C und D anderer Befehle fehlen: cat endet an der Lücke, der
+    # D danach bekommt einen eigenen Block ohne Befehlstext (Befund REC-Lücken).
     gb = block(env, f"{TID}@{c2}")
-    assert gb["flags"] == ["gap"]
+    assert gb["flags"] == ["gap", "truncated"] and gb["d_off"] is None and gb["exit_code"] is None
+    after = block(env, f"{TID}@{gap_at + 500}")
+    assert after["flags"] == ["partial"] and after["exit_code"] == 0 and after["argv"] == []
     u = [x for x in units(env) if x[4] == f"{TID}@{c2}"][0]
     flags = json.loads(env.rows("SELECT flags FROM unit WHERE unit_id = ?", u[0])[0][0])
-    assert "gap" in flags
-    texts = [r[2] for r in lines_of(env, u[0])]
-    assert texts[-2:] == ["before gap", "after gap"]
+    assert "gap" in flags and "truncated" in flags
+    assert [r[2] for r in lines_of(env, u[0])][-1] == "before gap"
     raw = env.rows("SELECT raw_start FROM unit_line WHERE text = 'after gap'")[0][0]
     assert raw >= c2 + 500
+
+
+def test_sensitive_output_gap_keeps_command(env):
+    """Die Pause für Schlüsselmaterial verliert keine Marker: der Befehl bleibt ganz."""
+    t = env.term
+    t.open()
+    c = t.start("ariadne init", b"Passphrase gesetzt\r\n")
+    t.gap(40, reason="sensitive_output")
+    t.out(b"fertig\r\n")
+    t.end(0)
+    t.prompt()
+    env.pipeline().process_new()
+    b = block(env, f"{TID}@{c}")
+    assert b["flags"] == ["gap"] and b["exit_code"] == 0 and b["argv"] == ["ariadne", "init"]
 
 
 def test_term_close_finishes_open_unit(env):

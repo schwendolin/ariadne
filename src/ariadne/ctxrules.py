@@ -429,9 +429,17 @@ def classify(argv: Sequence[str]) -> Classification:
 
 @dataclass
 class ContextStack:
-    """Kontext-Stapel eines Terminals. ``stages[0]`` ist immer lokal (Kali)."""
+    """Kontext-Stapel eines Terminals. ``stages[0]`` ist immer lokal (Kali).
+
+    ``jobs`` führt die angehaltenen Jobs in der Reihenfolge des Anhaltens, je mit
+    den ``opened_at`` der Stufen, die sie angehalten haben; ein Programm ohne Stufe
+    (vim, less) ist ein leerer Platzhalter. ``fg`` holt so den Job zurück, den
+    auch die Shell fortsetzt. ``None`` heisst unbekannt (nach einem Schnappschuss
+    mit angehaltenen Stufen): dann gilt die jüngste angehaltene Stufe.
+    """
 
     stages: list[Stage] = field(default_factory=lambda: [Stage(kind="local", host="local")])
+    jobs: list[tuple[int, ...]] | None = field(default_factory=list, compare=False)
 
     # ---- Abfragen -------------------------------------------------------- #
 
@@ -452,7 +460,8 @@ class ContextStack:
         stages = [Stage.from_dict(d) for d in data]
         if not stages or stages[0].kind != "local":
             stages.insert(0, Stage(kind="local", host="local"))
-        return cls(stages)
+        jobs: list[tuple[int, ...]] | None = None if any(s.state == "suspended" for s in stages) else []
+        return cls(stages, jobs)
 
     # ---- automatische Übergänge aus Markern ------------------------------ #
 
@@ -469,19 +478,45 @@ class ContextStack:
                 Stage(kind="su", host="local", user=c.user, opened_at=offset, source="auto")
             )
         elif isinstance(c, Resume):
+            self._resume(c.job)
+        return c
+
+    def _resume(self, job: str | None) -> None:
+        if self.jobs is None:  # Reihenfolge unbekannt: jüngste angehaltene Stufe
             for i in range(len(self.stages) - 1, 0, -1):
                 if self.stages[i].state == "suspended":
                     self.stages[i] = replace(self.stages[i], state="active")
                     break
-        return c
+            return
+        n = len(self.jobs)
+        spec = "%" if job is None else job
+        spec = spec[1:] if spec.startswith("%") else spec
+        if spec in ("", "%", "+"):
+            idx = n - 1
+        elif spec == "-":
+            idx = n - 2
+        elif spec.isdigit():
+            idx = int(spec) - 1  # Jobnummer der Shell, sofern keine Hintergrundjobs dazwischen
+        else:
+            return  # %name, %?text: unklar, keine Stufe aktivieren
+        if not 0 <= idx < n:
+            return
+        offs = set(self.jobs.pop(idx))
+        for i in range(1, len(self.stages)):
+            st = self.stages[i]
+            if st.state == "suspended" and st.opened_at in offs:
+                self.stages[i] = replace(st, state="active")
 
     def on_command_end(self, exit_code: int | None, offset: int) -> None:
         """D-Marker (gültig, Vordergrund geprüft)."""
         if exit_code == EXIT_SUSPENDED:
+            held = tuple(s.opened_at for s in self.stages[1:] if s.state == "active")
             self.stages = [self.stages[0]] + [
                 replace(s, state="suspended") if s.state == "active" else s
                 for s in self.stages[1:]
             ]
+            if self.jobs is not None:
+                self.jobs.append(held)  # leer: Programm ohne Stufe (Platzhalter)
             return
         # Die Vordergrund-Sitzung ist beendet: aktive Stufen schliessen,
         # angehaltene bleiben (andere Jobs).

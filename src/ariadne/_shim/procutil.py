@@ -12,6 +12,8 @@ __all__ = [
     "read_comm",
     "read_ppid",
     "has_ancestor_named",
+    "read_tty_nr",
+    "shim_owns_tty",
     "descends_from",
     "set_process_name",
     "harden_parent",
@@ -45,6 +47,48 @@ def read_ppid(pid: int) -> int | None:
         return int(rest[1])
     except (IndexError, ValueError):
         return None
+
+
+def read_tty_nr(pid: int) -> int | None:
+    """Kontrollierendes Terminal aus ``/proc/<pid>/stat`` (Feld 7, kodiert wie ``st_rdev``)."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            data = fh.read(4096)
+    except OSError:
+        return None
+    rest = data.rpartition(b")")[2].split()
+    try:
+        return int(rest[4])
+    except (IndexError, ValueError):
+        return None
+
+
+def _dev_parts(nr: int) -> tuple[int, int]:
+    """``tty_nr``/``st_rdev`` (Linux ``new_encode_dev``) in (major, minor)."""
+    return (nr >> 8) & 0xFFF, (nr & 0xFF) | ((nr >> 12) & 0xFFF00)
+
+
+def shim_owns_tty(name: str, tty_rdev: int, start: int | None = None) -> bool:
+    """Gehört das Terminal ``tty_rdev`` schon einem Vorfahren namens ``name``?
+
+    Gesucht wird der Vorfahre (Shim), dessen direktes Kind auf dem Weg zu uns
+    dieses Terminal als kontrollierendes Terminal hat: Unter-Shells, ``su`` und
+    ``exec zsh`` laufen im PTY des Shims. Ein Terminal-Emulator, der aus einer
+    aufgezeichneten Shell gestartet wird (``qterminal &``, ``code .``), legt ein
+    eigenes PTY an; seine Shells bekommen einen eigenen Shim.
+    """
+    want = _dev_parts(tty_rdev)
+    child = os.getpid() if start is None else start
+    pid = read_ppid(child)
+    for _ in range(_MAX_DEPTH):
+        if pid is None or pid <= 1:
+            return False
+        if read_comm(pid) == name:
+            nr = read_tty_nr(child)
+            if nr is not None and nr != 0 and _dev_parts(nr) == want:
+                return True
+        child, pid = pid, read_ppid(pid)
+    return False
 
 
 def has_ancestor_named(name: str, start: int | None = None) -> bool:

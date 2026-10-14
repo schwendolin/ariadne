@@ -75,6 +75,7 @@ class _Cmd:
     argv: tuple[str, ...]
     cwd: str | None
     local: bool
+    c_off: int = 0
 
 
 def find_ip_tool() -> str | None:
@@ -149,7 +150,19 @@ class LocalSources:
         self.routes = routes
         self.companions = companions
         self._last_c: dict[str, _Cmd] = {}
+        self._gap_off: dict[str, int] = {}  # Beginn der letzten Lücke, in der Marker fehlen können
         self._ip = find_ip_tool() if routes else None
+
+    # ------------------------------------------------------------------ Commit-Hook
+    def on_commit(self, records: list[EventRecord]) -> None:
+        """Lücken merken: Ein D nach einer Lücke gehört nicht sicher zum C davor."""
+        for r in records:
+            if r.kind != "term.gap" or r.terminal_id is None:
+                continue
+            h = r.header
+            if int(h.get("bytes_lost", 0) or 0) > 0 and h.get("reason") != "sensitive_output":
+                off = int(h.get("stream_off", 0) or 0)
+                self._gap_off[r.terminal_id] = max(off, self._gap_off.get(r.terminal_id, -1))
 
     # ------------------------------------------------------------------ Mark-Hook
     def on_mark(self, rec: EventRecord, ctx: MarkContext | None) -> Any:
@@ -162,8 +175,8 @@ class LocalSources:
             text = h.get("cmd_expanded") or h.get("cmd_typed")
             argv = tuple(split_command(text)) if isinstance(text, str) else ()
             cwd = h.get("cwd") if isinstance(h.get("cwd"), str) else None
-            cmd = _Cmd(make_cmd_id(tid, int(h.get("stream_off", 0))), ctx.project_id, argv, cwd,
-                       ctx.local_before)
+            c_off = int(h.get("stream_off", 0))
+            cmd = _Cmd(make_cmd_id(tid, c_off), ctx.project_id, argv, cwd, ctx.local_before, c_off)
             self._last_c[tid] = cmd
             if cmd.local and argv and self.routes and self._ip:
                 targets = _ip_targets(list(argv))
@@ -171,6 +184,8 @@ class LocalSources:
                     return self._routes(cmd, targets)
         elif mark == "D" and h.get("fg_shell"):
             cmd = self._last_c.pop(tid, None)
+            if cmd is not None and self._gap_off.get(tid, -1) >= cmd.c_off:
+                cmd = None  # REC war zwischendurch aus: der D gehört zu einem anderen Befehl
             if (cmd is not None and cmd.local and cmd.argv and self.companions
                     and cmd.project_id == ctx.project_id):
                 return self._companions(cmd, tid)

@@ -296,7 +296,7 @@ class Projector:
         with _savepoint(self.conn):
             before = self._snapshot()
             res = build(self._units(), self._observations(), self._mentions(), self._decisions(),
-                        self.scope, self.project_key)
+                        self.scope, self.project_key, spans=self._spans())
             for table in ("identifier", "entity", "claim", "claim_source", "conflict", "inbox_item",
                           "keystep"):
                 self.conn.execute(f"DELETE FROM {table}")  # noqa: S608
@@ -327,6 +327,14 @@ class Projector:
             "ORDER BY generation, entity, entity_key", (int(generation),))]
 
     # ------------------------------------------------------------------ Laden
+    def _spans(self) -> list[tuple[str, int, int | None, str | None, int | None]] | None:
+        try:
+            rows = self.conn.execute(
+                "SELECT terminal_id, start_off, end_off, kind, opened_at FROM ctx_span").fetchall()
+        except Exception:  # noqa: BLE001 - ohne Segmenter-Tabellen (Tests): alte Zuordnung
+            return None
+        return [(r[0], int(r[1]), r[2], r[3], r[4]) for r in rows]
+
     def _units(self) -> dict[str, UnitRow]:
         out: dict[str, UnitRow] = {}
         for r in self.conn.execute(

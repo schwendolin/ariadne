@@ -394,7 +394,12 @@ class Shim:
         if now < self._cpr_until and _CPR.fullmatch(data):
             self._cpr_until = 0.0
             return
-        for act in self.input.feed(data, now):
+        try:
+            acts = self.input.feed(data, now)
+        except Exception:
+            self._to_child += data  # Tasten nie verschlucken; das Notfall-Relay schreibt sie
+            raise
+        for act in acts:
             self._on_action(act, now)
 
     def _on_stdout(self, now: float) -> None:
@@ -654,7 +659,8 @@ class Shim:
             stack = _clean_stack(st.get("stack"))
             if stack is not None:
                 with contextlib.suppress(Exception):
-                    self.stack = ContextStack([Stage.from_dict(d) for d in stack])
+                    jobs = self.stack.jobs
+                    self.stack = ContextStack([Stage.from_dict(d) for d in stack], jobs)
         bound = st.get("bound_project_id")
         if isinstance(bound, str) and 0 < len(bound) <= 64:
             self._bound_id = bound

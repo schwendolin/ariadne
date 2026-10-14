@@ -198,8 +198,11 @@ if [[ -n ${ARIADNE_SHIM_FAILED-} ]]; then
   return 0
 fi
 
-# Aussen: Shim starten, wenn alles passt.
+# Aussen: Shim starten, wenn alles passt. Nicht bei "bash -ic BEFEHL" (der
+# Befehl ginge verloren); eine Login-Shell bleibt Login-Shell (Rest von
+# ~/.profile, z. B. ~/.local/bin im PATH, und logout).
 if [[ -t 0 && -t 1 && -n ${TERM-} && $TERM != dumb && -z ${ARIADNE_DISABLE-} ]] \
+  && [[ -z ${BASH_EXECUTION_STRING-} ]] \
   && [[ ! -e ${XDG_CONFIG_HOME:-$HOME/.config}/ariadne/disable ]]; then
   __ariadne_launcher=${BASH_SOURCE[0]%/*}/launcher.sh
   if [[ /proc/$$/exe -ef ${BASH-} ]]; then
@@ -211,7 +214,11 @@ if [[ -t 0 && -t 1 && -n ${TERM-} && $TERM != dumb && -z ${ARIADNE_DISABLE-} ]] 
         && -f $__ariadne_self && -x $__ariadne_self ]]; then
     if shopt -q execfail; then __ariadne_ef=1; else __ariadne_ef=0; fi
     shopt -s execfail
-    exec "$__ariadne_launcher" "$__ariadne_self" -i
+    if shopt -q login_shell; then
+      exec "$__ariadne_launcher" "$__ariadne_self" -i -l
+    else
+      exec "$__ariadne_launcher" "$__ariadne_self" -i
+    fi
     (( __ariadne_ef )) || shopt -u execfail
   fi
   unset __ariadne_launcher __ariadne_self __ariadne_ef

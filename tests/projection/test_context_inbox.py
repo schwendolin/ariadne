@@ -201,3 +201,28 @@ def test_context_host_typed_without_prefix():
     p.rebuild()
     assert (H.key, "host.os", "L") in claims(conn)
     assert rows(conn, "SELECT host_ident FROM keystep") == [(H.key,)]
+
+
+def test_ctx_set_targets_running_stage_not_older_parsed_one():
+    """Befund: F12 h in einer neuen, noch nicht geparsten Stufe überschrieb den Host einer
+    alten, beendeten ssh-Sitzung (Zuordnung nur über schon geparste Einheiten)."""
+    from ariadne.ingest.proj_build import DecisionRow, ObsRow, UnitRow, build
+    from tests.projection.helpers import PROJECT_KEY, FakeScope
+
+    t = "0190aaaa-bbbb-7ccc-8ddd-eeeeffff0000"
+    u1 = UnitRow(f"u:{t}@150", "segment", t, "c1", None, None, 1_000, 150, 900, "ssh",
+                 "ip:default/10.10.10.5", "root", 100, None, True, 10)
+    obs = [ObsRow(1, u1.unit_id, "shell.context", "1", "tool_text", False, 10, "ctx:host", "host.os",
+                  "Linux", "Linux", '{"line_end":0,"line_start":0}', 0.85, {}, 1_000, True, False, False)]
+    decisions = [
+        DecisionRow(5, "d1", "d.ctx.set", {"terminal_id": t, "from_off": 150, "host": "ip:default/10.10.10.5"},
+                    500),
+        DecisionRow(20, "d2", "d.ctx.set", {"terminal_id": t, "from_off": 3000,
+                                            "host": "ip:default/10.10.10.7"}, 5000),
+    ]
+    spans = [(t, 100, 2000, "ssh", 100), (t, 2000, 3000, "local", 0), (t, 3000, None, "unknown", 3000)]
+    res = build({u1.unit_id: u1}, obs, [], decisions, FakeScope(nets=["10.10.10.0/24"]), PROJECT_KEY,
+                spans=spans)
+    claims = {(c[1], c[3], c[5]) for c in res.claims}  # Subjekt, Prädikat, Wert
+    assert ("ip:default/10.10.10.5", "host.os", "Linux") in claims
+    assert not any(c[0] == "ip:default/10.10.10.7" for c in claims)

@@ -7,9 +7,11 @@ und damit den Shim startet; innen installiert dieselbe Datei die Hooks.
 
 from __future__ import annotations
 
+import io
 import re
 import shutil
 import time
+from pathlib import Path
 
 import pexpect
 import pytest
@@ -29,11 +31,21 @@ F12 = b"\x1b[24~"
 SHELLS = available_shells()
 
 
-def spawn(box, shell: str, rows: int = 24, cols: int = 80) -> pexpect.spawn:
+def spawn(box, shell: str, rows: int = 24, cols: int = 80, args: tuple[str, ...] = ("-i",),
+          prompt: bool = True) -> pexpect.spawn:
     env = dict(box.env, SHELL=shell)
-    c = pexpect.spawn(shell, ["-i"], env=env, cwd=str(box.home), timeout=10, dimensions=(rows, cols))
-    c.expect_exact(PROMPT)
+    c = pexpect.spawn(shell, list(args), env=env, cwd=str(box.home), timeout=10, dimensions=(rows, cols))
+    c.logfile_read = io.BytesIO()  # alles Gelesene, auch was ein expect schon verbraucht hat
+    if prompt:
+        c.expect_exact(PROMPT)
     return c
+
+
+def expect_seen(c: pexpect.spawn, needle: bytes, timeout: float = 3) -> None:
+    """Wartet auf ``needle``, auch wenn es schon vor dem letzten Prompt kam (Reihenfolge offen)."""
+    if needle in c.logfile_read.getvalue():
+        return
+    c.expect_exact(needle, timeout=timeout)
 
 
 def run_cmd(c: pexpect.spawn, cmd: str) -> bytes:
@@ -168,7 +180,7 @@ def test_daemon_unreachable_shell_works_and_title_offline(shell, box_factory):
     c = spawn(box, shell)
     out = run_cmd(c, 'echo "ok-$ARIADNE_SHIM_FAILED-${ARIADNE_SHIM_TTY:+wrapped}"')
     assert b"ok--wrapped" in out
-    c.expect_exact(b"\x1b]2;[ariadne offline]", timeout=3)
+    expect_seen(c, b"\x1b]2;[ariadne offline]")
     finish(c)
 
 
@@ -265,9 +277,9 @@ def test_daemon_restart_resends_buffer(box_factory):
     run_cmd(c, "echo before-crash")
     assert d1.wait_for(lambda: b"before-crash" in d1.out_bytes())
     d1.stop()
+    expect_seen(c, b"\x1b]2;[ariadne offline]")  # Titel kann vor oder nach dem Prompt kommen
     out = run_cmd(c, "echo while-offline")
     assert b"while-offline" in out
-    c.expect_exact(b"\x1b]2;[ariadne offline]", timeout=3)
     with FakeDaemon(box.sock) as d2:
         assert d2.wait_for(lambda: d2.hellos(), timeout=3)
         assert d2.hellos()[0]["resume_from_seq"] == 1
@@ -377,3 +389,102 @@ def test_markers_survive_unusual_user_options(shell, box_factory):
         assert dm and dm[-1]["pipestatus"] == [0, 1]
         assert d.events("term.marker_forged") == []
         finish(c)
+
+
+@pytest.mark.skipif(not shutil.which("script"), reason="script fehlt")
+@pytest.mark.parametrize("shell", SHELLS)
+def test_new_pty_from_recorded_shell_gets_own_shim(shell, box_factory):
+    """Befund: «nested» galt für jedes Terminal mit einem Shim als Vorfahre. Ein Fenster,
+    das aus einer aufgezeichneten Shell startet (qterminal &, code .), blieb still stumm."""
+    box = box_factory(shell=shell)
+    with FakeDaemon(box.sock) as d:
+        c = spawn(box, shell)
+        d.wait_for(lambda: d.hellos())
+        c.sendline(f"script -qfc '{shell} -i' /dev/null")  # eigenes PTY wie ein Terminal-Emulator
+        c.expect_exact(PROMPT)
+        out = run_cmd(c, 'echo "inner=${ARIADNE_SHIM_FAILED:-ok} tty=$(tty)"')
+        assert b"inner=ok" in out
+        hellos = d.wait_for(lambda: len(d.hellos()) >= 2 and d.hellos(), timeout=5)
+        assert hellos[1]["tty"] != hellos[0]["tty"]
+        run_cmd(c, "exit")
+        finish(c)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_dash_c_command_runs_and_keeps_exit_code(shell, box_factory):
+    box = box_factory(shell=shell)
+    c = spawn(box, shell, args=("-ic", "echo RUN-$((40+2)); exit 3"), prompt=False)
+    c.expect_exact("RUN-42")
+    c.expect(pexpect.EOF)
+    c.close()
+    assert c.exitstatus == 3
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_login_shell_stays_login_shell(shell, box_factory):
+    box = box_factory(shell=shell)
+    home = Path(box.home)
+    if shell_kind(shell) == "bash":
+        (home / ".profile").write_text('. "$HOME/.bashrc"\nexport AFTER_RC=gesetzt\n')
+        check = 'shopt -q login_shell && L=ja || L=nein; echo "after=${AFTER_RC:-fehlt} login=$L"'
+    else:
+        (home / ".zlogin").write_text("export AFTER_RC=gesetzt\n")
+        check = '[[ -o login ]] && L=ja || L=nein; echo "after=${AFTER_RC:-fehlt} login=$L"'
+    with FakeDaemon(box.sock) as d:
+        c = spawn(box, shell, args=("-l", "-i"))
+        d.wait_for(lambda: d.hellos())
+        out = run_cmd(c, check + '; echo "shim=${ARIADNE_SHIM_TTY:+ja}"')
+        assert b"after=gesetzt login=ja" in out and b"shim=ja" in out
+        finish(c)
+
+
+def _broken_pkg(tmp_path, patch) -> Path:
+    from tests.shim.conftest import SRC
+
+    pkg = tmp_path / "pkg"
+    shutil.copytree(SRC / "ariadne", pkg / "ariadne", ignore=shutil.ignore_patterns("__pycache__"))
+    patch(pkg / "ariadne" / "_shim")
+    return pkg
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_relay_import_failure_uses_plain_relay(shell, box_factory, tmp_path):
+    def patch(d: Path) -> None:
+        f = d / "relay.py"
+        f.write_text('raise RuntimeError("kaputt")\n' + f.read_text())
+
+    box = box_factory(shell=shell, pkg=_broken_pkg(tmp_path, patch))
+    c = spawn(box, shell)
+    expect_seen(c, b"[ariadne inaktiv]")
+    out = run_cmd(c, 'echo "x=$((6*7)) shim=${ARIADNE_SHIM_TTY:+ja}"')
+    assert b"x=42 shim=ja" in out
+    finish(c, 6)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_loop_failure_keeps_shell_and_keystrokes(shell, box_factory, tmp_path):
+    """Fehler in der Hauptschleife: Titel zeigt den Fehler, kein Tastendruck geht verloren."""
+    def patch(d: Path) -> None:
+        f = d / "hotkey.py"
+        src = f.read_text()
+        sig = "    def feed(self, chunk: bytes, now: float) -> list[Action]:\n"
+        assert sig in src
+        src = src.replace(sig, sig + "        _boom()\n", 1)
+        src += ("\n\n_N = [0]\n\n\ndef _boom() -> None:\n    _N[0] += 1\n    if _N[0] == 3:\n"
+                "        raise RuntimeError('Testfehler')\n")
+        f.write_text(src)
+
+    box = box_factory(shell=shell, pkg=_broken_pkg(tmp_path, patch))
+    with FakeDaemon(box.sock) as d:
+        c = spawn(box, shell)
+        d.wait_for(lambda: d.hellos())
+        for ch in "echo X$((1+1))":  # einzeln: der dritte Tastendruck (h) löst den Fehler aus
+            c.send(ch.encode())
+            time.sleep(0.03)
+        c.send(b"\r")
+        c.expect_exact("X2")
+        c.expect_exact(PROMPT)
+        expect_seen(c, b"[ariadne fehler]")
+        out = run_cmd(c, "echo weiter-$((2+3))")
+        assert b"weiter-5" in out
+        finish(c, 4)

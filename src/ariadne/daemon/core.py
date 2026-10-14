@@ -191,6 +191,7 @@ class Daemon:
         if self.ingest is not None:
             self.add_commit_hook(self.ingest.on_commit)
         self.sources = LocalSources(self, routes=sources, companions=sources)
+        self.add_commit_hook(self.sources.on_commit)
         self.add_mark_hook(self.sources.on_mark)
         self._update_redactor()
 

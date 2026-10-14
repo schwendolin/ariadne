@@ -143,11 +143,16 @@ class MarkerValidator:
         last = self._last.get(parsed.shell_pid)
         if last is not None and parsed.counter <= last:
             return Verdict(False, "replay")
-        self._last[parsed.shell_pid] = parsed.counter
-        self._last.move_to_end(parsed.shell_pid)
-        while len(self._last) > MAX_PIDS:
-            self._last.popitem(last=False)
-        return Verdict(True, None, parsed, self.fg_shell(parsed.shell_pid))
+        fg = self.fg_shell(parsed.shell_pid)
+        if fg or parsed.mark == "C":
+            # Ein D/A aus einem Prozess ausserhalb des Vordergrunds (z. B. mit geleakter
+            # Nonce und riesigem Zähler) darf den Zähler nicht hochsetzen: sonst gälten
+            # alle echten Marker dieser Shell danach als Wiederholung.
+            self._last[parsed.shell_pid] = parsed.counter
+            self._last.move_to_end(parsed.shell_pid)
+            while len(self._last) > MAX_PIDS:
+                self._last.popitem(last=False)
+        return Verdict(True, None, parsed, fg)
 
     def fg_shell(self, pid: int) -> bool:
         try:

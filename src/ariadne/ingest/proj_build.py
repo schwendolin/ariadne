@@ -223,15 +223,28 @@ def _max_access(a: str, b: str) -> str:
 
 
 # --------------------------------------------------------------------------- Hauptfunktion
+SpanRow = tuple[str, int, int | None, str | None, int | None]  # terminal, start, end, kind, opened_at
+
+
 def build(units: Mapping[str, UnitRow], observations: Iterable[ObsRow], mentions: Iterable[MentionRow],
-          decisions: Iterable[DecisionRow], scope: ScopeChecker, project_key: bytes) -> BuildResult:
-    return _Builder(units, observations, mentions, decisions, scope, project_key).run()
+          decisions: Iterable[DecisionRow], scope: ScopeChecker, project_key: bytes,
+          spans: Iterable[SpanRow] | None = None) -> BuildResult:
+    """``spans`` sind die Kontextspannen des Segmenters (``ctx_span``). Ohne sie ordnet
+    ``d.ctx.set`` nur über die schon geparsten Einheiten zu (Tests, alte Aufrufer)."""
+    return _Builder(units, observations, mentions, decisions, scope, project_key, spans).run()
 
 
 class _Builder:
     def __init__(self, units: Mapping[str, UnitRow], observations: Iterable[ObsRow],
                  mentions: Iterable[MentionRow], decisions: Iterable[DecisionRow], scope: ScopeChecker,
-                 project_key: bytes) -> None:
+                 project_key: bytes, spans: Iterable[SpanRow] | None = None) -> None:
+        self.spans: dict[str, list[SpanRow]] | None = None
+        if spans is not None:
+            self.spans = defaultdict(list)
+            for sp in spans:
+                self.spans[sp[0]].append(sp)
+            for lst in self.spans.values():
+                lst.sort(key=lambda x: x[1])
         self.units = dict(units)
         self.obs = list(observations)
         self.mentions = list(mentions)
@@ -310,9 +323,20 @@ class _Builder:
             off = d.payload.get("from_off")
             if not isinstance(term, str) or not isinstance(off, int):
                 continue
-            cands = [o for o in stages.get(term, []) if o <= off]
             host = host_identifier(str(d.payload["host"]))
-            if cands and host:
+            if not host:
+                continue
+            spans = self.spans.get(term) if self.spans is not None else None
+            if spans:
+                # Die Stufe, die bei from_off tatsächlich lief (aus dem Segmenter), nicht
+                # die jüngste schon geparste: deren Einheiten können noch offen sein.
+                hit = next((sp for sp in spans if sp[1] <= off < (sp[2] if sp[2] is not None else 1 << 62)),
+                           spans[0] if off < spans[0][1] else None)
+                if hit is not None and hit[3] not in _LOCAL_KINDS and hit[4] is not None:
+                    overrides[(term, int(hit[4]))] = host
+                continue
+            cands = [o for o in stages.get(term, []) if o <= off]
+            if cands:
                 overrides[(term, max(cands))] = host
         self.ctx_host: dict[str, str] = {}
         for u in self.units.values():

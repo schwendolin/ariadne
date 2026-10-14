@@ -93,3 +93,15 @@ def test_mark_event_ignores_garbage_numbers():
     m = parse_marker(payload("D", "exit=abc&pipestatus=1,x&cwd="))
     ev = mark_event(m, terminal_id="t", stream_off=0, fg_shell=True)
     assert "exit" not in ev and "pipestatus" not in ev and "cwd" not in ev
+
+
+def test_non_foreground_d_cannot_burn_the_counter():
+    """Befund: Ein D mit geleakter Nonce und riesigem Zähler aus einem Hintergrundprozess
+    machte alle echten Marker der Shell zu Wiederholungen."""
+    fg = {"pgrp": 999}
+    v = validator(tcgetpgrp=lambda fd: fg["pgrp"])
+    forged = v.check(payload("D", "exit=0", ctr=999_999_999_999))
+    assert forged.ok and not forged.fg_shell
+    fg["pgrp"] = 100
+    real = v.check(payload("D", "exit=0", ctr=7))
+    assert real.ok and real.fg_shell

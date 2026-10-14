@@ -68,10 +68,12 @@ das letzte ACK).
 ACK-Semantik: Der Daemon bestätigt erst, wenn ein Rahmen und alle davor
 gespeichert (oder bewusst verworfen, etwa bei REC aus) sind. Im Zustand
 ``waiting`` (Projekt gesperrt) puffert er im RAM und bestätigt erst nach dem
-Speichern. Wegen des Rückhalts des Redaktors kann ein ACK um höchstens die
-Länge des längsten eigenen Secrets minus eins hinterherhinken, bis das nächste
-EVENT oder der Leerlauf-Flush kommt. EVENTs müssen nach den vorangehenden
-OUT-Bytes gesendet werden, damit Journal- und Strom-Reihenfolge stimmen.
+Speichern. Wegen des Rückhalts des Redaktors kann ein ACK hinterherhinken,
+solange das Stromende ein eigenes Secret beginnen könnte (höchstens dessen
+Länge minus eins), bis weitere Ausgabe, REC aus oder das Ende des Terminals
+kommt. EVENTs dahinter warten mit und gehen an ihrer Stromposition ins
+Journal. EVENTs müssen nach den vorangehenden OUT-Bytes gesendet werden,
+damit Journal- und Strom-Reihenfolge stimmen.
 """
 
 from __future__ import annotations

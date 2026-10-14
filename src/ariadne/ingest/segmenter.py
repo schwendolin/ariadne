@@ -14,7 +14,9 @@ Regeln:
   ``ariadne.ids.cmd_id(terminal_id, C-Offset)``. Der Befehlstext kommt aus C
   (``cmd_expanded`` vor ``cmd_typed``) oder, bei bash vor 5.3, aus D. Flags:
   ``partial`` (REC begann mitten im Befehl, D ohne C), ``truncated`` (ohne D
-  beendet), ``gap`` (Lücke im Strom).
+  beendet), ``gap`` (Lücke im Strom). Eine Lücke mit verlorenen Bytes (ausser
+  ``sensitive_output``) beendet den laufenden Befehl als ``truncated``: In ihr
+  können Marker fehlen.
 * Der Kontext wird mit ``ariadne.ctxrules.ContextStack`` nachgespielt, sortiert
   nach (Offset, seq): Schnappschuss ersetzt den Stapel, C ->
   ``on_command_start``, D -> ``on_command_end``, ``d.ctx.push``/``pop``.
@@ -238,7 +240,19 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
             since_start = cur is not None
             continue
         if ev.kind == "term.gap":
-            if cur is not None:
+            lost = _int(h.get("bytes_lost")) or 0
+            if lost > 0 and h.get("reason") != "sensitive_output" and ev.off is not None:
+                # In der Lücke können Marker fehlen (REC aus, Überlauf, Daemon weg): Der
+                # laufende Befehl endet hier. Ein späterer D ohne C wird ``partial``,
+                # statt Exit-Code und Ende eines anderen Befehls zu übernehmen.
+                if cur is not None:
+                    cur.flags.add("gap")
+                    close(cur, ev.off, "truncated", ev.ts)
+                    cur = None
+                seg_start = ev.off + lost
+                since_start = False
+                first_a = None
+            elif cur is not None:
                 cur.flags.add("gap")
             continue
         if ev.kind == "term.close":

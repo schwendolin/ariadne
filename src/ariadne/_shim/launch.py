@@ -100,7 +100,13 @@ def precheck(argv: list[str]) -> str | None:
         return "args"
     if not (os.isatty(0) and os.isatty(1)):
         return "notty"
-    if procutil.has_ancestor_named(procutil.SHIM_NAME):
+    # Nur «nested», wenn ein Shim schon genau dieses Terminal aufnimmt. Ein neues
+    # Terminal-Fenster aus einer aufgezeichneten Shell hat ein eigenes PTY.
+    try:
+        rdev = os.fstat(0).st_rdev
+    except OSError:
+        return "notty"
+    if procutil.shim_owns_tty(procutil.SHIM_NAME, rdev):
         return "nested"
     return None
 
@@ -161,6 +167,8 @@ def plain_relay(sp: Spawned) -> int:
     try:
         with contextlib.suppress(termios.error, OSError):
             termios.tcsetattr(0, termios.TCSANOW, make_raw(sp.attrs))
+        with contextlib.suppress(OSError):
+            _write_all(1, b"\x1b]2;[ariadne inaktiv] Shim-Fehler, keine Aufnahme\x07")
         last = time.monotonic()
         while True:
             try:

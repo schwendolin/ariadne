@@ -48,7 +48,9 @@ __ariadne_vars() {
     seen[$name]=1
     [[ ${(Pt)name} == (scalar|integer|float)* ]] || continue
     val=${(P)name}
-    __ariadne_enc "${val[1,128]}"
+    # Längere Werte nie gekürzt senden: der Redaktor erkennt nur ganze Secrets.
+    (( ${#val} <= 128 )) || continue
+    __ariadne_enc "$val"
     out+="&var.$name=$REPLY"
     n+=1
   done
@@ -136,12 +138,18 @@ fi
 
 # Aussen: Shim starten, wenn alles passt. zsh kennt kein execfail, ein
 # gescheitertes exec beendet die Shell. Darum vorher alles prüfen.
+# Nicht bei "zsh -ic BEFEHL" oder "zsh -i skript" (Befehl bzw. Skript gingen verloren),
+# und eine Login-Shell bleibt Login-Shell (.zlogin, logout).
 if [[ -t 0 && -t 1 && -n ${TERM-} && $TERM != dumb && -z ${ARIADNE_DISABLE-} ]] \
+  && [[ -z ${ZSH_EXECUTION_STRING-} && -z ${ZSH_SCRIPT-} ]] \
   && [[ ! -e ${XDG_CONFIG_HOME:-$HOME/.config}/ariadne/disable ]]; then
   () {
     local launcher=${${(%):-%x}:A:h}/launcher.sh
     local self=${${:-/proc/$$/exe}:A}
     [[ -f $launcher && -x $launcher && -x /bin/sh && -f $self && -x $self ]] || return 0
+    if [[ -o login ]]; then
+      exec "$launcher" "$self" -i -l
+    fi
     exec "$launcher" "$self" -i
   }
 fi

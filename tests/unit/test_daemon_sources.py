@@ -57,3 +57,25 @@ def test_mark_hook_rules():
     # Befehl in einer Remote-Stufe getippt (lokaler Stapel oben remote): nie Begleitdateien
     src.on_mark(_rec("C", cmd_typed="nmap -oA x 10.0.0.1", cwd="/w"), remote)
     assert src.on_mark(_rec("D", exit=0), local) is None
+
+
+def test_d_after_rec_gap_does_not_read_companions_of_old_c():
+    """Befund: REC aus während A, an während B; der D von B las die Begleitdateien von A."""
+    d = SimpleNamespace(project=None, paths=None)
+    src = LocalSources(d, routes=False)  # type: ignore[arg-type]
+    local = MarkContext("t1", "p1", (), True, True)
+    src.on_mark(_rec("C", cmd_typed="nc -lvnp 4444 -oA x", cwd="/w"), local)
+    gap = EventRecord(2, "g", "raw", "term.gap", 0, None, None, "op", "shim", "t1", 500,
+                      {"terminal_id": "t1", "stream_off": 500, "reason": "rec_off", "bytes_lost": 900}, None)
+    src.on_commit([gap])
+    assert src.on_mark(_rec("D", exit=0), local) is None
+    # Pause für Schlüsselmaterial verliert keine Marker: dort gilt der Befehl weiter
+    src2 = LocalSources(d, routes=False)  # type: ignore[arg-type]
+    src2.on_mark(_rec("C", cmd_typed="nmap -oA x 10.0.0.1", cwd="/w"), local)
+    pause = EventRecord(3, "p", "raw", "term.gap", 0, None, None, "op", "daemon", "t1", 20,
+                        {"terminal_id": "t1", "stream_off": 20, "reason": "sensitive_output", "bytes_lost": 9},
+                        None)
+    src2.on_commit([pause])
+    co = src2.on_mark(_rec("D", exit=0), local)
+    assert co is not None
+    co.close()
