@@ -13,9 +13,25 @@ Trennt den Output des Kindes in Anzeige und Aufnahme:
 Der Parser folgt dem VT500-Zustandsautomaten: C0-Zeichen innerhalb von ESC
 und CSI werden übersprungen (Terminals führen sie aus und setzen die Sequenz
 fort), CAN und SUB brechen ab, ESC beginnt eine neue Sequenz. Unvollständige
-Sequenzen werden über Chunk-Grenzen gehalten, höchstens 8 KiB bzw. 100 ms,
-danach gehen sie als normale Bytes weiter. Das Ergebnis hängt (bis auf diese
-Zeitgrenze) nicht davon ab, wie der Strom in Chunks zerfällt.
+Sequenzen werden über Chunk-Grenzen gehalten, höchstens 8 KiB bzw. 100 ms.
+Das Ergebnis hängt (bis auf diese Zeitgrenze) nicht davon ab, wie der Strom
+in Chunks zerfällt.
+
+Fail-closed (ein Ziel steuert Inhalt und Zeitpunkt jedes Bytes):
+
+* Numerische Codes werden wie im Terminal gelesen, auch mit beliebig vielen
+  führenden Nullen. OSC-Codes und ``CSI t`` über 65535 werden verworfen.
+* Läuft die Zeitgrenze ab, geht eine angefangene ESC- oder CSI-Folge roh
+  hinaus, aber nie ihr Endbyte: Wird die Folge danach verworfen, schickt der
+  Scanner ``CAN``, das Terminal verlässt sie ohne Wirkung. Ein angefangener
+  String (OSC, DCS) geht nur roh hinaus, wenn sein Code schon feststeht und
+  harmlos ist (z. B. OSC 8). Sonst (Titel, OSC 52, Marker, DECRQSS, Code noch
+  offen) verwirft der Scanner ihn bis zum Terminator, höchstens 1 MiB.
+* Gleiches gilt für Strings über 8 KiB und für Strings, die ESC, CAN oder SUB
+  abbricht: Manche Terminals führen einen abgebrochenen OSC trotzdem aus.
+* C1-Einleitungen in UTF-8 (U+0090 DCS, U+0098, U+009B CSI, U+009C ST,
+  U+009D OSC, U+009E, U+009F) ersetzt der Scanner durch ``??``, denn VTE und
+  xterm werten sie als Steuerzeichen.
 """
 
 from __future__ import annotations
@@ -40,6 +56,9 @@ MAX_STRING = 8 * 1024  # OSC, DCS, APC, PM, SOS
 MAX_CSI = 512
 MAX_ESC = 32
 MAX_HOLD_S = 0.1
+MAX_CODE = 0xFFFF  # grössere OSC-Codes und CSI-t-Parameter verwendet kein Programm
+DISCARD_MAX = 1 << 20  # verworfener String: höchstens so viele Bytes bis zum Terminator
+_BIG = 1 << 31
 
 ESC = 0x1B
 BEL = 0x07
@@ -65,17 +84,25 @@ _RUN = re.compile(
 )
 _STR_STOP = re.compile(rb"[\x07\x1b\x18\x1a]")
 _DECRQSS = re.compile(rb"[\x00-\x17\x19\x1c-\x1f0-?]*\$q")
-_PEND_MARKER = re.compile(rb"\x1b[\x00-\x17\x19\x1c-\x1f]*\]0*7701;")
+_DCS_FUNC = re.compile(rb"[\x00-\x17\x19\x1c-\x1f0-?]*([ -/]*)([@-~])")
+_C1_UTF8 = re.compile(rb"\xc2[\x90\x98\x9b-\x9f]")
 _ALT_MODES = {1049, 1047, 47}
 _T_REFLECT = {8, 20, 21}  # Fenstergrösse setzen, Icon- und Titel-Report
 _T_STACK = {22, 23}  # Titel-Stapel
 
 
 def _num(b: bytes) -> int | None:
-    """Numerischer Parameter wie im Terminal (führende Nullen erlaubt)."""
-    if not b or len(b) > 9 or not b.isdigit():
+    """Numerischer Parameter wie im Terminal: beliebig viele führende Nullen.
+
+    Werte mit mehr als neun signifikanten Ziffern ergeben eine grosse Zahl
+    (``> MAX_CODE``), damit Aufrufer sie fail-closed verwerfen können.
+    """
+    if not b or not b.isdigit():
         return None
-    return int(b)
+    sig = b.lstrip(b"0")
+    if len(sig) > 9:
+        return _BIG
+    return int(sig or b"0")
 
 
 @dataclass(frozen=True)
@@ -132,24 +159,42 @@ class ScanResult:
 
 
 class _Out:
-    __slots__ = ("disp", "rec", "items", "offset")
+    __slots__ = ("disp", "rec", "items", "offset", "skip", "fresh")
 
     def __init__(self, offset: int) -> None:
         self.disp: list[bytes] = []
         self.rec: list[bytes] = []
         self.items: list[ScanItem] = []
         self.offset = offset
+        self.skip = 0  # so viele Bytes am Anfang sind schon hinaus (angefangene Folge)
+        self.fresh = 0  # neu angezeigte Bytes
+
+    def _skip(self, b: bytes) -> bytes:
+        if self.skip:
+            n = min(self.skip, len(b))
+            self.skip -= n
+            return b[n:]
+        return b
 
     def plain(self, b: bytes) -> None:
+        b = self._skip(b)
         if b:
             self.disp.append(b)
             self.rec.append(b)
             self.offset += len(b)
+            self.fresh += len(b)
 
     def record_only(self, b: bytes) -> None:
+        b = self._skip(b)
         if b:
             self.rec.append(b)
             self.offset += len(b)
+
+    def cancel(self) -> None:
+        """Ein schon gesendeter Anfang wird verworfen: ``CAN`` beendet ihn im Terminal."""
+        if self.skip:
+            self.skip = 0
+            self.plain(bytes((CAN,)))
 
     def result(self) -> ScanResult:
         return ScanResult(b"".join(self.disp), b"".join(self.rec), self.items)
@@ -169,47 +214,173 @@ class OutputScanner:
         self.alt_screen = False
         self._pend = b""
         self._pend_since = 0.0
+        self._pend_sent = 0  # so viele Bytes von _pend hat das Terminal schon (nur ESC, CSI)
+        self._discard = 0  # >0: verwirft einen String bis zum Terminator (Restbudget)
+        self._discard_esc = False  # letztes verworfenes Byte war ESC (ST möglich)
+        self._c2 = False  # zurückgehaltenes 0xC2 (Anfang einer C1-Einleitung in UTF-8?)
 
     # ------------------------------------------------------------------ API
 
     def feed(self, data: bytes, now: float) -> ScanResult:
         out = _Out(self.offset)
-        since = self._pend_since if self._pend else now
+        if self._c2:
+            data = b"\xc2" + data
+            self._c2 = False
+        if b"\xc2" in data:
+            if data.endswith(b"\xc2"):
+                data = data[:-1]
+                self._c2 = True
+            data = _C1_UTF8.sub(b"??", data)
+        sent = 0
         if self._pend:
+            sent = self._pend_sent
+            # Neue Bytes einer schon gesendeten Folge haben eine eigene Frist.
+            since = self._pend_since if sent < len(self._pend) else now
             data = self._pend + data
             self._pend = b""
-        elif ESC not in data:
+            self._pend_sent = 0
+        elif ESC not in data and not self._discard:
             out.plain(data)
             self.offset = out.offset
             return out.result()
-        self._scan(data, out, since, now)
+        else:
+            since = now
+        self._scan(data, out, since, now, sent)
         self.offset = out.offset
         return out.result()
 
     def deadline(self) -> float | None:
-        return self._pend_since + MAX_HOLD_S if self._pend else None
+        if self._pend and self._pend_sent < len(self._pend):
+            return self._pend_since + MAX_HOLD_S
+        return None
 
     def pending(self) -> int:
-        return len(self._pend)
+        return len(self._pend) + (1 if self._c2 else 0)
 
     def expire(self, now: float) -> ScanResult:
-        """Gibt eine zu lange gehaltene Sequenz als normale Bytes weiter."""
+        """Behandelt eine zu lange gehaltene Folge (Architektur 3.8, fail-closed).
+
+        ESC und CSI gehen roh hinaus (ohne Endbyte, siehe Modul-Doku), Strings nur
+        mit feststehendem harmlosem Code; alles andere wird bis zum Terminator
+        verworfen. ``now=inf`` (Ende) gibt auch ein zurückgehaltenes 0xC2 frei.
+        """
         out = _Out(self.offset)
-        if self._pend and now >= self._pend_since + MAX_HOLD_S:
-            pend, self._pend = self._pend, b""
-            if _PEND_MARKER.match(pend):
-                out.items.append(Forged("malformed", out.offset))
-            out.plain(pend)
+        final = now == float("inf")
+        if self._pend and (final or (self._pend_sent < len(self._pend)
+                                     and now >= self._pend_since + MAX_HOLD_S)):
+            self._expire_pending(out, final)
+        if final:
+            if self._c2:
+                self._c2 = False
+                out.plain(b"\xc2")
+            self._discard, self._discard_esc = 0, False
         self.offset = out.offset
         return out.result()
 
+    def _expire_pending(self, out: _Out, final: bool) -> None:
+        pend, sent = self._pend, self._pend_sent
+        k = 1
+        while k < len(pend) and _is_c0_exec(pend[k]):
+            k += 1
+        c = pend[k] if k < len(pend) else None
+        kind = {0x5D: "osc", 0x50: "dcs", 0x5F: "apc", 0x5E: "apc", 0x58: "apc"}.get(c or 0)
+        out.skip = sent
+        if kind is None:  # ESC allein, ESC mit Zwischenzeichen, CSI: Endbyte fehlt noch
+            out.plain(pend)
+            out.skip = 0
+            if final:
+                self._pend, self._pend_sent = b"", 0
+            else:
+                self._pend_sent = len(pend)
+            return
+        self._pend, self._pend_sent = b"", 0
+        cls = _string_class(pend[k + 1 :], kind)
+        if cls == "safe":
+            out.plain(pend)
+            out.skip = 0
+            return
+        self._report_dropped(cls, len(pend), out, "expired")
+        out.cancel()
+        self._discard = 0 if final else DISCARD_MAX - len(pend)
+        self._discard_esc = False
+
+    def _report_dropped(self, cls: str, length: int, out: _Out, why: str) -> None:
+        if cls == "marker":
+            out.items.append(Forged("malformed", out.offset))
+        elif cls == "osc52":
+            out.items.append(Osc52(length, out.offset, False))
+        else:
+            out.items.append(Dropped(f"{cls}_{why}", out.offset))
+
     # ------------------------------------------------------------- Parsing
 
-    def _scan(self, data: bytes, out: _Out, since: float, now: float) -> None:
+    def _eat_discard(self, data: bytes, i: int) -> int:
+        """Verwirft Bytes eines entfernten Strings bis zum Terminator (BEL, ST, CAN, SUB).
+
+        Ein ESC ohne folgendes ``\\`` beendet den String und beginnt eine neue Folge.
+        """
+        n = len(data)
+        if self._discard_esc:
+            self._discard_esc = False
+            if i < n and data[i] == 0x5C:
+                self._discard = 0
+                return i + 1
+            self._discard = 0
+            return i  # ESC war Anfang einer neuen Folge: hier geht es weiter
+        stop = min(n, i + self._discard)
+        m = _STR_STOP.search(data, i, stop)
+        if m is None:
+            self._discard -= stop - i
+            if self._discard <= 0:
+                self._discard = 0
+            return stop
+        t = m.start()
+        b = data[t]
+        if b == ESC:
+            if t + 1 >= n:
+                self._discard_esc = True
+                return n
+            self._discard = 0
+            return t + 2 if data[t + 1] == 0x5C else t
+        self._discard = 0
+        return t + 1  # BEL, CAN, SUB gehören zum entfernten String
+
+    def _scan(self, data: bytes, out: _Out, since: float, now: float, sent: int = 0) -> None:
         n = len(data)
         i = 0
+        if self._discard_esc and not self._discard:
+            self._discard_esc = False
+        if self._discard_esc:
+            # ESC am Ende des verworfenen Strings: ST oder Anfang einer neuen Folge
+            i = self._eat_discard(data, 0)
+            if self._discard_esc:
+                return
+            if i == 0:
+                data = b"\x1b" + data
+                n = len(data)
+        if sent:
+            # Das Terminal hat den Anfang dieser Folge schon (abgelaufene Frist). Wird
+            # sie verworfen oder abgebrochen, beendet CAN sie dort ohne Wirkung.
+            out.skip = sent
+            out.fresh = 0
+            nxt = self._escape(data, 0, out)
+            if nxt < 0:
+                out.skip = 0
+                self._pend = data
+                self._pend_sent = sent
+                self._pend_since = since
+                return
+            if out.skip or not out.fresh:
+                out.skip = 0
+                out.plain(bytes((CAN,)))
+            i = nxt
         run = _RUN.match if self._fast else None
         while i < n:
+            if self._discard:
+                i = self._eat_discard(data, i)
+                if self._discard_esc:
+                    return
+                continue
             if run is not None:
                 m = run(data, i)
                 if m is not None:
@@ -240,7 +411,8 @@ class OutputScanner:
         while k < n and _is_c0_exec(data[k]):
             k += 1
             if k - j > MAX_ESC:
-                out.plain(data[j:k])
+                # Das Terminal bliebe nach ESC im Escape-Zustand: ESC nie weitergeben.
+                self._drop_esc(data, j, k, out)
                 return k
         if k >= n:
             return -1
@@ -264,7 +436,7 @@ class OutputScanner:
             while p < n and (0x20 <= data[p] <= 0x2F or _is_c0_exec(data[p])):
                 p += 1
                 if p - j > MAX_ESC:
-                    out.plain(data[j:p])
+                    self._drop_esc(data, j, p, out)
                     return p
             if p >= n:
                 return -1
@@ -275,10 +447,18 @@ class OutputScanner:
             return p
         # Zweibyte-Sequenz (ESC 7, ESC c ...) oder ESC vor einem Nicht-ASCII-Byte
         if c >= 0x80:
-            out.plain(data[j:k])
+            self._drop_esc(data, j, k, out)  # manche Parser lesen 0xA0-0xFF wie 0x20-0x7F
             return k
         out.plain(data[j : k + 1])
         return k + 1
+
+    @staticmethod
+    def _drop_esc(data: bytes, j: int, end: int, out: _Out) -> None:
+        """Gibt ``data[j:end]`` ohne das einleitende ESC weiter (C0 und Zwischenzeichen)."""
+        if out.skip:
+            out.cancel()  # das ESC ist schon hinaus: CAN beendet es
+            out.skip = 0
+        out.plain(data[j + 1 : end])
 
     # ---------------------------------------------------------------- CSI
 
@@ -304,20 +484,25 @@ class OutputScanner:
             elif b in (CAN, SUB):
                 out.plain(data[j : p + 1])
                 return p + 1
-            elif b == ESC or b >= 0x80:
-                out.plain(data[j:p])
+            elif b == ESC:
+                out.plain(data[j:p])  # ESC bricht auch im Terminal ab
+                return p
+            elif b >= 0x80:
+                self._drop_esc(data, j, p, out)  # Terminals behandeln das uneinheitlich
                 return p
             # C0 und DEL: ausgeführt bzw. ignoriert, die Sequenz läuft weiter
             p += 1
             if p - j > MAX_CSI:
-                out.plain(data[j:p])
+                # Überlange CSI nie weitergeben: das Terminal könnte sie mit einem
+                # späteren Endbyte (t) abschliessen.
+                out.items.append(Dropped("csi_oversize", out.offset))
                 return p
         return -1
 
     def _csi_done(self, seq: bytes, params: bytes, inter: bytes, final: bytes, out: _Out) -> None:
         if final == b"t" and not inter and params[:1] not in (b"<", b"=", b">", b"?"):
             first = _num(params.split(b";", 1)[0].split(b":", 1)[0])
-            if first in _T_REFLECT:
+            if first in _T_REFLECT or (first is not None and first > MAX_CODE):
                 out.items.append(Dropped("csi_t", out.offset))
                 return
             if first in _T_STACK:

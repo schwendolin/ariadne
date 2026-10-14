@@ -67,9 +67,7 @@ Vier Regeln tragen die Sicherheit des Fernzugriffs (A bis C), alle aus der Red-T
 3. **Der Mac-Browser ist eine Insel.** Das Ariadne-Profil erreicht nur `127.0.0.1`, hat keine Erweiterungen und speichert nichts. Selbst eine Lücke in der Oberfläche kann keine Daten ins Internet schicken.
 4. **Sitzungen sterben mit dem Tunnel.** Ein Token gilt nur über die SSH-Verbindung, über die du dich angemeldet hast, und endet mit ihr, mit `ariadne lock` und mit `project close`.
 
-Weil die Schule die VM zurücksetzen und beim Archivieren löschen kann, gehört eine mit age verschlüsselte Sicherung ausserhalb der VM fest dazu; `ariadne backup` rückt von v0.2 nach v0.1. Auf SmartLearn gehören nur Lab-Daten, denn wer den Hypervisor betreibt, sieht Bildschirm, Tastatur und Arbeitsspeicher der VM.
-
-Was du jetzt tust, steht in «Auf einen Blick». Alles Weitere richten später zwei Skripte ein (Abschnitt 7).
+Sicherung, Lab-Daten und die nächsten Schritte stehen in «Auf einen Blick». Alles Weitere richten später zwei Skripte ein (Abschnitt 7).
 
 ## 2 Bild der Lösung
 
@@ -547,7 +545,6 @@ Das ist das heutige Design der Architektur, ohne Netzweg und ohne Regelfrage. Al
 
 - Auflösung der Kali an den Mac-Bildschirm anpassen: `xrandr` zeigt Ausgänge und Modi, dann z. B. `xrandr --output Virtual1 --mode 1920x1080`.
 - Webkonsole im Vollbild des Browsers, in Xfce das Terminal links und Firefox rechts, die Karte auf einem eigenen Arbeitsbereich.
-- Die Webkonsole nur in Chrome oder Safari und in einem eigenen Profil ohne Erweiterungen (3.1): Bei Weg E tippst du die Passphrase von `ariadne unlock` durch diese Seite.
 - Die Webkonsole zeigt einen Bildschirm. Ob die VMRC unter macOS die VM auf zwei Monitore verteilt, ist zu verifizieren; das wäre der Zweitbildschirm ohne Netz.
 - Mit 4 GB RAM wird es eng, wenn Burp, Firefox und die Karte gleichzeitig laufen. Eine kleinere Karte oder die Tabellenansicht hilft.
 - Was auf der Konsole steht, sieht eine Lehrperson im Beobachtungsmodus von SmartLearn mit, also auch das Dashboard. Vor dem Unterricht den Präsentationsmodus einschalten.
