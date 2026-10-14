@@ -6,7 +6,7 @@
 
 ## 1 Kurzfassung
 
-**Bedienung.** Dass jedes Terminal aufgenommen wird, ist schon gebaut: Jede neue zsh- oder bash-Shell startet mit einem eigenen Shim, auch in parallelen Fenstern, Tabs und tmux-Panes. Umständlich ist der Rest. Heute braucht es nach jedem Login `ariadne unlock`, `ariadne project open` und `ariadne rec on`. Vorschlag: ein Befehl `ariadne start lame 10.10.10.3` pro Auftrag und nach jedem Neustart, mit einmal Passphrase. Solange ein Projekt aktiv ist, nehmen alle Terminals auf. Den REC-Knopf ersetzt eine Pause pro Terminal, die nach 10 Minuten von selbst endet.
+**Bedienung.** Dass jedes Terminal aufgenommen wird, ist schon gebaut: Jede neue zsh- oder bash-Shell startet mit einem eigenen Shim, auch in parallelen Fenstern, Tabs und tmux-Panes. Umständlich ist der Rest. Heute braucht es nach jedem Login `ariadne unlock`, `ariadne project open` und `ariadne rec on`. Vorschlag: ein Befehl `ariadne start lame 10.10.10.3` pro Auftrag und nach jedem Neustart; die Passphrase tippst du dabei einmal. Solange ein Projekt aktiv ist, nehmen alle Terminals auf. Den REC-Knopf ersetzt eine Pause pro Terminal, die nach 10 Minuten von selbst endet.
 
 **Zeitstempel.** Der Shim stempelt jede gelesene Ausgabe schon heute auf die Nanosekunde. Die Auswertung benutzt aber die Speicherzeit im Daemon und liegt damit bis etwa 250 ms daneben. Vorschlag: überall die Shim-Zeit, auch für Befehlsanfang und -ende. Realistisch ist dann etwa 1 ms Genauigkeit in der VM, und die Reihenfolge über alle Terminals stimmt. Von deinen Eingaben speichert Ariadne die lokale Befehlszeile, aber nie einzelne Tastendrücke. In Remote-Shells kommt nur der Zeitpunkt jedes Enter dazu.
 
@@ -263,13 +263,13 @@ Ein Ausschnitt steht in Beispiel B.
 
 Projekt `lame`, Scope 10.10.10.3, Kali tun0 10.10.14.5, Terminal T1.
 
-1. **14:02:11.204** C-Marker mit `nmap -Pn -sV -oA scans/lame 10.10.10.3`, Offset 18432. Der Mark-Hook fragt `ip route get 10.10.10.3` und bekommt Quell-IP 10.10.14.5 (kein Paket ans Ziel). `companions()` meldet `scans/lame.xml`, `.nmap` und `.gnmap`. (gebaut)
+1. **14:02:11.204** C-Marker mit `nmap -Pn -sV -oA scans/lame 10.10.10.3`, Offset 18432. Der Mark-Hook fragt mit `ip route get 10.10.10.3` die eigene Routing-Tabelle und bekommt Quell-IP 10.10.14.5. Das ist eine lokale Abfrage beim Kernel, kein Paket ans Ziel. `companions()` meldet `scans/lame.xml`, `.nmap` und `.gnmap`. (gebaut)
 2. **14:02:25.318** D-Marker, Exit 0. Die Einheit `T1@18432` ist fertig. Der Daemon liest `scans/lame.xml` sicher ein (`file.observed`, `produced_by_cmd = T1@18432`), daraus wird eine Datei-Einheit. (gebaut)
 3. **Parser im Worker:** `nmap.text` liefert die Werte für 21 Claims, darunter vsftpd 2.3.4 auf tcp/21 (Zeile 5), OpenSSH 4.7p1 Debian 8ubuntu1 auf tcp/22, Samba smbd 3.X - 4.X auf tcp/139 und tcp/445. `nmap.xml` liefert dieselben mit XPath. (gebaut)
 4. **Claim** tcp/21 `service.version` «2.3.4» mit zwei Quellen. Heute 0.99 (zwei Einheiten, noisy-OR), mit Evidenzgruppen 0.95, weil beide zu `T1@18432` gehören.
 5. **Spur:** Heute sind alle Claims Kandidaten; für die Textausgabe allein gemessen 18 Einträge in einer Gruppe, also eine Sammelbestätigung. Mit der Drei-Spuren-Regel werden alle `auto`, und die Zeitachse zeigt «nmap 14:02: 21 Werte übernommen [Rückgängig]».
 6. **Karte:** Der Host tritt aus dem Nebel und wird entsättigt («Versionen bekannt»), mit vier Services. Unter «Als Nächstes» stehen Denkanstösse aus Regeln (geplant): Versionsrecherche für vsftpd 2.3.4 mit der Vorlage `searchsploit vsftpd 2.3.4`, anonymer Zugriff auf FTP und SMB, Full-Port-Scan, weil nur die Top-1000-Ports gescannt wurden. Ariadne führt nichts davon aus.
-7. **14:06** `nmap -Pn -sC -sV -p 139,445 10.10.10.3` liefert für tcp/445 «3.0.20-Debian». Heute ein Konflikt mit «3.X - 4.X», mit der Prädikat-Art `version` eine Präzisierung: Die Karte zeigt 3.0.20-Debian, der alte Wert steht im Verlauf, und die Versionsrecherche nennt Samba 3.0.20 (CVE-2007-2447).
+7. **14:06** `nmap -Pn -sC -sV -p 139,445 10.10.10.3` liefert für tcp/445 «3.0.20-Debian». Heute ein Konflikt mit «3.X - 4.X», mit der Prädikat-Art `version` eine Präzisierung: Die Karte zeigt 3.0.20-Debian, der alte Wert steht im Verlauf, und der Denkanstoss «Version recherchieren» nennt jetzt Samba 3.0.20 statt «3.X - 4.X». Die passende CVE (CVE-2007-2447, usermap_script) liefert erst dein eigenes `searchsploit samba 3.0.20` über den geplanten Parser oder die KI als gekennzeichnete Hypothese. Ariadne schlägt selbst nichts im Internet nach.
 8. **Später** findet `-p-` tcp/3632 mit distccd. Heute entstünde laut Code ein Scheinkonflikt zwischen Text und XML, mit Evidenzgruppen ist die XML der Hauptbeleg.
 9. **Zeile im Lagebild:** `T41 14:02:11 T1 kali nmap -Pn -sV -oA scans/lame 10.10.10.3 exit=0 -> 1 Host, 4 Services`
 
@@ -278,10 +278,10 @@ Projekt `lame`, Scope 10.10.10.3, Kali tun0 10.10.14.5, Terminal T1.
 Projekt `portal`, Scope `10.20.30.0/24` und `*.firma.lab`, Kali 10.10.14.5. Der Foothold kommt über den Upload aus Beispiel 4.6.
 
 1. **14:31:02.118** T2: `nc -lvnp 4444`. Die Kontextregeln legen eine Stufe `revshell` mit Host «unbekannt» an. (gebaut)
-2. **14:31:40.902** `connect to [10.10.14.5] from (UNKNOWN) [10.20.30.15] 51732`. `listener.callback` erkennt den ersten Treffer. (gebaut) Heute folgt «Kontext klären» und `F12 h`. Mit dem Vorschlag setzt Ariadne den Host selbst, Titel `[REC portal] 10.20.30.15 (auto)`, dazu der Vorschlag «Schlüsselschritt Foothold?».
+2. **14:31:40.902** `connect to [10.10.14.5] from (UNKNOWN) [10.20.30.15] 51732`. `listener.callback` erkennt den ersten Treffer. (gebaut) Heute steht in der Inbox «Kontext klären» mit 10.20.30.15 als Vorschlag, setzen musst du den Host mit `F12 h`. Mit dem Vorschlag setzt Ariadne den Host selbst, Titel `[REC portal] 10.20.30.15 (auto)`, dazu der Vorschlag «Schlüsselschritt Foothold?».
 3. **14:32:05.377** `cat /etc/passwd`, Enter. Eingabemarke, Echo stimmt, Einheit `remote_cmd`. Der Formparser `passwd` (31 von 31 Zeilen passen, Befehl passt) liefert für jedes Konto uid und Shell, zum Beispiel `portaladm:x:1000:1000:Portal Admin,,,:/home/portaladm:/bin/bash`.
 4. **14:32:41.020** `sudo -l` meldet `(root) NOPASSWD: /usr/bin/find` für www-data. `sudo.list` liefert `identity.sudo` (runas root, nopasswd, cmd `/usr/bin/find`).
-5. **14:33:12.554** `cat config.php` zeigt in Zeile 4 `$db_pass = 'Portal!2024';`. `kv.secrets` liefert ein Secret (nur als HMAC gespeichert) mit `secret.found_in config.php`, das Konto `portal_app` für MySQL auf 10.20.30.15 und den Hinweis «MySQL nur lokal» aus `db_host = 'localhost'`.
+5. **14:33:12.554** `cat config.php` zeigt in Zeile 4 `$db_pass = 'Portal!2024';`. `kv.secrets` liefert ein Secret (Claim-Schlüssel als HMAC, Klartext nur verschlüsselt in `secret_value`, überall maskiert) mit `secret.found_in config.php`, das Konto `portal_app` für MySQL auf 10.20.30.15 und den Hinweis «MySQL nur lokal» aus `db_host = 'localhost'`.
 6. **Heute** wird aus diesen drei Befehlen kein Fakt: Sie liegen in einem Segment, das erst nach dem Ende von `nc` oder 10 Minuten Stille geparst wird, und `regex.net` findet weder Passwort noch Konto noch sudo-Regel. **Mit dem Vorschlag** laufen alle Werte über die Spur «automatisch». Der Host trägt Zugriff user und den Zähler «3 Login-Konten, +28 Systemkonten», auf der Credential-Ebene steht `portal_app/***` an MySQL als «ungetestet», dazu das Prüfziel `PZ-CRED-REUSE`. Ariadne testet nichts selbst.
 7. **Finding-Vorschläge** im Reiter Findings: «Datenbank-Passwort im Klartext in config.php, lesbar für www-data» (R-SECRET-IN-CONFIG, Vorschlag Mittel) und «www-data darf /usr/bin/find als root ohne Passwort ausführen» (R-SUDO-GTFO, Vorschlag Hoch, Status «unbelegt»). Führst du `sudo find . -exec /bin/sh \; -quit` und `id` aus, erkennt `shell.context` `uid=0(root)`. Daraus werden Zugriff root, der Vorschlag «Schlüsselschritt privesc?» und ein belegter zweiter Vorschlag.
 8. **Lagebild** für die KI, ohne Rohtext:
@@ -303,16 +303,18 @@ Heute gibt es für Web nur URL-Mentions aus `regex.net` und zwei ungenutzte Prä
 
 ### 4.1 Empfehlung: ein Flugschreiber für den Browser (Vorschlag)
 
-Im Terminal sitzt der Shim zwischen Terminal und Shell. Im Browser übernimmt diese Rolle ein **Aufzeichnungs-Proxy** zwischen einem eigenen Firefox-Profil und dem Ziel. Er leitet nur weiter, was der Browser schickt, und schreibt beide Richtungen mit. Für Web ist der Weg zu verlässlichen Fakten sogar kürzer als im Terminal: HTTP ist schon strukturiert, jede Anfrage hat exakte Grenzen, und das Ziel steht in jeder Anfrage. Die Parser lesen Status, Header und HTML und müssen nichts erraten.
+Im Terminal sitzt der Shim zwischen Terminal und Shell. Im Browser übernimmt diese Rolle ein **Aufzeichnungs-Proxy** zwischen einem eigenen Firefox-Profil und dem Ziel. Er leitet nur weiter, was der Browser schickt, und schreibt beide Richtungen mit. Ehrlich gesagt heisst «weiterleiten»: Der Recorder löst den Namen auf und baut die Verbindung zum Ziel auf, so wie es ohne Proxy Firefox täte. Jede Verbindung geht auf eine Anfrage deines Browsers zurück, Ariadne fügt keine hinzu. Für Web ist der Weg zu verlässlichen Fakten sogar kürzer als im Terminal: HTTP ist schon strukturiert, jede Anfrage hat exakte Grenzen, und das Ziel steht in jeder Anfrage. Die Parser lesen Status, Header und HTML und müssen nichts erraten.
 
 `ariadne browser [URL]` richtet beim ersten Aufruf alles ein, danach öffnet es nur noch den Browser:
 
 1. **Profil pro Projekt** unter `~/ariadne/<slug>/.browser/` (0700), gelöscht mit dem Projekt.
-2. **CA pro Projekt,** per `certutil` nur in dieses Profil importiert. Nie in den Systemspeicher, nie über `policies.json`, nie ins UI-Profil (A7.2.5). `doctor` prüft das.
+2. **CA pro Projekt,** beim Einrichten einmalig per `certutil` (lokal, aus `libnss3-tools`) nur in dieses Profil importiert. Nie in den Systemspeicher, nie über `policies.json`, nie ins UI-Profil (A7.2.5). `doctor` prüft das.
 3. **`user.js`:** Proxy fest auf `127.0.0.1:<projektport>`, auch für localhost, damit Seiten hinter `ssh -L` mitlaufen. Aus sind DoH (sonst gehen Zielnamen an einen DoH-Anbieter), HTTP/3, WebRTC, Prefetch, Suchvorschläge in der Adressleiste, Safe Browsing, Telemetrie, Passwortspeicher und Festplatten-Cache. Ein farbiger Fensterrahmen zeigt «Ariadne-Testbrowser: lame».
-4. **Recorder:** `mitmdump` aus dem Kali-Paket mit einem kleinen Ariadne-Addon, das nur die Standardbibliothek und die stabilen Hooks (`client_connected`, `request`, `response`, `error`) nutzt. Er läuft als eigener Prozess ohne Ariadne-Schlüssel, wie der Shim, und startet mit dem Projekt. Nur der Port des aktiven Projekts lauscht. Ein eigener Prozess ist auch nötig, weil mitmproxy ab 12.2.2 Python 3.12 verlangt, Ariadne aber 3.11 bis 3.13 unterstützt.
+4. **Recorder:** `mitmdump` aus dem Kali-Paket mit einem kleinen Ariadne-Addon, das nur die Standardbibliothek und die stabilen Hooks (`client_connected`, `tls_clienthello`, `request`, `response`, `error`) nutzt. Liegen Name und Adresse eines Ziels beide ausserhalb des Scopes, setzt das Addon in `tls_clienthello` die Verbindung auf Durchreichen: Sie wird nicht entschlüsselt, der Recorder sieht nur den Namen aus dem TLS-Handshake (SNI). Wie das mit `connection_strategy=lazy` zusammenspielt, ist zu verifizieren. Er läuft als eigener Prozess ohne Ariadne-Schlüssel, wie der Shim, und startet mit dem Projekt. Nur der Port des aktiven Projekts lauscht. Ein eigener Prozess ist auch nötig, weil mitmproxy ab 12.2.2 Python 3.12 verlangt, Ariadne aber 3.11 bis 3.13 unterstützt.
 5. **Aufnahme wie im Terminal:** an, solange das Projekt aktiv ist. In der Pause leitet der Recorder weiter, und der Daemon zählt nur die Lücke.
 6. **Rückfall:** `ariadne import` für HAR (DevTools, ZAP, mitmproxy) und Burp-XML («Save items» geht auch in der Community-Version).
+
+Im Alltag heisst das: Zielseiten öffnest du im Testbrowser, Recherche (Suchmaschine, Exploit-DB, Doku) im normalen Browser. Was du im Testbrowser per «Seitenquelltext anzeigen» oder in den DevTools unter «Netzwerk» siehst, hat der Recorder schon als Antwort gespeichert.
 
 Die Wege im Vergleich:
 
@@ -332,7 +334,7 @@ Warum nicht gleich die Erweiterung: Sie braucht eine Signatur (ob `xpinstall.sig
 
 **Vor dem Journal:**
 
-- Der eine `ScopeMatcher` prüft Host der URL und verbundene IP. `in` wird gespeichert. Name unbekannt, IP `in`: gespeichert, und Ariadne fragt «Name portal.firma.lab in den Scope?». Fremde Domains werden nur gezählt, ihr Pfad, Header und Body erreichen nie die Platte, eigene Konten und Google-Suchen also auch nicht.
+- Der eine `ScopeMatcher` prüft Host der URL und verbundene IP. `in` wird gespeichert. Name unbekannt, IP `in`: gespeichert, und Ariadne fragt «Name portal.firma.lab in den Scope?». Fremde Domains werden nur gezählt. Ihr TLS wird durchgereicht statt entschlüsselt, Pfad, Header und Body erreichen weder den Speicher des Recorders noch die Platte. Eigene Konten und Suchanfragen im Testbrowser bleiben damit draussen. Bei unverschlüsseltem HTTP an fremde Hosts sieht der Recorder die Anfrage zwar, verwirft sie aber vor dem Journal.
 - Der Redaktor läuft über Anfragezeile, Header und dekodierte Bodies, neu auch in der Base64-Variante für Basic-Auth. `Cookie`, `Authorization` und Passwortfelder sind Belege der Testsitzung: nicht geschwärzt, aber in UI, Export und KI-Payload maskiert. Bilder, Fonts und Videos nur als Hash und Grösse.
 
 **Einheit:** neuer `UnitKind` `http`, eine pro Austausch mit Textantwort oder interessanten Kopfzeilen (Redirect, 401, Set-Cookie). Minifiziertes JavaScript wird an Token-Grenzen umbrochen, sonst schneidet die 16-KiB-Grenze pro Zeile Endpunkte ab. Importe zerlegt ein Expander in virtuelle `http`-Einheiten. Provenienz: `{"t":"http","exchange":"<id>","part":"res.body","lines":[a,b]}`.
@@ -370,15 +372,18 @@ Terminal-Werkzeuge wie gobuster, ffuf und `curl -i` speisen denselben Baum, weil
 - **Recorder im Datenweg:** Stürzt er ab, zeigt der Testbrowser Fehlerseiten, bis der Daemon ihn neu startet. Eine sichtbare Störung ist mir lieber als eine stille Lücke.
 - **Login-Erkennung:** Manche Apps antworten auch bei falschem Passwort mit 302. Darum heisst das Ergebnis zuerst «vermutlich» und wird erst durch die Folgeseite oder durch dich bestätigt.
 - **Screenshots** hängen in v0.2 nur über Zeit und Fenstertitel an der Seite (Desktop-Kürzel, denn `F12` öffnet im Browser die DevTools). Exakt über die `exchange_id` geht es erst mit der Erweiterung.
+- **Nur der Testbrowser:** Was du im normalen Browser, in Burp ohne Recorder dahinter oder mit `curl` ohne Proxy tust, sieht der Recorder nicht. `curl` und Co. erfasst dafür der Shim im Terminal.
+- **Speicher:** Moderne Webseiten laden pro Aufruf oft mehrere MB JavaScript. Ohne Gegenmassnahmen wächst das Projekt schnell (Abschnitt 6).
 - **Aufwand** laut Bericht Browser: grob 80 bis 110 Stunden für einen Minimal-Schnitt (Recorder, `web.exchange`, `http.meta`, `html.basic`, `ariadne show web`), der ganze v0.2-Teil etwa ein halbes v0.1.
 
 ### 4.5 Sicherheit
 
-- **Nur passiv.** Der Recorder leitet ausschliesslich weiter, was der Browser schickt. Er crawlt nicht, lädt keine Favicons, prüft keine Pfade und verändert nichts (`anticache` und `anticomp` aus); `connection_strategy=lazy` verbindet erst, wenn der Browser etwas will. Weil der Tab-Screenshot ab v0.3 keine Anfrage erzeugt, braucht es die Webshots nicht mehr, und E10 hat keine Ausnahme mehr.
-- **Scope vor dem Journal** wie oben. Im Kundenprofil sperrt der Recorder fremde Ziele ganz. Die Ports von Ariadne (7330) und Ollama (11434) sind für das Testprofil immer gesperrt.
+- **Nur passiv.** Der Recorder leitet ausschliesslich weiter, was der Browser schickt. Er crawlt nicht, lädt keine Favicons, prüft keine Pfade und verändert nichts (`anticache` und `anticomp` aus); `connection_strategy=lazy` verbindet erst, wenn der Browser etwas will. Zu verifizieren ist, dass mitmproxy dabei auch für die Zertifikatsdaten (`upstream_cert`) keine Verbindung aufbaut, bevor der Browser eine Anfrage schickt. Weil der Tab-Screenshot ab v0.3 keine Anfrage erzeugt, braucht es die Webshots nicht mehr, und E10 hat keine Ausnahme mehr.
+- **Namensauflösung:** Mit Proxy löst der Recorder die Namen auf, die du im Testbrowser aufrufst, nicht mehr Firefox. Es sind dieselben Abfragen, keine zusätzlichen. E49 («Ariadne löst Zielnamen nie per DNS auf») müsste dafür eine benannte Ausnahme bekommen: nur für Namen, die der Testbrowser anfragt. Das ist Teil von Frage 7.
+- **Scope vor dem Journal** wie oben. Im Kundenprofil sperrt der Recorder fremde Ziele ganz. Anmeldungen über fremde Anbieter (SSO, etwa Microsoft Entra ID) gehen dann nur mit einer Ausnahme pro Domain, die du ausdrücklich freigibst. Die Ports von Ariadne (7330) und Ollama (11434) sind für das Testprofil immer gesperrt.
 - **Wer den Proxy benutzen darf:** Das Addon prüft bei `client_connected` über `/proc`, ob die Verbindung vom Firefox mit genau diesem Profil kommt, damit weder ein anderer lokaler Prozess noch ein Tunnel vom Ziel ihn nutzt. Das ist noch zu verifizieren.
 - **Feindliche Inhalte:** Die Web-UI rendert nie HTML vom Ziel (kein iframe, kein `{@html}`). Quelltext erscheint als escapter Text mit Zeilennummern. `javascript:`- und `data:`-URLs nur als Text, SVG nie als Bild. HAR wird gestreamt gelesen. Burp-XML braucht in `parsers/safe.py` eine enge Ausnahme: ein internes DTD-Subset nur mit `<!ELEMENT>` und `<!ATTLIST>`, nie `<!ENTITY>`.
-- **Recht** (Laienhinweis): Ohne Erlaubnis kann das unter Art. 143bis StGB fallen. Benutzerlisten aus Admin-Bereichen sind Personendaten nach DSG; im Kundenprofil werden E-Mail-Spalten im Export maskiert.
+- **Recht:** Benutzerlisten aus Admin-Bereichen sind Personendaten nach DSG; im Kundenprofil werden E-Mail-Spalten im Export maskiert. Mehr in Abschnitt 6.
 
 ### 4.6 Beispiel: Firmenportal mit Admin-Seite
 
@@ -387,11 +392,11 @@ Projekt `portal`, Scope `*.firma.lab` und `10.20.30.0/24`, ein früheres nmap ha
 | Zeit | Du | Ariadne |
 |---|---|---|
 | 14:18:30 | `ariadne browser http://portal.firma.lab/` | `web.open`, Testbrowser mit Rahmen «portal» |
-| 14:20:03.410 | Startseite | `ex-01` GET / 200 an 10.20.30.15:80, neun Ressourcen, `fonts.googleapis.com` nur als Zähler. `http.meta`: Titel «Firma Portal», Server `Apache/2.4.41 (Ubuntu)` passt zu nmap, `host.name portal.firma.lab` an 10.20.30.15. `html.basic`: Kommentar in Zeile 41 `<!-- TODO: /admin-old abschalten! Zugang Helpdesk: helpdesk / Helpdesk2019 -->` ergibt `/admin-old` als Nebel und einen Credential-Kandidaten «vom Ziel angeboten» zum Klären. `js.endpoints` findet `/api/v1/users/me` (Nebel) |
+| 14:20:03.410 | Startseite | `ex-01` GET / 200 an 10.20.30.15:80, neun Ressourcen, `fonts.googleapis.com` nur als Zähler. `http.meta`: Server `Apache/2.4.41 (Ubuntu)` passt zu nmap, `host.name portal.firma.lab` an 10.20.30.15. `html.basic`: Titel «Firma Portal», Kommentar in Zeile 41 `<!-- TODO: /admin-old abschalten! Zugang Helpdesk: helpdesk / Helpdesk2019 -->` ergibt `/admin-old` als Nebel und einen Credential-Kandidaten «vom Ziel angeboten» zum Klären. `js.endpoints` findet `/api/v1/users/me` (Nebel) |
 | 14:20:41.552 | Klick auf `/admin-old` | `ex-11` 301, `ex-12` 200 «AcmeAdmin Anmeldung»: Formular POST `login.php` mit `username`, `password` und verstecktem `csrf_token`. Footer Zeile 88 «AcmeAdmin 2.3.1» ergibt Produkt und Version der App. Im Baum wird `/admin-old/` fest, mit Schloss und Admin-Kennzeichen. Denkanstösse: Standard-Zugang prüfen, Version recherchieren |
 | 14:22:17.882 | Anmeldung mit helpdesk und Helpdesk2019 | `ex-14` POST, 302 nach `users.php`, `Set-Cookie: ACMESESSID` ohne HttpOnly. Body verschlüsselt, Passwort überall maskiert. `http.login`: Credential-Test «vermutlich erfolgreich». Das Secret hat denselben HMAC wie der Kandidat aus dem Kommentar, beide fallen zusammen |
 | 14:22:18.050 | | `ex-15` `users.php` 200 «Benutzerverwaltung», «Angemeldet als helpdesk (Administrator)». Die Folgeseite stützt die Anmeldung; unter «Klären» steht «Anmeldung erfolgreich: helpdesk @ AcmeAdmin», ein Tastendruck bestätigt. Danach `access.app admin`, Schlüssel am Service 80. `html.table`: Zähler «23 Portal-Benutzer». Denkanstoss `PZ-CRED-REUSE` für SSH mit Lockout-Hinweis |
-| 14:22:30 | Screenshot per Desktop-Kürzel | hängt an `users.php` |
+| 14:22:30 | Screenshot per Desktop-Kürzel | hängt über Zeit und Fenstertitel an `users.php` (exakt über `ex-15` erst mit der Erweiterung, 4.4) |
 | 14:30:12 | Upload von `shell.php` über `/admin-old/upload.php` | Antwort «gespeichert: /uploads/shell.php» |
 | 14:31:39.802 | Abruf von `/uploads/shell.php` (keine Antwort) | 1,1 s später kommt in T2 der Callback (Beispiel B). Die gemeinsame Zeitachse verbindet beides: Vorschlag «Schlüsselschritt Foothold über Datei-Upload» mit beiden Belegen und der Artefakt-Eintrag «/uploads/shell.php entfernen» für die Cleanup-Liste |
 
@@ -409,20 +414,24 @@ Die Web-Ebene zeigt danach: http:80 → `/`, `/admin-old/` (Schlüssel helpdesk)
 | Entscheid | heute | Vorschlag | Frage |
 |---|---|---|---|
 | E22 REC-Knopf, VISION Grundsatz 4 | REC global an oder aus, nach Neustart aus | Aufnahme an, solange ein Projekt aktiv ist; REC wird Pause mit Ablauf | 1 |
-| E28 Bindung beim ersten REC | gebundene Terminals pausieren nach einem Wechsel für immer | Rebind an der Kali-Grenze | 1 |
-| E26 nur Output | bleibt | Eingabemarke ohne Inhalt passt dazu und kommt für Remote-Shells; im Web gelten Formular-Bodies als Aktivität und werden gespeichert | 3, 8 |
-| E42 Vorschlag vor Automatik, VISION Grundsatz 5 | alles über die Inbox, Automodus pro Projekt | Drei-Spuren-Regel als Standard im Profil lab | 4 |
+| E28 Bindung beim ersten REC | gebundene Terminals pausieren nach einem Wechsel, bis ihr altes Projekt wieder aktiv ist | Wechsel ins neue Projekt, sobald die lokale Kali-Shell oben steht | 1 |
+| E74 Entsperren nur per CLI, E71 Verschlüsselung | `ariadne unlock` einmal pro Daemon-Lauf | Passphrase in `ariadne start` integriert, weiter nur im Terminal, nie in der Web-UI | 3 |
+| E26 nur Output | bleibt | Eingabemarke ohne Inhalt passt dazu und kommt für Remote-Shells; im Web gelten Formular-Bodies als Aktivität und werden gespeichert | 4, 8 |
+| E42 Vorschlag vor Automatik, VISION Grundsatz 5 | alles über die Inbox, Automodus pro Projekt | Drei-Spuren-Regel als Standard im Profil lab | 5 |
 | E88 Sammelbestätigung | für jede Gruppe | bleibt für die Spur «entscheiden», wird selten gebraucht | |
-| E45 Widersprüche nie auflösen | bleibt | Präzisierung und zeitlicher Verlauf gelten nicht als Widerspruch, der Verlauf bleibt sichtbar | 4 |
+| E45 Widersprüche nie auflösen | bleibt | Präzisierung und zeitlicher Verlauf gelten nicht als Widerspruch, der Verlauf bleibt sichtbar | 5 |
 | E23 Kontext per Hotkey | automatisch nur Session-Start und Rückkehr nach Kali | dazu der Host aus dem ersten Callback im Scope | 5 |
 | E10 und E11, VISION Grundsatz 1 | Webshot als einzige Ausnahme (v0.3) | Webshots zurückstellen, E10 ohne Ausnahme; Recorder leitet nur weiter | 7 |
+| E49 keine DNS-Auflösung von Zielnamen | gilt ohne Ausnahme | Ausnahme nur für Namen, die der Testbrowser selbst anfragt | 7 |
 | E33 weitere Quellen | Burp und HAR v0.2, Browser-Verlauf v0.3, Erweiterung v0.4+ | Recorder v0.2 ersetzt den Browser-Verlauf, Erweiterung v0.3 | 7 |
 | E66 Modell | `claude-opus-5-5` | bleibt; `claude-haiku-5-5` nur als Schalter pro Funktion | |
 
 ### 5.2 Änderungen an der Architektur
 
 - **3.6, 3.7, 3.9:** REC als Pause, Rebind, `ariadne start/stop/pause`; Shim-Zeit statt Empfangszeit («Massgeblich ist die Empfangszeit im Daemon» fällt), Protokoll v2; Multiplexer-Pause bauen.
-- **4.4, 4.5:** Webshots zurückstellen, Recorder als Quelle; «Bodies nie dekomprimiert» wird «nur im Recorder oder Worker, mit festen Grenzen».
+- **4.4, 4.5:** Webshots zurückstellen, Recorder als Quelle mit TLS-Durchreichen für fremde Ziele, gleiche Bodies nur einmal speichern; «Bodies nie dekomprimiert» wird «nur im Recorder oder Worker, mit festen Grenzen».
+- **5.8 und 9.2 (Prinzip 5):** falls Frage 7 so entschieden wird, die Namensauflösung im Recorder als einzige benannte Ausnahme von «keine DNS-Auflösung von Zielnamen».
+- **8.3:** `ariadne start` vereint `unlock`, `project new/open` und REC; `stop` schliesst und sperrt.
 - **5.3:** neue Ereignisse `term.input_mark` und `web.*`, Entscheid `d.unit.distrust`, Origins `webrec` und `extension`.
 - **5.4 bis 5.8:** Einheiten `remote_cmd` und `http`, vorläufiges Parsen nach 3 s, `covered_lines`, Spur statt `inbox`-Schalter, Evidenzgruppen, Automatik über «mindestens eine Quelle», Arten von Prädikaten, eigene Adressen nie als Host.
 - **Ontologie v2**, enge DTD-Ausnahme für Burp in `parsers/safe.py`, Zusammenfassen pro Sekunde im Writer (8.6).
@@ -432,14 +441,14 @@ Die Web-Ebene zeigt danach: http:80 → `/`, `/admin-old/` (Schlüssel helpdesk)
 | Version | Was dazukommt oder sich verschiebt |
 |---|---|
 | **v0.1** (Rest) | Wie geplant: Web-API und UI-Anbindung, Regeln, KI-Denkanstoss, Export, Screenshots, Watcher. Neu, weil klein und für den Alltag entscheidend: Shim-Zeit an jedem Ereignis und Sortierung nach monotoner Uhr; `ariadne start`, `stop`, `pause` mit gespeichertem Zustand und Rebind; Multiplexer-Pause; Drei-Spuren-Regel mit Evidenzgruppen, eigenen Adressen, Prädikat-Arten und `d.unit.distrust` (Golden-Ziel: MS2 86 → 0, Lame 18 → 0); Zusammenfassen pro Sekunde. Ich würde mit der Projektion anfangen, weil sie den Nutzen der fertigen Teile sofort zeigt |
-| **v0.2** | Eingabemarken, `remote_cmd`, Kontext aus dem Callback, `shell.context`; Ontologie v2, Formparser, Secrets als Claims; Kernparser nach Häufigkeit mit `ariadne fixture export` und Parser-Abdeckung; KI-Extraktion mit Belegprüfung; Finding-Vorschläge aus Regeln im Reiter Findings; Lagebild mit verdichteter Zeitachse; Zeitindex (Protokoll v2), RAM-Vorlauf, zstd, Speicherwächter; Browser zuerst als Minimal-Schnitt, dann Login-Erkennung, HAR- und Burp-Import, Web-Baum in der UI; `setup --root` |
+| **v0.2** | Eingabemarken, `remote_cmd`, Kontext aus dem Callback, `shell.context`; Ontologie v2, Formparser, Secrets als Claims; Kernparser nach Häufigkeit mit `ariadne fixture export` und Parser-Abdeckung; KI-Extraktion mit Belegprüfung; Finding-Vorschläge aus Regeln im Reiter Findings; Lagebild mit verdichteter Zeitachse; Zeitindex (Protokoll v2), RAM-Vorlauf, zstd, Speicherwächter; Browser zuerst als Minimal-Schnitt mit Speichergrenzen, dann Login-Erkennung, HAR- und Burp-Import, Web-Baum in der UI; `setup --root` |
 | **v0.3** | Firefox-Erweiterung (`web.nav`, `web.dom`, Tab-Screenshot), Burp in der Kette als Option, Caido-Import, faraday_plugins als optionale Brücke, Findings mit CVSS, Testprofil im verschlüsselten Arbeitsbereich, Scope-Sperre im Recorder für customer. Die Webshots entfallen |
 
 Ehrlich gesagt wird v0.2 damit deutlich grösser. Wenn es eng wird, würde ich den Browser auf den Minimal-Schnitt plus Importe begrenzen und den Rest nach v0.3 schieben, nicht die Kette.
 
 ### 5.4 Wo die Berichte auseinandergingen
 
-| Punkt | Berichte | Mein Entscheid und warum |
+| Punkt | Berichte | Mein Vorschlag und warum |
 |---|---|---|
 | Reicht der Automodus? | Bedienung: «im Automodus für nmap.xml entfällt das Bestätigen»; Auswertung: greift kaum | Auswertung hat recht. Nachgemessen: Mit dem Standard (`nmap.xml`) werden 18 von 144 MS2-Claims `auto`, die Inbox bleibt bei 86. Der Fehler sitzt in der Regel «erste Beobachtung», darum die Drei-Spuren-Regel statt einer längeren Parserliste |
 | Browser zuerst über was? | Auswertung: HAR, dann Erweiterung; Browser: Recorder-Proxy in v0.2; Bedienung: Import v0.2, Verlauf v0.3, Erweiterung v0.4 | Recorder-Proxy. Er liefert exakte Grenzen, Ziel-IP und Bodies ohne Signatur und ohne Code im Browser; der Verlauf zeigt deutlich weniger |
@@ -447,24 +456,115 @@ Ehrlich gesagt wird v0.2 damit deutlich grösser. Wenn es eng wird, würde ich d
 | Wozu die Eingabemarke? | Bedienung: nur Flag fürs Aktivitätsprotokoll; Auswertung: auch zum Schneiden | beides mit einem Ereignis |
 | Was geht im Web in die Inbox? | Browser: Login, Admin, Version, vHost, Kommentar; Auswertung: nur KI, Widersprüche, Kontext | Drei-Spuren-Regel plus Einstufung wichtiger heuristischer Prädikate; Login-Formulare und Admin-Bereiche werden Denkanstösse statt Klärungen |
 
-## 6 Fragen an dich
+## 6 Risiken und Grenzen
 
-1. **Aufnahme-Modell.** (a) Aufnahme an, solange ein Projekt aktiv ist; `F12 r` pausiert ein Terminal 10 Minuten; offene Terminals wechseln an der Kali-Grenze ins neue Projekt; ein Projekt endet mit `ariadne stop` oder nach 12 Stunden ohne Terminal-Ausgabe. (b) wie (a), aber das Projekt endet nur mit `ariadne stop`. (c) wie heute mit REC-Knopf. **Empfehlung (a).** Ersetzt E22, ändert E28.
-2. **Ohne aktives Projekt.** (a) RAM-Vorlauf von 15 Minuten pro Terminal, den `ariadne start` übernehmen kann, nie auf der Platte. (b) nichts, nur Hinweis im Titel. (c) verschlüsseltes Sammelbecken auf der Platte, später zuordnen. **Empfehlung (a)**, weil (c) Privates und Fremdes dauerhaft speichert und die Projekttrennung aufweicht.
-3. **Eingaben im Terminal.** (a) keine Tastendrücke, aber pro Enter eine Eingabemarke mit Zeit, Offset und Echo-Vergleich, ohne Inhalt; damit bekommen Remote-Befehle eigene Einheiten und Zeitstempel. (b) zusätzlich den getippten Text speichern; Passwörter ohne Echo landen dann im unveränderlichen Journal, das widerspricht E26. (c) nichts, Remote-Sitzungen bleiben ein Block. **Empfehlung (a).**
-4. **Drei-Spuren-Regel.** (a) Standard im Profil lab: Parser-Werte im Scope kommen automatisch auf die Karte, Rückgängig pro Befehl, Präzisierung und Verlauf sind kein Widerspruch. (b) Automatik nur für ausdrücklich freigegebene Parser; das geht heute schon über `[automode]`, mit `nmap.xml` und `nmap.text` sinkt die MS2-Inbox von 86 auf 1. (c) wie bisher alles über die Inbox. **Empfehlung (a).** Ändert E42.
-5. **Kontext einer Reverse Shell.** (a) automatisch aus dem ersten Callback im Scope, sichtbar als `(auto)`, `F12 h` überschreibt auch rückwirkend. (b) nur als Vorschlag, mit `F12 y` zu bestätigen. (c) wie heute von Hand. **Empfehlung (a).**
-6. **KI-Extraktion.** (a) im Profil lab automatisch für Einheiten mit Zielkontext, ohne Parser-Treffer und mit Signal, bekannte Ziel-Secrets vorher als Platzhalter; im Profil customer nur auf Klick und lokal. (b) nur auf Klick. (c) für alle Einheiten ohne Parser-Treffer. **Empfehlung (a).** Bedenke: Noch nicht erkannte Ziel-Secrets gehen dabei in die Cloud, genau dafür ruft man die KI ja auf.
-7. **Browser.** (a) Recorder-Proxy (`ariadne browser`, mitmdump aus dem Kali-Paket) in v0.2, HAR- und Burp-Import als Rückfall, Firefox-Erweiterung in v0.3, Webshots (E11) zurückstellen. (b) nur Importe in v0.2, Erweiterung in v0.3. (c) Roadmap wie bisher. **Empfehlung (a).** Dazu eine Grundsatzfrage: Zählt für dich ein Proxy als «passiv», der nur weiterleitet, was dein Browser schickt? Ich meine ja, weil Ariadne keine einzige Anfrage selbst erzeugt. Falls du in Labs mit Burp arbeitest, kommt Burp in v0.3 vor den Recorder.
-8. **Formulareingaben im Browser.** (a) Anfrage-Bodies verschlüsselt speichern, eigene Secrets geschwärzt, Passwörter für das Ziel als maskierte Secrets. (b) nur Feldnamen und Längen. (c) gar nicht. **Empfehlung (a)**, sonst gibt es keinen Beleg für eine Anmeldung. Das ist eine bewusste Ergänzung zu E26.
+«Immer aufnehmen» heisst auch: mehr aufnehmen, als man will. Hier die wichtigsten Risiken mit dem, was dagegen hilft. «gebaut» und «geplant» wie oben.
 
-## 7 Quellen
+**1 Passwörter in der Aufnahme.**
+
+- **Gefahr:** Was sichtbar auf dem Bildschirm steht, landet im unveränderlichen Journal. Das gilt für `mysql -pGeheim`, `curl -u user:pass`, für jede Taste in einer einfachen Reverse Shell ohne PTY und für Formulare im Testbrowser. Eigene Passwörter genauso wie fremde.
+- **Dagegen:** Eigene Secrets in die Liste (`ariadne secrets add`), der Redaktor schwärzt sie vor dem Speichern (gebaut). Passwortabfragen ohne Echo erreichen Ariadne nie. Zielpasswörter sind Funde: verschlüsselt gespeichert und überall maskiert. Was trotzdem durchrutscht, entfernt `ariadne redact` (gebaut). Gewohnheit, die hilft: Passwörter an der Abfrage eingeben statt in der Befehlszeile.
+
+**2 Privates und Fremdes.**
+
+- **Gefahr:** Ohne Projekt tippst du Privates in dieselben Terminals. Im Testbrowser rufst du vielleicht fremde Seiten auf. Ein Screenshot erfasst ein Chatfenster.
+- **Dagegen:** Ohne Projekt kommt nichts auf die Platte, der Vorlauf bleibt im RAM und wird nur auf Nachfrage übernommen (Frage 2). Fremde Domains im Testbrowser werden nur gezählt und nicht entschlüsselt (Vorschlag, 4.2). Screenshots nehmen standardmässig nur das aktive Fenster (Architektur 4.3). Für private Minuten im Projekt gibt es `F12 r`.
+
+**3 Speicherplatz in der VM.**
+
+- **Gefahr:** Fortschrittsbalken kosten heute rund 25 MB Journal pro Stunde (Container-Messung). Im Browser laden moderne Seiten pro Aufruf mehrere MB JavaScript, und Burp Intruder hinter dem Recorder erzeugt tausende Austausche. Eine volle Platte beendet die Aufnahme mitten im Test.
+- **Dagegen:** Zusammenfassen pro Sekunde und zstd (geplant). Im Recorder (Vorschlag): gleiche Antworten nur einmal speichern, Bodies über 5 MiB nur als Hash und Grösse. Speicherwächter: Unter 2 GiB freiem Platz speichert der Daemon nur noch Metadaten und warnt deutlich (Architektur 8.6, geplant). Die Zahlen müssen noch in der echten Kali-VM gemessen werden.
+
+**4 Falsche Fakten.**
+
+- **Gefahr:** Ein Parser liest falsch. Das Ziel lügt (Honeypot, präparierte Banner). Ein Wert landet beim falschen Host, weil der Kontext falsch ist. Die KI ordnet ein wörtliches Zitat dem falschen Konto zu oder erfindet eine CVE.
+- **Dagegen:** Jeder Wert zeigt auf seine Zeile (gebaut). Automatisch übernommen wird nur aus Parsern mit Golden-Tests und nur im Scope, mit Rückgängig pro Befehl. KI-Werte brauchen ein wörtliches Zitat und immer deinen Entscheid. KI-Texte dürfen nur IDs aus dem Lagebild nennen, sonst werden sie verworfen. Eine CVE nennt nur dein `searchsploit` oder die KI als gekennzeichnete Hypothese. Die Konfidenz misst, wie sicher Ariadne gelesen hat, nicht, ob das Ziel die Wahrheit sagt (3.2).
+
+**5 Daten in der Cloud-KI.**
+
+- **Gefahr:** Für Extraktion und Denkanstösse gehen Ausschnitte mit Zieldaten an die Claude API, auch Secrets, die Ariadne noch nicht erkannt hat. Pentest-Inhalte können eine Ablehnung (`refusal`) auslösen.
+- **Dagegen:** Cloud nur für Lab-Projekte, deren Scope in der Lab-Liste liegt (Leitplanke, Architektur 8.1). Bekannte Secrets werden vorher durch Platzhalter ersetzt. Im Kundenprofil ist die Cloud aus. Eine Ablehnung wird erkannt und protokolliert, nie umformuliert.
+
+**6 Recht beim Mitschneiden im Kundenauftrag** (Laienhinweis, keine Rechtsberatung).
+
+- **Gefahr:**
+  - Ohne schriftliche Erlaubnis mit Scope und Zeitfenster kann schon der Test unter Art. 143bis StGB fallen. Die Aufnahme ist dann ein Beweis gegen dich.
+  - Mitschnitte enthalten Personendaten Dritter: Benutzerlisten, E-Mails, Namen in Dateien und Screenshots. Das DSG verlangt dafür einen Zweck, Datensparsamkeit, Schutz und Löschung nach dem Auftrag.
+  - Cloud-KI heisst Bekanntgabe an einen Dienstleister im Ausland (Anthropic, USA). Das braucht die Zustimmung des Auftraggebers.
+  - Eine Geheimhaltungsvereinbarung gilt auch für Aufnahme, Backups und Exporte.
+- **Dagegen:** Bis v0.3 ist Ariadne nur für Labs und fiktive Aufträge gedacht (E01, E73). Das Kundenprofil (v0.3, geplant) verlangt Scope und Zeitfenster, schaltet die Cloud aus, verschlüsselt den Arbeitsbereich und erstellt einen Löschnachweis. Vor dem ersten echten Auftrag gehört in den Vertrag, dass mitgeschnitten wird, was, wie lange es aufbewahrt und wann es gelöscht wird.
+
+**7 Lücken trotz «immer an».**
+
+- **Gefahr:** Du verlässt dich auf eine Aufnahme, die fehlt: Root-Terminal aus dem Menü, andere Shell, normaler statt Testbrowser, Tresor nach einem Neustart noch gesperrt und RAM-Puffer übergelaufen.
+- **Dagegen:** Lücken sind sichtbar, im Fenstertitel und als `term.gap` in der Zeitachse (gebaut). Die Liste in 2.1 nennt sie, `doctor` prüft die Einrichtung.
+
+## 7 Fragen an dich
+
+Acht Entscheide, jeder mit Empfehlung. Antworte zum Beispiel mit «1a, 2a, 3b ...» oder nur mit den Abweichungen.
+
+1. **Wann nimmt Ariadne auf?**
+   - (a) Immer, solange ein Projekt aktiv ist. `F12 r` pausiert ein einzelnes Terminal für 10 Minuten. Schon offene Terminals wechseln beim Projektwechsel mit, sobald in ihnen wieder die lokale Kali-Shell läuft. Ein Projekt endet mit `ariadne stop` oder nach 12 Stunden ohne Ausgabe in irgendeinem Terminal.
+   - (b) Wie (a), aber das Projekt endet nur mit `ariadne stop`.
+   - (c) Wie heute: ein REC-Knopf für alle Terminals, nach jedem Neustart aus.
+
+   **Empfehlung (a).** Am wenigsten zu vergessen, und eine vergessene Sitzung endet von selbst. Ersetzt E22, ändert E28.
+
+2. **Was passiert, wenn kein Projekt aktiv ist?**
+   - (a) Jedes Terminal behält die letzten 15 Minuten nur im Arbeitsspeicher. `ariadne start` fragt, ob du sie übernehmen willst. Auf die Platte kommt nichts.
+   - (b) Nichts wird behalten, nur der Fenstertitel erinnert dich.
+   - (c) Alles kommt verschlüsselt in einen Sammeltopf auf der Platte, den du später einem Projekt zuordnest.
+
+   **Empfehlung (a).** Rettet die vergessenen ersten Minuten. (c) würde Privates und Fremdes dauerhaft speichern und die Projekttrennung aufweichen.
+
+3. **Wie entsperrst du Ariadne nach einem Neustart der VM?**
+   - (a) Mit der Passphrase in `ariadne start`, einmal pro Anmeldung. Bis dahin puffern die Terminals im Arbeitsspeicher.
+   - (b) Automatisch beim Kali-Login. Der Schlüssel liegt dann im Schlüsselbund des Desktops.
+
+   **Empfehlung (a).** Ein Schritt mehr pro Tag, dafür bleibt die Verschlüsselung echt. Bei (b) schützt nur noch das Kali-Passwort, und das ist in Labs oft `kali` oder ganz weg (Autologin).
+
+4. **Was speichert Ariadne von deinen Eingaben im Terminal?**
+   - (a) Die lokale Befehlszeile wie heute. Dazu in Remote-Shells pro Enter nur den Zeitpunkt und ob die Zeile auf dem Bildschirm erschien, ohne Inhalt. Damit bekommt jeder Befehl in einer Reverse Shell eine eigene Einheit mit genauer Zeit.
+   - (b) Zusätzlich alles, was du tippst. Dann landen auch Passwörter, die nie auf dem Bildschirm standen, im unveränderlichen Journal.
+   - (c) Nur die lokale Befehlszeile wie heute. Eine Remote-Sitzung bleibt ein einziger Block.
+
+   **Empfehlung (a).** Genaue Zeiten für jeden Befehl, ohne Passwörter zu speichern, die du blind getippt hast. Passt zu E26.
+
+5. **Was darf Ariadne selbst auf die Karte setzen?**
+   - (a) In Lab-Projekten automatisch: Werte aus bekannten Tool-Parsern für Ziele im Scope und den Host einer Reverse Shell aus dem ersten Callback. Alles sichtbar als «auto» und pro Befehl rückgängig zu machen. Eine genauere Versionsangabe ersetzt eine ungenauere ohne Rückfrage (Samba «3.0.20-Debian» statt «3.X - 4.X»). Echte Widersprüche, KI-Werte und Unklares bleiben bei dir.
+   - (b) Nur Werte aus Parsern, die du ausdrücklich freigibst. Das geht heute schon über `[automode]` in den Projekteinstellungen: Mit `nmap.xml` und `nmap.text` sinkt die Inbox im Metasploitable2-Test von 86 auf 1 Eintrag, und der eine ist die eigene Kali-IP. Den Host einer Reverse Shell bestätigst du mit einem Tastendruck.
+   - (c) Wie bisher: Jeder Wert und jeder Kontext geht über die Inbox.
+
+   **Empfehlung (a).** Die Karte füllt sich, ohne dass du nach jedem Scan klickst, und ein Fehler lässt sich pro Befehl zurücknehmen. Ändert E42 und E23.
+
+6. **Wann darf die KI Ausgaben lesen, die kein Parser versteht?**
+   - (a) In Lab-Projekten automatisch, aber nur für Befehle auf einem Ziel, die Signalwörter wie user, pass, key oder admin enthalten und die kein Parser ganz verstanden hat. Bekannte Ziel-Secrets werden vorher ersetzt. In Kundenprojekten nur auf Klick und nur mit lokalem Modell.
+   - (b) Nur auf Klick.
+   - (c) Für alle Ausgaben, die kein Parser versteht.
+
+   **Empfehlung (a).** Findet Werte aus Tools ohne eigenen Parser, ohne den ganzen Verlauf hinauszuschicken. Bedenke: Noch nicht erkannte Ziel-Secrets gehen dabei an die Claude API, genau dafür ruft man die KI ja auf. Kosten grob 1 bis 3 Rappen pro Befehl.
+
+7. **Browser: welcher Weg, und ist das noch «passiv»?**
+   - (a) Ein Aufzeichnungs-Proxy vor einem eigenen Testbrowser (`ariadne browser`) in v0.2. Import aus DevTools (HAR) und Burp als Rückfall. Eine Firefox-Erweiterung für Single-Page-Apps und Tab-Screenshots in v0.3. Die Webseiten-Screenshots, für die Ariadne selbst Anfragen schicken würde (E11), entfallen.
+   - (b) Nur Importe aus DevTools und Burp in v0.2, Erweiterung in v0.3.
+   - (c) Roadmap wie bisher: Importe v0.2, Browser-Verlauf und eigene Webseiten-Screenshots v0.3, Erweiterung v0.4.
+
+   **Empfehlung (a).** Dazu die Grundsatzfrage: Zählt für dich ein Proxy als passiv, der nur weiterleitet, was dein Browser schickt, und dafür die Namen auflöst, die du aufrufst? Ich meine ja, weil Ariadne keine einzige Anfrage selbst erzeugt. E10 hätte dann keine Ausnahme mehr, E49 eine eng begrenzte. Falls du in Labs mit Burp arbeitest, kommt Burp in v0.3 vor den Recorder.
+
+8. **Was speichert der Browser-Recorder von Formularen?**
+   - (a) Den ganzen Inhalt, verschlüsselt. Eigene Secrets schwärzt der Redaktor, Passwörter für das Ziel sind überall maskiert.
+   - (b) Nur Feldnamen und die Länge der Eingaben.
+   - (c) Gar nichts aus Formularen.
+
+   **Empfehlung (a).** Sonst gibt es keinen Beleg für eine erfolgreiche Anmeldung oder einen Upload. Das ist eine bewusste Ergänzung zu E26, das bisher nur für das Terminal gilt.
+
+## 8 Quellen
 
 **Projekt, gelesen am 2026-10-14:** `VISION.md`; `docs/architektur.md` (3, 4.3 bis 4.5, 5.2 bis 5.13, 6.1 bis 6.4, 7.2, 7.5, 8.6, 9); `docs/entscheide.md` (E10, E11, E22, E23, E26, E28, E33, E42, E43, E45, E49, E66, E86 bis E88); `docs/entwicklung.md` (bekannte Grenzen).
 
-**Code, gelesen am 2026-10-14** (unter `src/ariadne/`): `ingest/proj_build.py` (`_claim_decisions`, `_automode`, `_inbox`), `ingest/projection.py`, `ingest/pipeline.py`, `ingest/segmenter.py`, `project/settings.py`, `parsers/nmap_text.py`, `parsers/listener_callback.py`, `parsers/api.py`, `parsers/safe.py`, `ontology.py`, `events.py`, `_shim/relay.py`, `_shim/transport.py`, `_shim/markers.py`, `daemon/writer.py`, `daemon/core.py`, `store/journal.py`.
+**Code, gelesen am 2026-10-14** (unter `src/ariadne/`): `ingest/proj_build.py` (`_claim_decisions`, `_automode`, `_inbox`), `ingest/projection.py`, `ingest/pipeline.py`, `ingest/segmenter.py`, `project/settings.py`, `parsers/nmap_text.py`, `parsers/listener_callback.py`, `parsers/api.py`, `parsers/safe.py`, `ontology.py`, `events.py`, `_shim/relay.py`, `_shim/transport.py`, `_shim/markers.py`, `daemon/writer.py`, `daemon/core.py`, `store/journal.py`. Bei der Prüfung am selben Tag zusätzlich: `daemon/sources.py`, `daemon/terminal.py`, `_shim/ringbuf.py`, `_shim/launch.py`, `_shim/procutil.py`, `shell/init.zsh`, `ingest/schema_claims.py`, `ingest/claims.py`, `ingest/units.py`, `parsers/regex_net.py`, `cli/main.py`, `cli/views.py`.
 
-**Messungen, 2026-10-14** (Skripte im Scratchpad der Recherche-Session, nicht im Repo, Eingaben nachgestellt): `count_inbox.py` (MS2-Golden: 144 Claims, 86 Inbox-Einträge in einer Gruppe, 85 mit hoher Konfidenz, Kali-IP 192.168.56.102 als Host mit 0.64); `lame.py` (Lame nur Text: 21 Claims, 18 Einträge); `automode_ms2.py` (MS2 mit Automodus: `nmap.xml` allein 18 von 144 `auto`, mit `nmap.text` 143); `bench/journal_size.py` (Journalgrösse und CPU, Container mit 4 Kernen).
+**Messungen, 2026-10-14** (Skripte im Scratchpad der Recherche-Session, nicht im Repo, Eingaben nachgestellt): `count_inbox.py` (MS2-Golden: 144 Claims, 86 Inbox-Einträge in einer Gruppe, 85 mit hoher Konfidenz, Kali-IP 192.168.56.102 als Host mit 0.64); `lame.py` (Lame nur Text: 21 Claims, 18 Einträge); `automode_ms2.py` (MS2 mit Automodus: `nmap.xml` allein 18 von 144 `auto`, mit `nmap.text` 143); `bench/journal_size.py` (Journalgrösse und CPU, Container mit 4 Kernen). Nachgemessen bei der Prüfung am 2026-10-14 mit `tests/projection/helpers.py` und den Golden-Eingaben `ms2_sv_sc`: 144 Claims, 86 Inbox-Einträge in einer Gruppe; Automodus mit `nmap.xml` 18 `auto`, mit `nmap.xml` und `nmap.text` 143 `auto` und 1 Eintrag (Kali-IP, Konfidenz 0.64). Die Lame-Zahlen sind nicht nachgemessen, im Repo gibt es keine Lame-Eingabe.
 
 **Auswertung und Parser:**
 
@@ -474,7 +574,7 @@ Ehrlich gesagt wird v0.2 damit deutlich grösser. Wenn es eng wird, würde ich d
 - Ghostwriter: https://www.ghostwriter.wiki/features/operation-logs/setting-up-automated-logging (BSD-3, Oplog)
 - SysReptor: https://docs.sysreptor.com/cli/tools/burp (CLI-Importer abgekündigt)
 - LangExtract: https://github.com/google/langextract (1.6.0 vom 02.07.2026, Treffer auf Zeichen-Offsets)
-- Claude API, Citations: https://platform.claude.com/docs/en/build-with-claude/citations.md (laut Bericht nicht mit `output_config.format` kombinierbar; Preise und Caching laut claude-api-Referenz, Stand 06.10.2026)
+- Claude API, Citations: https://platform.claude.com/docs/en/build-with-claude/citations.md (nicht mit `output_config.format` kombinierbar, bestätigt durch die claude-api-Referenz); Preise laut claude-api-Referenz, Stand 06.10.2026: `claude-opus-5-5` 4 USD und 20 USD pro Million Eingabe- bzw. Ausgabe-Tokens
 
 **Browser** (abgerufen 2026-10-14):
 
