@@ -372,3 +372,23 @@ def test_decision_before_rec_start_applies_from_start():
     lay = compute_layout(TID, evs, 900)
     assert [(s.start, s.stage.get("host")) for s in lay.spans] == [(500, "ip:default/10.10.10.8")]
     assert [(u.kind, u.start) for u in lay.units] == [("segment", 500)]
+
+
+def test_hotkey_stage_keeps_key_across_rec_restart():
+    """``F12 h`` auf Kali: Daemon (set_top) und Segmenter legen die Stufe am selben Offset an,
+    sonst zerfällt sie nach REC aus/an in zwei Stufen (Host-Korrektur wirkt nur halb)."""
+    from ariadne.ctxrules import ContextStack
+
+    d = ContextStack()
+    d.set_top(host="ip:default/10.10.10.7", source="hotkey", offset=1000)  # wie der Daemon
+    local = [{"kind": "local", "host": "local", "opened_at": 0}]
+    ev = [SegEvent(1, "term.open", 0, 1, {"cols": 80, "rows": 24}),
+          SegEvent(2, "term.ctx_snapshot", 0, 1, {"stack": local}),
+          SegEvent(3, "d.ctx.set", 1000, 2, {"terminal_id": TID, "from_off": 1000,
+                                             "host": "ip:default/10.10.10.7"}),
+          SegEvent(4, "term.ctx_snapshot", 2000, 3, {"stack": d.snapshot()}),
+          SegEvent(5, "term.gap", 2000, 3, {"reason": "rec_off", "bytes_lost": 1000}),
+          SegEvent(6, "term.ctx_snapshot", 3000, 3, {"stack": d.snapshot()})]
+    lay = compute_layout(TID, ev, 4000)
+    remote = [sp for sp in lay.spans if not sp.local]
+    assert remote and {sp.stage_key for sp in remote} == {f"{TID}@1000/1"}

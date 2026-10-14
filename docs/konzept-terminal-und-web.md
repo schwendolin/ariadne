@@ -2,45 +2,38 @@
 
 ## Auf einen Blick
 
-Ariadne schreibt mit, was du in Terminal und Testbrowser tust, und zeichnet daraus eine Karte der Ziele. Alles läuft in deiner Kali in SmartLearn, die du über die Webkonsole bedienst. Die Karte auf dem Mac regelt das [Konzept Fernzugriff](konzept-fernzugriff.md). Gebaut sind die Aufnahme der Terminals und ihre Auswertung bis zur Datenbank, der Rest ist Vorschlag.
+Ariadne schreibt mit, was du in Terminal und Testbrowser tust, und zeichnet daraus eine Karte der Ziele. Alles läuft in deiner Kali in SmartLearn, die du über die Webkonsole bedienst; den Zugriff vom Mac regelt das [Konzept Fernzugriff](konzept-fernzugriff.md). Gebaut sind Aufnahme und Auswertung der Terminals bis zur Datenbank (Textansicht: `ariadne show`), der Rest ist geplant oder Vorschlag.
 
 **Bedienung in drei Schritten**
 
 1. **Einmal:** Ariadne per `pipx` installieren, `ariadne setup`, offene Terminals neu öffnen.
-2. **Pro Auftrag und nach jedem Neustart der VM:** `ariadne start lame 10.10.10.3` (Projekt und Ziel), danach nur `ariadne start`. Dazu einmal die Passphrase, in der Webkonsole mit Chrome oder Safari ohne Erweiterungen, nie mit Firefox (dort kommen Tasten doppelt an).
+2. **Pro Auftrag und nach jedem Neustart der VM:** `ariadne start lame 10.10.10.3` (Projekt und Ziel), später nur `ariadne start`, dazu die Passphrase. Die Webkonsole dafür nur in Chrome oder Safari ohne Erweiterungen, Firefox tippt dort doppelt.
 3. **Arbeiten:** Jedes Terminal nimmt auf, auch neue Tabs und tmux-Panes. `F12 r` pausiert ein Terminal für 10 Minuten, `F12 k` markiert einen Schlüsselschritt wie den ersten Zugang. Am Ende `ariadne export`, `ariadne stop` und eine Sicherung ausserhalb der VM.
 
-Heute braucht es statt Schritt 2 noch `ariadne unlock`, `ariadne project open` und `ariadne rec on`.
+Heute braucht es statt Schritt 2 noch `ariadne unlock`, `ariadne project open lame` und `ariadne rec on`.
 
 **Vom Terminal zur Karte**
 
-Ausgabe (verschlüsselt gespeichert) → Befehl → Wert mit Verweis auf seine Zeile → Host oder Dienst auf der Karte.
+Ein Parser (Leseprogramm für ein bestimmtes Tool) liest aus jedem Befehl Werte, jeden mit Verweis auf seine Zeile. Aus der nmap-Zeile `21/tcp open ftp vsftpd 2.3.4` wird am Host 10.10.10.3 der Dienst «FTP, vsftpd 2.3.4». Jeder Wert nimmt eine von drei Spuren:
 
-Die Werte liest ein Parser heraus, ein Leseprogramm für ein bestimmtes Tool. Beispiel: Aus der nmap-Zeile `21/tcp open ftp vsftpd 2.3.4` wird auf der Karte am Host 10.10.10.3 der Dienst «FTP, vsftpd 2.3.4».
-
-**Drei Spuren**
-
-- **Automatisch:** Werte bekannter Parser zu Zielen im Scope (deiner erlaubten Zielliste) kommen direkt auf die Karte, pro Befehl rückgängig. Nach einem nmap-Lauf auf Metasploitable2 bleiben laut Rechnung 0 statt heute 86 Bestätigungen.
+- **Automatisch:** Werte bekannter Parser zu Zielen im Scope (deiner erlaubten Zielliste) kommen ohne Klick auf die Karte, pro Befehl rückgängig. Nach nmap auf Metasploitable2 bleiben laut Rechnung 0 statt heute 86 Einträge zum Bestätigen.
 - **Still:** Unsicheres und Fremdes erscheint nur als Zähler und in der Suche.
 - **Entscheiden:** KI-Werte, echte Widersprüche und unklare Zuordnungen landen in der Spalte «Als Nächstes».
 
 **Browser**
 
-- `ariadne browser` öffnet in der Kali einen Testbrowser, ein eigenes Firefox-Profil.
-- Ein Aufzeichnungs-Proxy dazwischen leitet jede Anfrage ans Ziel weiter und speichert sie mit Antwort, Ziel-IP und Zeit. Ariadne schickt selbst nichts.
-- Daraus werden Seiten, Formulare, Kommentare und Admin-Bereiche unter dem Webdienst. Fremde Seiten werden nur gezählt.
-- Was du in einem anderen Browser tust, sieht Ariadne nicht.
+`ariadne browser` öffnet in der Kali einen Testbrowser (eigenes Firefox-Profil). Ein Proxy dazwischen speichert jede Anfrage an deine Ziele mit Antwort, Ziel-IP und Zeit; fremde Seiten zählt er nur. Eigene Anfragen schickt er keine. Was du in anderen Browsern tust, sieht Ariadne nicht.
 
-**Acht Fragen an dich** (Details in [Abschnitt 7](#7-fragen-an-dich), Antwort etwa «1a, 2a ...»)
+**Acht Fragen an dich**, Empfehlung jeweils (a) ([Abschnitt 7](#7-fragen-an-dich), Antwort etwa «1a, 2a ...»)
 
-1. Wann aufnehmen? **(a)** Immer, solange ein Projekt aktiv ist.
-2. Ohne Projekt? **(a)** Die letzten 15 Minuten nur im Arbeitsspeicher halten.
-3. Entsperren? **(a)** Passphrase bei `ariadne start`, nicht automatisch.
-4. Eingaben? **(a)** Lokale Befehlszeile; in Remote-Shells pro Enter nur den Zeitpunkt.
-5. Selbst auf die Karte? **(a)** Parser-Werte im Scope und den Host einer Reverse Shell.
-6. KI? **(a)** In Labs automatisch, nur für Ausgaben ohne passenden Parser mit Wörtern wie pass oder admin.
-7. Browser? **(a)** Proxy mit Testbrowser in v0.2. Zählt das als passiv, obwohl der Proxy die Verbindungen aufbaut?
-8. Formulare? **(a)** Ganzer Inhalt, verschlüsselt, Passwörter maskiert.
+1. Wann aufnehmen? Immer, solange ein Projekt aktiv ist.
+2. Ohne Projekt? Die letzten 15 Minuten nur im Arbeitsspeicher.
+3. Entsperren? Passphrase bei `ariadne start`, nicht automatisch.
+4. Eingaben? Lokale Befehlszeile; in Remote-Shells pro Enter nur den Zeitpunkt.
+5. Was setzt Ariadne selbst auf die Karte? Parser-Werte im Scope und den Host einer Reverse Shell.
+6. KI? In Labs automatisch, nur bei Ausgaben ohne passenden Parser mit Wörtern wie pass oder admin; in SmartLearn erst mit Erlaubnis der Schule.
+7. Browser? Proxy mit Testbrowser in v0.2. Gilt das als passiv, obwohl er die Verbindungen aufbaut?
+8. Formulare? Ganzer Inhalt, verschlüsselt, Passwörter maskiert.
 
 > Stand 2026-10-14, Vorschlag. Antwort auf deine Nachricht vom 2026-10-14 («irgendwie muss das ganze simpler zu bedienen sein ...»). Grundlage sind drei Rechercheberichte (Auswertung, Browser, Bedienung), [VISION](../VISION.md), die [Lösungsarchitektur](architektur.md), das [Entscheidungsprotokoll](entscheide.md), [entwicklung.md](entwicklung.md) und der Code unter `src/ariadne`. Entschieden ist davon nichts, bis du die Fragen in Abschnitt 7 beantwortet hast.
 >
@@ -72,7 +65,7 @@ Umständlich ist der Alltag drumherum:
 
 | Schritt | Du tippst | Ariadne macht |
 |---|---|---|
-| 1 einmal | Installation per `pipx`, dann `ariadne setup`, danach offene Terminals einmal neu öffnen | RC-Zeile und systemd-Dienst (gebaut), neu auch Operator-Tresor mit Passphrase und Recovery-Code (heute separat `ariadne init`), `doctor`, Desktop-Kürzel für Screenshots, Firefox-Testprofil |
+| 1 einmal | Installation per `pipx`, dann `ariadne setup`, danach offene Terminals einmal neu öffnen | RC-Zeile und systemd-Dienst (gebaut), neu auch Operator-Tresor mit Passphrase und Recovery-Code (heute separat `ariadne init`), `doctor`, Desktop-Kürzel für Screenshots (das Testprofil für den Browser legt erst `ariadne browser` pro Projekt an, 4.1) |
 | 2 pro Auftrag und nach jedem Neustart der VM | `ariadne start lame 10.10.10.3`, danach nur `ariadne start` | fragt die Passphrase (per `getpass`, nie in der Web-UI, E74), legt das Projekt an oder öffnet es, schaltet die Aufnahme für alle Terminals ein, auch für schon offene, und merkt sich «lame aktiv» über Neustarts |
 | 3 arbeiten | fast nichts: selten `F12 k` (Schlüsselschritt) oder `F12 r` (Pause), für Webseiten `ariadne browser`, am Ende `ariadne export` und `ariadne stop` | nimmt alles auf, füllt Karte und Zeitachse, schlägt Schlüsselschritte und Findings vor |
 
@@ -80,6 +73,7 @@ Umständlich ist der Alltag drumherum:
 
 - Nach jedem Neustart der VM einmal `ariadne start` mit Passphrase. Ohne das bleibt der Tresor zu, und die Terminals puffern nur im RAM (Frage 3). Die Passphrase tippst du über die Webkonsole von SmartLearn, in Chrome oder Safari ohne Erweiterungen oder in der VMware Remote Console, nie in Firefox: Dort kommen Eingaben doppelt an. Sobald es einen erlaubten SSH-Weg vom Mac gibt, entsperrst du besser von dort (`ssh -t kali-sl unlock`), dann läuft die Passphrase nicht über die Konsole ([Konzept Fernzugriff](konzept-fernzugriff.md), 3 und 5.3).
 - Einmal prüfen, ob `F12` über die Webkonsole in der Kali ankommt: `ariadne hotkey test` (gebaut). Auf der Mac-Tastatur braucht es oft `fn`. Kommt nichts an, stellst du einen anderen Präfix ein, etwa `ctrl-]` (Architektur 3.4).
+- Lässt du die Kali allein, gibst du `ariadne lock` ein. Das sperrt den Tresor und schliesst das Projekt (gebaut). Weiter geht es mit `ariadne start` ([Konzept Fernzugriff](konzept-fernzugriff.md), Sicherheitsregeln).
 - Nach jeder Session eine verschlüsselte Sicherung aus der VM holen, denn die Schule kann die VM zurücksetzen oder löschen ([Konzept Fernzugriff](konzept-fernzugriff.md), 6.4).
 - Zielseiten öffnest du im Testbrowser von Ariadne, nicht in deinem normalen Firefox. Was im normalen Browser passiert, sieht Ariadne nicht.
 - Pro Lab-Abend eine Handvoll Klärungen in der Spalte «Als Nächstes»: KI-Werte, echte Widersprüche, neue Namen ausserhalb des Scopes, Kontext bei Pivots.
@@ -482,7 +476,7 @@ Die Web-Ebene zeigt danach: http:80 → `/`, `/admin-old/` (Schlüssel helpdesk)
 
 | Version | Was dazukommt oder sich verschiebt |
 |---|---|
-| **v0.1** (Rest) | Wie geplant: Web-API und UI-Anbindung, Regeln, KI-Denkanstoss, Export, Screenshots, Watcher. Neu, weil klein und für den Alltag entscheidend: Shim-Zeit an jedem Ereignis und Sortierung nach monotoner Uhr; `ariadne start`, `stop`, `pause` mit gespeichertem Zustand und Rebind; Multiplexer-Pause; Drei-Spuren-Regel mit Evidenzgruppen, eigenen Adressen, Prädikat-Arten und `d.unit.distrust` (Golden-Ziel: MS2 86 → 0, Lame 18 → 0); Zusammenfassen pro Sekunde. Ich würde mit der Projektion anfangen, weil sie den Nutzen der fertigen Teile sofort zeigt |
+| **v0.1** (Rest) | Wie geplant: Web-API und UI-Anbindung, Regeln, KI-Denkanstoss, Export, Screenshots, Watcher. Neu, weil klein und für den Alltag entscheidend: Shim-Zeit an jedem Ereignis und Sortierung nach monotoner Uhr; `ariadne start`, `stop`, `pause` mit gespeichertem Zustand und Rebind; Multiplexer-Pause; Drei-Spuren-Regel mit Evidenzgruppen, eigenen Adressen, Prädikat-Arten und `d.unit.distrust` (Golden-Ziel: MS2 86 → 0, Lame 18 → 0); Zusammenfassen pro Sekunde. Aus dem [Konzept Fernzugriff](konzept-fernzugriff.md) (Abschnitt 7) kommen `ariadne backup` und `restore` sowie der Schutz des Webservers dazu. Ich würde mit der Projektion anfangen, weil sie den Nutzen der fertigen Teile sofort zeigt |
 | **v0.2** | Eingabemarken, `remote_cmd`, Kontext aus dem Callback, `shell.context`; Ontologie v2, Formparser, Secrets als Claims; Kernparser nach Häufigkeit mit `ariadne fixture export` und Parser-Abdeckung; KI-Extraktion mit Belegprüfung; Finding-Vorschläge aus Regeln im Reiter Findings; Lagebild mit verdichteter Zeitachse; Zeitindex (Protokoll v2), RAM-Vorlauf, zstd, Speicherwächter; Browser zuerst als Minimal-Schnitt mit Speichergrenzen, dann Login-Erkennung, HAR- und Burp-Import, Web-Baum in der UI; `setup --root` |
 | **v0.3** | Firefox-Erweiterung (`web.nav`, `web.dom`, Tab-Screenshot), Burp in der Kette als Option, Caido-Import, faraday_plugins als optionale Brücke, Findings mit CVSS, Testprofil im verschlüsselten Arbeitsbereich, Scope-Sperre im Recorder für customer. Die Webshots entfallen |
 
@@ -525,7 +519,7 @@ Ehrlich gesagt wird v0.2 damit deutlich grösser. Wenn es eng wird, würde ich d
 **5 Daten in der Cloud-KI.**
 
 - **Gefahr:** Für Extraktion und Denkanstösse gehen Ausschnitte mit Zieldaten an die Claude API, auch Secrets, die Ariadne noch nicht erkannt hat. Pentest-Inhalte können eine Ablehnung (`refusal`) auslösen.
-- **Dagegen:** Cloud nur für Lab-Projekte, deren Scope in der Lab-Liste liegt (Leitplanke, Architektur 8.1). In SmartLearn vorher prüfen, ob die Schule HTTPS aufbricht; dann keine Cloud-KI ([Konzept Fernzugriff](konzept-fernzugriff.md), 3.2 und 3.4). Bekannte Secrets werden vorher durch Platzhalter ersetzt. Im Kundenprofil ist die Cloud aus. Eine Ablehnung wird erkannt und protokolliert, nie umformuliert.
+- **Dagegen:** Cloud nur für Lab-Projekte, deren Scope in der Lab-Liste liegt (Leitplanke, Architektur 8.1). In SmartLearn nur, wenn die Prüfliste keinen TLS-Aufbruch zeigt und die Schule Lab-Daten in der Cloud erlaubt ([Konzept Fernzugriff](konzept-fernzugriff.md), 3.2, 3.4 und Ticket-Frage 4 in 3.5). Bekannte Secrets werden vorher durch Platzhalter ersetzt. Im Kundenprofil ist die Cloud aus. Eine Ablehnung wird erkannt und protokolliert, nie umformuliert.
 
 **6 Recht beim Mitschneiden im Kundenauftrag** (Laienhinweis, keine Rechtsberatung).
 
@@ -584,7 +578,7 @@ Acht Entscheide, jeder mit Empfehlung. Antworte zum Beispiel mit «1a, 2a, 3b ..
    - (b) Nur auf Klick.
    - (c) Für alle Ausgaben, die kein Parser versteht.
 
-   **Empfehlung (a).** Findet Werte aus Tools ohne eigenen Parser, ohne den ganzen Verlauf hinauszuschicken. Bedenke: Noch nicht erkannte Ziel-Secrets gehen dabei an die Claude API, genau dafür ruft man die KI ja auf. Kosten grob 1 bis 3 Rappen pro Befehl.
+   **Empfehlung (a).** Findet Werte aus Tools ohne eigenen Parser, ohne den ganzen Verlauf hinauszuschicken. Bedenke: Noch nicht erkannte Ziel-Secrets gehen dabei an die Claude API, genau dafür ruft man die KI ja auf. In SmartLearn gilt (a) erst, wenn die Schule Lab-Daten in der Cloud erlaubt und HTTPS nicht aufbricht (Abschnitt 6, Risiko 5). Kosten grob 1 bis 3 Rappen pro Befehl.
 
 7. **Browser: welcher Weg, und ist das noch «passiv»?**
    - (a) Ein Aufzeichnungs-Proxy vor einem eigenen Testbrowser (`ariadne browser`) in v0.2. Import aus DevTools (HAR) und Burp als Rückfall. Eine Firefox-Erweiterung für Single-Page-Apps und Tab-Screenshots in v0.3. Die Webseiten-Screenshots, für die Ariadne selbst Anfragen schicken würde (E11), entfallen.

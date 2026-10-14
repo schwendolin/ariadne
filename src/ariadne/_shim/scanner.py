@@ -545,24 +545,32 @@ class OutputScanner:
         self._string_abort(data, j, k, t + 1, out, kind)
         return t + 1
 
-    def _is_marker(self, data: bytes, k: int, kind: str) -> bool:
-        if kind != "osc":
-            return False
-        code = data[k + 1 : k + 12].partition(b";")[0]
-        return _num(code) == 7701
-
     def _oversize(self, data: bytes, j: int, k: int, out: _Out, kind: str) -> int:
         end = j + MAX_STRING
-        if self._is_marker(data, k, kind):
+        cls = _string_class(data[k + 1 : end], kind)
+        if cls == "safe":
+            out.plain(data[j:end])  # Code steht fest und ist harmlos (z. B. OSC 8)
+            return end
+        if cls == "marker":
             out.items.append(Forged("oversize", out.offset))
-        out.plain(data[j:end])
+        else:
+            self._report_dropped(cls, MAX_STRING, out, "oversize")
+        self._discard = DISCARD_MAX - MAX_STRING  # Rest bis zum Terminator verwerfen
+        self._discard_esc = False
         return end
 
     def _string_abort(self, data: bytes, j: int, k: int, end: int, out: _Out, kind: str) -> None:
-        if self._is_marker(data, k, kind):
-            out.items.append(Forged("malformed", out.offset))
+        """String durch ESC (``end`` = ESC), CAN oder SUB (``end`` danach) abgebrochen.
+
+        Parser nach dem DEC-Modell (z. B. ``vte`` in Alacritty) führen einen so
+        beendeten OSC aus. Nur Strings mit harmlosem Code gehen deshalb weiter.
+        """
+        t = end if data[end - 1] not in (CAN, SUB) or end - 1 <= k else end - 1
+        cls = _string_class(data[k + 1 : t], kind)
+        if cls == "safe":
+            out.plain(data[j:end])
             return
-        out.plain(data[j:end])
+        self._report_dropped(cls, end - j, out, "aborted")
 
     def _string_done(self, data: bytes, j: int, k: int, t: int, end: int, out: _Out, kind: str) -> None:
         body = data[k + 1 : t]
@@ -570,6 +578,9 @@ class OutputScanner:
         if kind == "osc":
             raw_code, _, rest = body.partition(b";")
             code = _num(raw_code)
+            if code is not None and code > MAX_CODE:
+                out.items.append(Dropped("osc_code", out.offset))
+                return
             if code == 7701:
                 out.items.append(Marker(body, out.offset))
                 return
@@ -585,3 +596,30 @@ class OutputScanner:
             out.items.append(Dropped("decrqss", out.offset))
             return
         out.plain(seq)
+
+
+def _string_class(body: bytes, kind: str) -> str:
+    """Einordnung eines (auch unvollständigen) Strings für die fail-closed-Pfade.
+
+    ``safe``: Code steht fest und wird nie gefiltert; ``title`` (OSC 0/1/2),
+    ``osc52``, ``marker`` (OSC 7701) oder ``block`` (DECRQSS, Code noch offen,
+    nicht numerisch oder zu gross).
+    """
+    if kind == "apc":
+        return "safe"  # APC, PM, SOS: von Terminals ignoriert bzw. ohne Rückkanal
+    if kind == "dcs":
+        m = _DCS_FUNC.match(body)
+        if m is None:
+            return "block"
+        return "block" if b"$" in m.group(1) and m.group(2) == b"q" else "safe"
+    raw, sep, _ = body.partition(b";")
+    code = _num(raw) if sep else None
+    if code is None:
+        return "block"
+    if code == 7701:
+        return "marker"
+    if code in (0, 1, 2):
+        return "title"
+    if code == 52:
+        return "osc52"
+    return "block" if code > MAX_CODE else "safe"

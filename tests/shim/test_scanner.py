@@ -152,11 +152,11 @@ def test_lone_esc_held_until_next_chunk():
     assert r2.display == b"\x1b[31mx"
 
 
-def test_oversize_marker_is_forged_and_passed_as_plain():
+def test_oversize_marker_is_forged_and_dropped():
     body = b"\x1b]7701;ariadne;v1;" + b"a" * (MAX_STRING + 100)
-    sc, r = scan(body)
+    sc, r = scan(body + b"\x07nachher")
     assert any(isinstance(i, Forged) and i.reason == "oversize" for i in r.items)
-    assert r.display == body  # als normale Bytes weiter
+    assert r.display == b"nachher"  # nie als Bytes, die das Terminal fortsetzt
     assert sc.pending() == 0
 
 
@@ -166,13 +166,21 @@ def test_oversize_generic_osc_passed_through():
     assert r.display == body
 
 
-def test_timeout_releases_partial_sequence():
+def test_timeout_drops_partial_title_until_terminator():
     sc = OutputScanner()
     r = sc.feed(b"x\x1b]2;never ending", 1.0)
     assert r.display == b"x" and sc.deadline() == 1.0 + MAX_HOLD_S
     assert sc.expire(1.05).display == b""
     r = sc.expire(1.0 + MAX_HOLD_S)
-    assert r.display == b"\x1b]2;never ending" and sc.pending() == 0
+    assert r.display == b"" and sc.pending() == 0 and sc.deadline() is None
+    r = sc.feed(b" [REC lame]\x07sichtbar", 2.0)
+    assert r.display == r.record == b"sichtbar"
+
+
+def test_timeout_passes_harmless_string_raw():
+    sc = OutputScanner()
+    sc.feed(b"\x1b]8;;http://x", 1.0)
+    assert sc.expire(2.0).display == b"\x1b]8;;http://x"
 
 
 def test_timeout_on_partial_marker_reports_forged():
@@ -188,8 +196,160 @@ def test_aborted_strings():
     _, r = scan(b"a\x1b]7701;ariadne\x1b[31mb")
     assert r.display == b"a\x1b[31mb"
     assert [i.reason for i in r.items if isinstance(i, Forged)] == ["malformed"]
-    _, r = scan(b"a\x1b]2;t\x18b")  # CAN
-    assert r.display == b"a\x1b]2;t\x18b" and not any(isinstance(i, Title) for i in r.items)
+    _, r = scan(b"a\x1b]2;t\x18b")  # CAN: manche Terminals führen den OSC trotzdem aus
+    assert r.display == b"ab" and not any(isinstance(i, Title) for i in r.items)
+
+
+def test_leading_zeros_do_not_bypass_filters():
+    """Terminals lesen führende Nullen beliebig lang (xterm, VTE, qtermwidget)."""
+    z = b"0" * 12
+    _, r = scan(b"a\x1b]" + z + b"52;c;Y3VybCBldmlsfHNo\x07b")
+    assert r.display == r.record == b"ab" and any(isinstance(i, Osc52) for i in r.items)
+    _, r = scan(b"a\x1b]" + z + b"2;[REC lame]\x07b")
+    assert r.display == b"ab" and [i.text for i in r.items if isinstance(i, Title)] == [b"[REC lame]"]
+    _, r = scan(b"a\x1b[" + z + b"21tb")
+    assert r.display == r.record == b"ab"
+    _, r = scan(b"a\x1b[" + z + b"22tb")
+    assert r.display == b"ab" and r.record == b"a\x1b[" + z + b"22tb"
+    _, r = scan(b"a\x1b]" + z + b"7701;ariadne;v1;x\x07b")
+    assert r.display == b"ab" and isinstance(r.items[0], Marker)
+    for huge in (b"\x1b]4294967348;c;eA==\x07", b"\x1b[4294967317t", b"\x1b]99999;x\x07"):
+        _, r = scan(b"a" + huge + b"b")
+        assert r.display == b"ab", huge
+
+
+def test_timeout_osc52_split_is_dropped():
+    sc = OutputScanner()
+    assert sc.feed(b"a\x1b]52;c;", 0.0).display == b"a"
+    r = sc.expire(0.2)
+    assert r.display == b"" and any(isinstance(i, Osc52) for i in r.items)
+    r = sc.feed(b"Y3VybCBldmlsfHNo\x07b", 0.3)
+    assert r.display == r.record == b"b"
+
+
+def test_timeout_csi_split_never_sends_final_byte():
+    sc = OutputScanner()
+    assert sc.feed(b"a\x1b[2", 0.0).display == b"a"
+    r = sc.expire(0.2)
+    assert r.display == b"\x1b[2" and sc.deadline() is None  # Endbyte fehlt noch
+    r = sc.feed(b"1tb", 0.3)
+    assert r.display == b"\x18b"  # CAN beendet die angefangene Folge ohne Wirkung
+    sc = OutputScanner()
+    sc.feed(b"\x1b[3", 0.0)
+    sc.expire(0.2)
+    assert sc.feed(b"1mrot", 0.3).display == b"1mrot"  # harmlos: Rest geht weiter
+
+
+def test_timeout_lone_esc_then_osc():
+    sc = OutputScanner()
+    sc.feed(b"a\x1b", 0.0)
+    assert sc.expire(0.2).display == b"\x1b"
+    r = sc.feed(b"]52;c;eA==\x07b", 0.3)
+    assert r.display == b"\x18b" and any(isinstance(i, Osc52) for i in r.items)
+    sc = OutputScanner()
+    sc.feed(b"\x1b", 0.0)
+    sc.expire(0.2)
+    assert sc.feed(b"]2;titel", 0.3).display == b""
+    r = sc.expire(0.6)
+    assert r.display == b"\x18" and sc.feed(b" rest\x07ok", 0.7).display == b"ok"
+
+
+def test_aborted_filtered_strings_are_dropped():
+    _, r = scan(b"a\x1b]52;c;Y3VybA==\x1b[0mb")
+    assert r.display == b"a\x1b[0mb" and any(isinstance(i, Osc52) for i in r.items)
+    _, r = scan(b"a\x1bP$qm\x1b[0mb")
+    assert r.display == b"a\x1b[0mb"
+    _, r = scan(b"a\x1b]2;[REC x]\x1ab")
+    assert r.display == b"ab"
+
+
+def test_long_esc_c0_run_drops_esc():
+    _, r = scan(b"a\x1b" + b"\n" * 40 + b"]52;c;eA==\x07b")
+    assert b"\x1b" not in r.display
+
+
+def test_c1_controls_in_utf8_replaced():
+    _, r = scan("a\u009d52;c;eA==\u009cb\u009b21t°".encode())
+    assert r.display == r.record == "a??52;c;eA==??b??21t°".encode()
+    disp, rec, _items, sc = scan_split([b"a\xc2", b"\x9d2;x\xc2", b"\xb0"])
+    assert disp == rec == "a??2;x°".encode() and sc.pending() == 0
+
+
+def _executed(display: bytes) -> list[tuple[str, int | None]]:
+    """Kleiner VT500-Parser: welche OSC und CSI t würde ein Terminal ausführen?
+
+    Abgebrochene OSC zählen als ausgeführt (DEC-Modell, z. B. Alacritty).
+    """
+    out: list[tuple[str, int | None]] = []
+    state, buf = "ground", bytearray()
+
+    def num(b: bytes) -> int | None:
+        return int(b) if b.isdigit() else None
+
+    def osc_end() -> None:
+        out.append(("osc", num(bytes(buf).partition(b";")[0])))
+
+    for x in display:
+        if state == "osc":
+            if x in (0x07, 0x18, 0x1A):
+                osc_end()
+                state = "ground"
+            elif x == 0x1B:
+                osc_end()
+                state = "esc"
+            else:
+                buf.append(x)
+            continue
+        if x in (0x18, 0x1A):
+            state = "ground"
+        elif x == 0x1B:
+            state, buf = "esc", bytearray()
+        elif state == "esc":
+            if x == 0x5D:
+                state, buf = "osc", bytearray()
+            elif x == 0x5B:
+                state, buf = "csi", bytearray()
+            elif x >= 0x20:
+                state = "ground"
+        elif state == "csi":
+            if 0x40 <= x <= 0x7E:
+                if x == 0x74:
+                    out.append(("csi_t", num(bytes(buf).split(b";")[0])))
+                state = "ground"
+            elif x >= 0x20:
+                buf.append(x)
+    return out
+
+
+HOSTILE = [b"\x1b]52;c;Y3VybCBldmlsfHNo\x07", b"\x1b]0;[REC lame]\x07", b"\x1b[21t", b"\x1b[20t",
+           b"\x1b]2;[REC x]\x1b\\", b"\x1b]0052;c;eA==\x1b[0m", b"\x1b[0021t", b"text\r\n",
+           b"\x1b[31mrot\x1b[0m", b"\x1b]8;;http://x\x07link\x1b]8;;\x07"]
+BAD = {("osc", 52), ("osc", 0), ("osc", 1), ("osc", 2), ("csi_t", 20), ("csi_t", 21), ("csi_t", 8)}
+
+
+@settings(max_examples=300, deadline=None)
+@given(st.lists(st.sampled_from(HOSTILE), min_size=1, max_size=6),
+       st.lists(st.integers(min_value=0, max_value=200), max_size=8),
+       st.lists(st.booleans(), max_size=10))
+def test_no_filtered_sequence_reaches_terminal_with_timing(pieces, cuts, pauses):
+    data = b"".join(pieces)
+    pts = sorted({c % (len(data) + 1) for c in cuts})
+    parts, prev = [], 0
+    for c in pts:
+        parts.append(data[prev:c])
+        prev = c
+    parts.append(data[prev:])
+    sc = OutputScanner()
+    now = 0.0
+    disp = []
+    for i, part in enumerate(parts):
+        disp.append(sc.feed(part, now).display)
+        if i < len(pauses) and pauses[i]:
+            now += 0.5  # Ziel wartet zwischen zwei Bytes länger als die Haltefrist
+            disp.append(sc.expire(now).display)
+        now += 0.01
+    disp.append(sc.expire(float("inf")).display)
+    assert not set(_executed(b"".join(disp))) & BAD
 
 
 CORPUS = (

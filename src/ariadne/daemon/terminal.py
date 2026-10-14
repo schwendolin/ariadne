@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import ipaddress
 import re
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, get_args
@@ -19,6 +20,7 @@ __all__ = [
     "MarkContext",
     "Terminal",
     "parse_hello",
+    "parse_stack",
     "normalize_host",
     "normalize_user",
     "STAGE_KINDS",
@@ -27,6 +29,8 @@ __all__ = [
 STAGE_KINDS = frozenset(get_args(StageKind))
 _TID_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z-]{7,63}$")
 _NAME_RE = re.compile(r"^[a-z0-9_][a-z0-9_.-]{0,252}$")
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_STAGE_SOURCES = frozenset({"auto", "hotkey", "webui", "cli", "suggestion"})
 
 
 @dataclass
@@ -92,20 +96,23 @@ class Terminal:
     gap_hint: str | None = None
     pause: Pause | None = None
     frame_offs: list[int] = field(default_factory=list)
-    frame_times: list[tuple[int, int | None]] = field(default_factory=list)
+    frame_times: list[tuple[int, int | None, int]] = field(default_factory=list)  # Shim-Wand, Mono, Empfang
     last_out: float = 0.0
     title_extra: str | None = None
     last_state: dict[str, Any] | None = None
     closed: bool = False
+    idle_flushed: bool = False  # Leerlauf-Flush seit der letzten Ausgabe schon eingereiht
+    ctx_version: int = 0  # zählt Kontext-Entscheide; der Shim übernimmt STATE.stack nur dann
 
-    def note_frame(self, off: int, wall: int, mono: int | None) -> None:
+    def note_frame(self, off: int, wall: int, mono: int | None, recv: int = 0) -> None:
         self.frame_offs.append(off)
-        self.frame_times.append((wall, mono))
+        self.frame_times.append((wall, mono, recv or time.time_ns()))
 
-    def time_at(self, off: int) -> tuple[int, int | None]:
+    def time_at(self, off: int) -> tuple[int, int | None, int]:
+        """Shim-Wanduhr, Shim-Monotonic und Empfangszeit im Daemon des Rahmens mit ``off``."""
         i = bisect.bisect_right(self.frame_offs, off) - 1
         if i < 0:
-            return (self.frame_times[0] if self.frame_times else (0, None))
+            return (self.frame_times[0] if self.frame_times else (0, None, 0))
         return self.frame_times[i]
 
     def prune_frames(self) -> None:
@@ -134,6 +141,29 @@ def _int(obj: dict[str, Any], key: str, lo: int, hi: int, default: int = 0) -> i
     return v
 
 
+def parse_stack(data: Any) -> list[dict[str, Any]] | None:
+    """Kontext-Stapel vom Shim (HELLO, ``req.ctx.sync``) prüfen; ``None`` bei Fehlern."""
+    if not isinstance(data, list) or not data or len(data) > 64:
+        return None
+    out: list[dict[str, Any]] = []
+    for d in data:
+        if not isinstance(d, dict) or d.get("kind") not in STAGE_KINDS:
+            return None
+        st: dict[str, Any] = {"kind": d["kind"]}
+        for key in ("host", "user", "candidate"):
+            v = d.get(key)
+            if isinstance(v, str) and 0 < len(v) <= 255:
+                st[key] = v
+        off = d.get("opened_at")
+        st["opened_at"] = off if isinstance(off, int) and not isinstance(off, bool) and off >= 0 else 0
+        st["state"] = "suspended" if d.get("state") == "suspended" else "active"
+        st["source"] = d["source"] if d.get("source") in _STAGE_SOURCES else "auto"
+        out.append(st)
+    if out[0]["kind"] != "local":
+        return None
+    return out
+
+
 def parse_hello(obj: dict[str, Any]) -> dict[str, Any]:
     """Prüft ein HELLO und gibt die übernommenen Felder zurück."""
     if obj.get("proto") != PROTO_VERSION:
@@ -151,7 +181,16 @@ def parse_hello(obj: dict[str, Any]) -> dict[str, Any]:
     resume = obj.get("resume_from_seq")
     if resume is not None and (not isinstance(resume, int) or isinstance(resume, bool) or resume < 0):
         raise ProtocolError("HELLO: resume_from_seq ungültig")
+    bound = obj.get("bound_project_id")
+    if bound is not None and (not isinstance(bound, str) or not _TID_RE.match(bound)):
+        bound = None
+    slug = obj.get("bound_slug")
+    if not isinstance(slug, str) or not _SLUG_RE.match(slug):
+        slug = None
     return {
+        "stack": parse_stack(obj.get("stack")),
+        "bound_project_id": bound,
+        "bound_slug": slug if bound else None,
         "terminal_id": tid,
         "tty": _opt_str(obj, "tty", 128),
         "shell": _opt_str(obj, "shell", 256) or "unknown",

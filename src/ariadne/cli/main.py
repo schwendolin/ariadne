@@ -290,7 +290,8 @@ def cmd_ctx(paths: Paths, args: argparse.Namespace) -> int:
                       + (f" [{s(st['kind'], 20)}]" if st.get("kind") not in ("local",) else ""))
     say("Kontext: " + " › ".join(labels))
     if args.ccmd != "show" and not res.get("stored", True):
-        say("Hinweis: kein Projekt offen, Entscheid nur im Terminal-Stapel.")
+        say("Hinweis: nicht gespeichert (kein Projekt offen oder REC aus), nur im Terminal-Stapel. "
+            "Beim nächsten REC an geht der Stapel als Schnappschuss ins Journal.")
     return 0
 
 

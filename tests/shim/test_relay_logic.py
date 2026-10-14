@@ -139,17 +139,19 @@ def test_markers_update_stack_and_events():
 def test_titles_osc52_and_daemon_stack_override():
     shim, t = make_shim()
     shim._update_capture(0.0)
-    t.state_msg(shim, True, rec="on", project="lame",
-                stack=[{"kind": "local", "host": "local", "opened_at": 0},
-                       {"kind": "ssh", "host": "name:web01", "user": "root", "opened_at": 5}])
+    web01 = [{"kind": "local", "host": "local", "opened_at": 0},
+             {"kind": "ssh", "host": "name:web01", "user": "root", "opened_at": 5}]
+    t.state_msg(shim, True, rec="on", project="lame", stack=web01, ctx_version=0)
+    assert shim.stack.label() == "kali"  # erster STATE: der eigene Stapel gilt
+    t.state_msg(shim, False, rec="on", project="lame", stack=web01, ctx_version=1)  # Entscheid
     assert shim.stack.label() == "web01 root"
-    t.state_msg(shim, False, rec="on", project="lame", stack=[{"kind": "bogus"}])  # ungültig: ignoriert
-    assert shim.stack.label() == "web01 root"
+    t.state_msg(shim, False, rec="on", project="lame", stack=[{"kind": "bogus"}], ctx_version=2)
+    assert shim.stack.label() == "web01 root"  # ungültig: ignoriert
     shim._disp.clear()
     hostile = "evil \u202e[REC fake]\x01\x9b2J".encode()
     shim._on_output(b"\x1b]0;" + hostile + b"\x07\x1b]52;c;ZXZpbA==\x07", time.monotonic())
     title = bytes(shim._disp)
-    assert title.startswith(b"\x1b]2;[REC lame] web01 root | evil <U+202E>[REC fake]<0x01><0x9B>2J")
+    assert title.startswith(b"\x1b]2;[REC lame] web01 root | evil <U+202E>[REC fake]<0x01>??2J")  # C1 ersetzt
     assert title.count(b"\x1b") == 1 and title.endswith(b"\x07")
     assert ("term.osc52_blocked", {"stream_off": 28, "length": 16, "terminal_id": "term-1"}) in t.events
 
@@ -161,3 +163,55 @@ def test_hotkey_request_requires_daemon():
     t.state_msg(shim, True, rec="off")
     shim._hotkey("r", 1.0)
     assert t.events[-1] == ("req.rec", {"terminal_id": "term-1", "stream_off": 0, "on": None})
+
+
+def _stack_kinds(stack) -> list[str]:
+    return [st["kind"] for st in stack]
+
+
+def test_shim_stack_survives_rec_on_and_is_synced():
+    """REC aus: der Daemon sieht keine Marker. Sein veralteter Stapel darf den des Shims
+    beim Einschalten nicht überschreiben (Befund: Reverse Shell landet bei Kali)."""
+    shim, t = make_shim()
+    t.state_msg(shim, True, rec="off", project="lame", ctx_version=0,
+                stack=[{"kind": "local", "host": "local", "opened_at": 0}])
+    assert not shim.capture
+    t.events.clear()
+    shim._on_output(b"$ " + marker("C", "cmd=listen&cmdx=rlwrap%20nc%20-lvnp%204444", 1), 0.0)
+    assert shim.stack.top().kind == "revshell"  # Alias: zählt wie im Daemon cmd_expanded
+    sync = [f for k, f in t.events if k == "req.ctx.sync"]
+    assert sync and _stack_kinds(sync[-1]["stack"]) == ["local", "revshell"]
+    # REC an: Daemon schickt seinen (alten) Stapel ohne neuen Entscheid
+    t.state_msg(shim, False, rec="on", project="lame", ctx_version=0,
+                stack=[{"kind": "local", "host": "local", "opened_at": 0}])
+    assert shim.capture and shim.stack.top().kind == "revshell"
+    snap = [f for k, f in t.events if k == "term.ctx_snapshot"][-1]
+    assert _stack_kinds(snap["stack"]) == ["local", "revshell"]
+
+
+def test_hello_carries_stack_and_binding():
+    shim, t = make_shim()
+    t.state_msg(shim, True, rec="on", project="lame", project_id="p-alpha-0001",
+                bound_project_id="p-alpha-0001", ctx_version=0)
+    shim._on_output(marker("C", "cmd=ssh%20root%4010.10.10.5", 1), 0.0)
+    hello = shim._hello()
+    assert _stack_kinds(hello["stack"]) == ["local", "ssh"]
+    assert hello["bound_project_id"] == "p-alpha-0001" and hello["bound_slug"] == "lame"
+
+
+def test_daemon_restart_gap_reason_is_daemon_down():
+    shim, t = make_shim()
+    shim._update_capture(0.0)
+    t.state_msg(shim, True, rec="on", project="lame", daemon_id="aaaa")
+    shim._on_output(b"vorher", 0.0)
+    t.connected = t.ready = False
+    shim._on_disconnect_cb()
+    assert shim.capture  # puffert weiter
+    shim._on_output(b"waehrend", 0.1)
+    t.connected = True
+    t.state_msg(shim, True, rec="off", daemon_id="bbbb")  # neuer Daemon: gesperrt, REC aus
+    assert not shim.capture and shim._lost_reason == "daemon_down"
+    shim2, tt = make_shim()
+    shim2._update_capture(0.0)  # vorläufig an, bis der erste STATE kommt
+    tt.state_msg(shim2, True, rec="off", daemon_id="aaaa")
+    assert shim2._lost_reason == "rec_off"

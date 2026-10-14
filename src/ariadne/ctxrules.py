@@ -490,12 +490,13 @@ class ContextStack:
     # ---- Nutzerentscheide ------------------------------------------------ #
 
     def set_top(self, *, host: str | None = None, user: str | None = None,
-                kind: str | None = None, source: str = "hotkey") -> None:
+                kind: str | None = None, source: str = "hotkey", offset: int = 0) -> None:
         """Host/Benutzer der obersten aktiven Stufe setzen. Auf der lokalen Basis
-        wird stattdessen eine neue Stufe angelegt (Sprung ohne erkannten Start)."""
+        wird stattdessen eine neue Stufe ab ``offset`` angelegt (Sprung ohne
+        erkannten Start; der Segmenter nimmt dafür ``from_off`` des Entscheids)."""
         idx = self._top_index()
         if idx == 0:
-            self.push(kind=kind or "unknown", host=host, user=user, offset=0, source=source)
+            self.push(kind=kind or "unknown", host=host, user=user, offset=offset, source=source)
             return
         st = self.stages[idx]
         self.stages[idx] = replace(

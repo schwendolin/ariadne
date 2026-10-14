@@ -94,14 +94,38 @@ def test_short_secrets_ignored_and_no_hold_without_secrets():
     assert r.pending("t") is None
 
 
-def test_hold_back_and_flush():
+def test_hold_back_only_possible_secret_start_and_flush():
     r = Redactor([("sudo", SECRET)])
     out = r.feed("t", 0, b"0123456789" * 3)
-    emitted = sum(len(c) for _, c, _ in out)
-    assert emitted == 30 - (len(SECRET) - 1)
-    assert r.pending("t") == (emitted, len(SECRET) - 1)
+    assert sum(len(c) for _, c, _ in out) == 30 and r.pending("t") is None  # nichts kann ein Secret sein
+    out = r.feed("t", 30, b"pw: " + SECRET[:7].encode())
+    emitted = 30 + sum(len(c) for _, c, _ in out)
+    assert emitted == 34 and r.pending("t") == (34, 7)  # nur "Sudo-Ge" wartet
     rest = r.flush("t")
     assert rest[0][0] == emitted and r.pending("t") is None
+
+
+def test_idle_flush_keeps_secret_prefix():
+    """Pause beim Tippen (über 10 s): der Anfang des Secrets darf nicht frei werden."""
+    r = Redactor([("sudo", SECRET)])
+    out = r.feed("t", 0, b"$ mysql -u root -p" + SECRET[:7].encode())
+    out += r.flush("t", keep_prefix=True)
+    assert r.pending("t") == (18, 7)
+    out += r.feed("t", 25, SECRET[7:].encode() + b"\r\n")
+    out += r.flush("t")
+    assert joined(out) == b"$ mysql -u root -p" + stars(len(SECRET)) + b"\r\n"
+    r2 = Redactor([("sudo", SECRET)])
+    out = r2.feed("t", 0, b"abc\x1b[3")  # unvollständige Sequenz: im Leerlauf frei
+    out += r2.flush("t", keep_prefix=True)
+    assert joined(out) == b"abc\x1b[3" and r2.pending("t") is None
+
+
+def test_secret_inside_osc_title_and_hyperlink():
+    r = Redactor([("own", "hunter2-Secret")])
+    data = b"\x1b]2;curl -u admin:hunter2-Secret http://x\x07ok \x1b]8;;http://h/?t=hunter2-Secret\x1b\\x"
+    res = joined(feed_all(r, [data[:20], data[20:]]))
+    assert b"hunter2-Secret" not in res and len(res) == len(data)
+    assert res.startswith(b"\x1b]2;curl -u admin:**************") and res.endswith(b"\x1b\\x")
 
 
 def test_discontinuity_flushes_old_state():

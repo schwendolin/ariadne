@@ -3,8 +3,14 @@
 Ein Commit alle 200 ms oder ab 256 KiB. Reihenfolge pro Commit:
 
 1. ``term.out`` läuft durch den Redaktor (eigene Secrets, längenerhaltend).
-   Vor jedem anderen Event eines Terminals wird dessen Rückhalt freigegeben,
-   damit Journal- und Strom-Reihenfolge übereinstimmen.
+   Andere Events eines Terminals geben den Rückhalt nie frei: Hält der Redaktor
+   gerade den Anfang eines möglichen Secrets, warten sie hinter ihm und gehen
+   an ihrer Stromposition ins Journal (das ``term.out`` wird dort geteilt). Sonst
+   könnte ein Ereignis, das ein Ziel auslösen kann (``term.marker_forged``,
+   ``term.osc52_blocked``) oder ein ``term.resize``, ein Secret zerteilen und
+   den Anfang im Klartext schreiben. Nur REC aus, Projektwechsel, Pause und das
+   Ende des Terminals geben den Rückhalt hart frei; Stille nur, was kein
+   Secret beginnen kann.
 2. ``append_many`` in einer Transaktion.
 3. ACK an die Shims (nur für vollständig gespeicherte Rahmen).
 4. Commit- und Mark-Hooks, ausserhalb der Transaktion. Fehler dort stoppen
@@ -39,6 +45,7 @@ class _Out:
 @dataclass
 class _Flush:
     t: Terminal
+    soft: bool = False  # Leerlauf: möglichen Secret-Anfang behalten
 
 
 @dataclass
@@ -59,6 +66,7 @@ class Writer:
         self._carry: list[AppendItem] = []
         self._carry_marks: list[MarkContext | None] = []
         self._carry_journal: Any = None
+        self._deferred: dict[str, list[_Event]] = {}  # Events hinter dem Redaktor-Rückhalt
 
     @property
     def pending_gen(self) -> int:
@@ -76,8 +84,8 @@ class Writer:
                   mark_ctx: MarkContext | None = None) -> None:
         self.pending.append(_Event(item, t, mark_ctx))
 
-    def add_flush(self, t: Terminal) -> None:
-        self.pending.append(_Flush(t))
+    def add_flush(self, t: Terminal, *, soft: bool = False) -> None:
+        self.pending.append(_Flush(t, soft))
 
     def drop_carry(self) -> None:
         if self._carry:
@@ -96,7 +104,7 @@ class Writer:
     # ------------------------------------------------------------------ #
     def _out_item(self, t: Terminal, chunk: Chunk) -> AppendItem:
         off, data, reds = chunk
-        wall, mono = t.time_at(off)
+        wall, mono, recv = t.time_at(off)
         header: dict[str, Any] = {
             "terminal_id": t.terminal_id,
             "stream_off": off,
@@ -106,14 +114,57 @@ class Writer:
         }
         if mono is not None:
             header["mono_ns"] = mono
+        # Empfangszeit des Rahmens, nicht die Commit-Zeit (der Rückhalt kann warten)
         return AppendItem("term.out", header, data, origin="shim", terminal_id=t.terminal_id,
-                          stream_off=off)
+                          stream_off=off, ts_utc_ns=recv or None)
+
+    @staticmethod
+    def _event_off(e: _Event) -> int:
+        off = e.item.stream_off
+        return off if isinstance(off, int) else 0
+
+    def _put_event(self, e: _Event, items: list[AppendItem], marks: list[MarkContext | None]) -> None:
+        items.append(e.item)
+        if e.item.kind == "term.mark":
+            marks.append(e.mark_ctx)
+
+    def _put_chunks(self, t: Terminal, chunks: list[Chunk], items: list[AppendItem],
+                    marks: list[MarkContext | None]) -> None:
+        """Ausgabe-Stücke ins Journal; wartende Events an ihrer Stromposition dazwischen."""
+        q = self._deferred.get(t.terminal_id)
+        for off, data, reds in chunks:
+            while q:
+                x = self._event_off(q[0])
+                if x > off + len(data):
+                    break
+                if x > off:
+                    cut = x - off
+                    items.append(self._out_item(t, (off, data[:cut], _clip(reds, off, x))))
+                    reds = _clip(reds, x, off + len(data))
+                    data, off = data[cut:], x
+                self._put_event(q.pop(0), items, marks)
+            if data:
+                items.append(self._out_item(t, (off, data, reds)))
+        self._release(t, items, marks)
+
+    def _release(self, t: Terminal, items: list[AppendItem], marks: list[MarkContext | None]) -> None:
+        q = self._deferred.get(t.terminal_id)
+        if not q:
+            self._deferred.pop(t.terminal_id, None)
+            return
+        pend = self.d.redactor.pending(t.terminal_id)
+        limit = pend[0] if pend is not None else None
+        while q and (limit is None or self._event_off(q[0]) <= limit):
+            self._put_event(q.pop(0), items, marks)
+        if not q:
+            self._deferred.pop(t.terminal_id, None)
 
     def flush_now(self) -> list[EventRecord]:
         """Schreibt alles Eingereihte synchron. Gibt die neuen Records zurück."""
         project = self.d.project
         pending, self.pending, self.pending_bytes = self.pending, [], 0
         if project is None:
+            self._deferred.clear()
             if pending:
                 log.warning("Writer: %d Einträge ohne offenes Projekt verworfen", len(pending))
                 for e in pending:
@@ -130,15 +181,18 @@ class Writer:
         redactor = self.d.redactor
         for e in pending:
             if isinstance(e, _Out):
-                items.extend(self._out_item(e.t, c) for c in redactor.feed(e.t.terminal_id, e.off, e.data))
+                self._put_chunks(e.t, redactor.feed(e.t.terminal_id, e.off, e.data), items, marks)
             elif isinstance(e, _Flush):
-                items.extend(self._out_item(e.t, c) for c in redactor.flush(e.t.terminal_id))
+                self._put_chunks(e.t, redactor.flush(e.t.terminal_id, keep_prefix=e.soft), items, marks)
+            elif e.t is None:
+                self._put_event(e, items, marks)
             else:
-                if e.t is not None:
-                    items.extend(self._out_item(e.t, c) for c in redactor.flush(e.t.terminal_id))
-                items.append(e.item)
-                if e.item.kind == "term.mark":
-                    marks.append(e.mark_ctx)
+                tid = e.t.terminal_id
+                pend = redactor.pending(tid)
+                if tid in self._deferred or (pend is not None and self._event_off(e) > pend[0]):
+                    self._deferred.setdefault(tid, []).append(e)  # wartet hinter dem Rückhalt
+                else:
+                    self._put_event(e, items, marks)
         if not items:
             self.committed_gen += 1
             self.d.advance_acks()
@@ -163,3 +217,13 @@ class Writer:
         for rec, ctx in zip(mark_records, marks, strict=False):
             self.d.run_mark_hooks(rec, ctx)
         return records
+
+
+def _clip(reds: list[Any], start: int, end: int) -> list[Any]:
+    """Redaktionsvermerke auf den Bereich ``[start, end)`` beschneiden."""
+    out = []
+    for r in reds:
+        a, b = max(r.start, start), min(r.end, end)
+        if a < b:
+            out.append(r.model_copy(update={"start": a, "end": b}))
+    return out

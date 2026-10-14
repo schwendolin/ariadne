@@ -10,7 +10,11 @@ Shim an Daemon
                   "cols", "tmux_pane", "window_id", "shim_version", "pid",
                   "display": {"DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY",
                               "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"},
-                  "resume_from_seq": int | null}
+                  "resume_from_seq": int | null,
+                  "stack": [Stage-Dicts] (Stapel des Shims),
+                  "bound_project_id": str | null, "bound_slug": str | null}
+           Stapel und Bindung übernimmt der Daemon nur für ein Terminal, das er
+           noch nicht kennt (erster Kontakt, Daemon-Neustart).
     OUT    binär ``>QQqq`` (seq, stream_off, t_wall_ns, t_mono_ns) + Bytes.
            Bytes sind der aufgezeichnete Strom: genau das, was angezeigt wurde,
            ohne entfernte Ariadne-Marker und ohne gefilterte Sequenzen.
@@ -29,20 +33,26 @@ Shim an Daemon
              "req.ctx.pop"  {}                                 oberste Stufe schliessen
              "req.keystep"  {"step": foothold|privesc|pivot|loot, "host"?, "note"?}
              "req.shot"     {"mode"?: window|monitor|region}
+             "req.ctx.sync" {"stack": [Stage-Dicts]}  Stapel des Shims, solange
+                            er nicht aufnimmt (der Daemon sieht dann keine Marker)
            Die Stufenart heisst ``stage_kind`` (``kind`` ist die Event-Art);
            ``ctx_kind`` wird ebenfalls angenommen. ``host`` ist der eingegebene
            Text (IP oder Name); der Daemon normalisiert zu ``ip:default/<ip>``
            bzw. ``name:<name>`` und löst nie auf. Optional schickt der Shim bei
            jedem ``req.*`` ``terminal_id`` und ``stream_off`` mit; der Daemon
-           ignoriert beide und nimmt seine eigenen Werte. Der Shim setzt nie
-           selbst eine Operator-ID.
+           nimmt seine eigenen Werte, nur bei REC aus ``stream_off`` als Beginn
+           einer neuen Stufe. Der Shim setzt nie selbst eine Operator-ID.
     BYE    JSON  {"exit_code": int|null}
 
 Daemon an Shim
     STATE  JSON  {"rec": "off"|"on"|"waiting"|"offline", "project": slug|null,
                   "project_id": str|null, "profile": "lab"|"customer"|null,
                   "bound_project_id": str|null, "stack": [Stage-Dicts],
+                  "ctx_version": int, "daemon_id": str,
                   "suggestion": str|null, "hosts": [str], "title_extra": str|null}
+           ``stack`` übernimmt der Shim nur, wenn sich ``ctx_version`` seit dem
+           letzten STATE dieser Verbindung geändert hat (Kontext-Entscheid).
+           ``daemon_id`` ist pro Daemon-Start neu; wechselt sie, war der Daemon weg.
            ``offline`` sendet der Daemon nie; der Shim nutzt den Wert intern
            (Daemon nicht erreichbar) und behandelt einen empfangenen Wert wie
            «letzten bekannten Zustand beibehalten». ``title_extra`` ist eine

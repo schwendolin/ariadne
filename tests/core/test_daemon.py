@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -388,3 +389,168 @@ def test_submit_and_flush_for_other_sources(paths, operator):
         assert "d.note.set" in got
 
     run(paths, operator, scenario)
+
+
+def _stage(kind: str, opened_at: int = 0, **kw: Any) -> dict[str, Any]:
+    return {"kind": kind, "opened_at": opened_at, **kw}
+
+
+def test_shim_stack_is_authoritative_while_not_recording(paths, operator):
+    """Befund: Daemon kennt Marker nur bei REC an; sein Stapel darf beim Start der Aufnahme
+    und nach einem Neustart nicht den des Shims ersetzen."""
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "project.new", slug="stk", targets=["10.10.10.0/24"])
+        # Neues Terminal (z. B. nach Daemon-Neustart mitten in einer ssh-Sitzung)
+        shim = await FakeShim(paths.term_sock).connect(
+            stack=[_stage("local", host="local"), _stage("ssh", 40, candidate="10.10.10.5", user="root")])
+        st = await shim.wait_state(rec="off")
+        assert [s["kind"] for s in st["stack"]] == ["local", "ssh"]
+        # REC aus: nc -lvnp im Shim erkannt, der Daemon bekommt den Stapel per req.ctx.sync
+        await shim.event(1, "req.ctx.sync", stack=[_stage("local", host="local"),
+                                                   _stage("ssh", 40, candidate="10.10.10.5", user="root"),
+                                                   _stage("revshell", 900)])
+        await shim.wait_ack(1)
+        # Entscheid bei REC aus: wirkt auf den Stapel, wird aber nicht am alten Offset gespeichert
+        await shim.event(2, "req.ctx.set", host="10.10.10.7", stream_off=950)
+        st = await shim._wait(lambda: shim.state if shim.state.get("ctx_version") == 1 else None, 3)
+        assert st["stack"][-1]["host"] == "ip:default/10.10.10.7"
+        await shim.event(3, "req.keystep", step="foothold")
+        await shim.wait_ack(3)
+        await ctl_ok(paths.ctl_sock, "rec.on")
+        await shim.wait_state(rec="on")
+        await shim.event(4, "term.gap", stream_off=1000, reason="rec_off", bytes_lost=0)
+        await shim.out(5, 1000, b"uid=0(root)\r\n")
+        await shim.wait_ack(5)
+        d.flush()
+        j = d.project.journal
+        assert list(j.iter_events(kinds=["d.ctx.set"])) == []
+        snap = next(j.iter_events(kinds=["term.ctx_snapshot"]))
+        assert [s["kind"] for s in snap.header["stack"]] == ["local", "ssh", "revshell"]
+        assert snap.header["stack"][-1]["host"] == "ip:default/10.10.10.7"
+        key = next(j.iter_events(kinds=["d.keystep.mark"]))
+        assert "stream_off" not in key.header and key.header["host"] == "ip:default/10.10.10.7"
+        # Lücke beginnt am gespeicherten Ende (0), nicht erst dort, wo der Shim sie meldet
+        gap = next(j.iter_events(kinds=["term.gap"]))
+        assert (gap.header["stream_off"], gap.header["bytes_lost"]) == (0, 1000)
+        await shim.close()
+
+    run(paths, operator, scenario, idle_flush=0.05)
+
+
+def test_binding_survives_daemon_restart_via_hello(paths, operator):
+    async def scenario(d: Daemon) -> None:
+        a = await ctl_ok(paths.ctl_sock, "project.new", slug="alpha", targets=["10.10.10.0/24"])
+        await ctl_ok(paths.ctl_sock, "project.new", slug="beta", targets=["10.10.20.0/24"])
+        st = await ctl_ok(paths.ctl_sock, "status")
+        assert st["project"]["slug"] == "beta" and a["opened"]
+        alpha_id = next(p["id"] for p in (await ctl_ok(paths.ctl_sock, "project.list"))["projects"]
+                        if p["slug"] == "alpha")
+        shim = await FakeShim(paths.term_sock).connect(bound_project_id=alpha_id, bound_slug="alpha")
+        await ctl_ok(paths.ctl_sock, "rec.on")
+        st = await shim.wait_state(project="beta")
+        assert st["rec"] == "off" and st["bound_project_id"] == alpha_id
+        assert "alpha" in (st["title_extra"] or "")
+        await shim.out(1, 0, b"evil-winrm Sitzung zu alpha\r\n")
+        await shim.wait_ack(1)
+        d.flush()
+        assert list(d.project.journal.iter_events(kinds=["term.out"])) == []
+        await shim.close()
+
+    run(paths, operator, scenario, idle_flush=0.05)
+
+
+def test_bye_after_rec_off_writes_term_close(paths, operator):
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "project.new", slug="bye", targets=["10.10.10.0/24"])
+        await ctl_ok(paths.ctl_sock, "rec.on")
+        shim = await FakeShim(paths.term_sock).connect()
+        await shim.wait_state(rec="on")
+        await shim.out(1, 0, b"eins\r\n")
+        await shim.wait_ack(1)
+        await ctl_ok(paths.ctl_sock, "rec.off")
+        await shim.wait_state(rec="off")
+        await shim.bye(0)
+        await shim._wait(lambda: shim.closed, 3)
+        closes = [r.header for r in d.project.journal.iter_events(kinds=["term.close"])]
+        assert closes == [{"terminal_id": shim.terminal_id, "stream_off": 6}]
+
+    run(paths, operator, scenario, idle_flush=0.05)
+
+
+def _ordered_stream(journal, terminal_id: str) -> bytes:
+    """Strom in Journal-Reihenfolge (prüft zugleich, dass die Reihenfolge stimmt)."""
+    data = b""
+    for r in journal.iter_events(kinds=["term.out"], terminal_id=terminal_id):
+        assert r.stream_off == len(data), "Journal-Reihenfolge weicht vom Strom ab"
+        data += r.body or b""
+    return data
+
+
+@pytest.mark.parametrize("between", ["resize", "forged", "idle", "other_terminal"])
+def test_secret_split_by_event_or_silence_is_redacted(paths, operator, between):
+    """Befund: Events und Leerlauf gaben den Rückhalt frei, der Secret-Anfang landete im Klartext."""
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "project.new", slug="leak", targets=["10.10.10.0/24"])
+        await ctl_ok(paths.ctl_sock, "rec.on")
+        shim = await FakeShim(paths.term_sock).connect()
+        other = await FakeShim(paths.term_sock).connect()
+        await shim.wait_state(rec="on")
+        await other.wait_state(rec="on")
+        head = b"$ mysql -u root -p" + OWN_SECRET[:7].encode()
+        await shim.out(1, 0, head)
+        seq = 2
+        if between == "resize":
+            await shim.event(seq, "term.resize", stream_off=len(head), rows=30, cols=100)
+            seq += 1
+        elif between == "forged":
+            for _ in range(3):  # Ziel löst Events aus, während das Echo Zeichen für Zeichen kommt
+                await shim.event(seq, "term.marker_forged", stream_off=len(head), reason="bad_nonce")
+                seq += 1
+        elif between == "idle":
+            await asyncio.sleep(0.3)  # länger als idle_flush
+        else:
+            await other.out(1, 0, b"anderes Terminal\r\n")
+            await other.event(2, "term.resize", stream_off=18, rows=30, cols=100)
+            await other.wait_ack(2)
+        await asyncio.sleep(0.1)
+        await shim.out(seq, len(head), OWN_SECRET[7:].encode() + b"\r\n")
+        await shim.event(seq + 1, "term.mark", stream_off=len(head) + len(OWN_SECRET) - 7 + 2, mark="A",
+                         counter=1, fg_shell=True)
+        await shim.wait_ack(seq + 1)
+        d.flush()
+        j = d.project.journal
+        data = _ordered_stream(j, shim.terminal_id)
+        assert OWN_SECRET[:7].encode() not in data
+        assert data == b"$ mysql -u root -p" + b"*" * len(OWN_SECRET) + b"\r\n"
+        if between == "resize":
+            recs = [r for r in j.iter_events(terminal_id=shim.terminal_id)
+                    if r.kind in ("term.out", "term.resize")]
+            pos = [(r.kind, r.stream_off) for r in recs]
+            assert ("term.resize", len(head)) in pos
+            i = pos.index(("term.resize", len(head)))
+            before = [r for r in recs[:i] if r.kind == "term.out"]
+            assert all(r.stream_off + len(r.body or b"") <= len(head) for r in before)
+        await shim.close()
+        await other.close()
+
+    run(paths, operator, scenario, idle_flush=0.05)
+
+
+def test_term_out_keeps_receive_time(paths, operator):
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "project.new", slug="ts", targets=["10.10.10.0/24"])
+        await ctl_ok(paths.ctl_sock, "rec.on")
+        shim = await FakeShim(paths.term_sock).connect()
+        await shim.wait_state(rec="on")
+        t0 = time.time_ns()
+        await shim.out(1, 0, b"root@lame:~# " + OWN_SECRET[:5].encode())  # Rückhalt am Ende
+        await asyncio.sleep(0.5)
+        await shim.out(2, 18, b"x\r\n")
+        await shim.wait_ack(2)
+        d.flush()
+        outs = list(d.project.journal.iter_events(kinds=["term.out"]))
+        held = [r for r in outs if r.stream_off <= 13 < r.stream_off + r.header["length"]]
+        assert held and held[0].ts_utc_ns < t0 + 300_000_000  # Empfang, nicht Freigabe
+        await shim.close()
+
+    run(paths, operator, scenario, idle_flush=10.0)

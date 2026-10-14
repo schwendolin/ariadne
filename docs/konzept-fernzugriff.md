@@ -4,38 +4,37 @@
 
 Deine Kali läuft in SmartLearn, du bedienst sie über die Webkonsole im Browser. Dein Mac kommt nicht an die Kali heran, die Kali aber ins Internet.
 
-**Dein Weg jetzt: Weg E.** Ariadne läuft in der Kali, das Dashboard öffnest du im Firefox der Kali. Das geht sofort und ohne Erlaubnis. Den Webserver dafür bringt v0.1; bis dahin nutzt du die Kommandozeile.
+**Dein Weg jetzt: Weg E, Browser in der Kali.** Ariadne läuft in der Kali, das Dashboard öffnest du im Firefox der Kali. Das braucht weder Tunnel noch Erlaubnis. Das Dashboard kommt mit v0.1, bis dahin zeigt `ariadne show` die Daten im Terminal.
 
-**Dein Zielweg: Weg B, erst wenn die Schule schriftlich zustimmt.** Tailscale baut von der Kali aus ein privates, verschlüsseltes Netz zum Mac und ist nur die Leitung. Darin trägt SSH (verschlüsselte Fernanmeldung) `http://127.0.0.1:7330` vom Mac-Browser zur Kali. Ariadne lauscht weiter nur auf `127.0.0.1`, also nur für Programme der Kali.
+**Dein Zielweg: Weg B, erst wenn die Schule schriftlich zustimmt.** Tailscale baut von der Kali aus ein privates, verschlüsseltes Netz zum Mac. Darin bringt SSH (verschlüsselte Fernanmeldung) das Dashboard in den Browser des Macs. Ariadne lauscht weiter nur auf `127.0.0.1`, also nur für Programme der Kali.
 
 **Was du als Nächstes tust**
 
-1. Webkonsole in Chrome oder Safari öffnen, in einem eigenen Profil ohne Erweiterungen (Firefox tippt dort doppelt).
-2. In der Kali `passwd`, dann die Prüfliste 3.2. Sie bestätigt das Internet und zeigt bei `issuer`, ob die Schule HTTPS mitliest.
+1. Webkonsole in Chrome oder Safari öffnen, in einem eigenen Profil ohne Erweiterungen, denn Erweiterungen sehen jede Taste. Nie Firefox: Dort kommen Tasten doppelt an.
+2. In der Kali `passwd` (eigenes Passwort), dann die Prüfliste 3.2. Sie bestätigt das Internet und zeigt bei `issuer`, ob die Schule HTTPS mitliest.
 3. Auf dem Mac `fdesetup status`. Erwartet: `FileVault is On.` (Plattenverschlüsselung).
-4. Ticket an die Schule (3.5), vor allem: Ist Tailscale aus der Lab-VM erlaubt?
-5. Sicherung einrichten (6.3), dann nach jeder Session sichern (6.4).
+4. Ticket an die Schule mit den Fragen aus 3.5.
+5. Sicherung einrichten (6.3), dann nach jeder Session verschlüsselt aus der VM holen (6.4). Die Schule kann die VM jederzeit zurücksetzen.
 
 **Sicherheitsregeln**
 
-- Im Lab-Netz lauscht nur, was du für eine Übung startest. Ariadne bleibt auf `127.0.0.1`, SSH bleibt aus, kein Übungs-Webserver im Home-Ordner. Prüfen mit `sudo ss -tulpn`.
+- Im Lab-Netz lauscht nur, was du für eine Übung startest: Ariadne nur auf `127.0.0.1`, SSH aus (bis Weg B), kein Übungs-Webserver im Home-Ordner. Prüfen mit `sudo ss -tulpn`.
 - Kein Tunnel und keine Tunnel-Probe ohne schriftliches Ja der Schule.
 - Die Schule kann Bildschirm, Tastatur und Speicher der VM sehen. Darum nur Lab-Daten.
-- Passphrase nie unter Firefox oder mit Browser-Erweiterungen in die Webkonsole tippen. Ab Weg B entsperrst du vom Mac aus: `ssh -t kali-sl unlock`.
-- Sicherung ausserhalb der VM, mit age verschlüsselt (Werkzeug für Dateiverschlüsselung). Die Schule kann die VM jederzeit zurücksetzen.
-- Vor jeder Pause `ariadne lock`. Das soll auch die Anmeldung im Dashboard beenden; sonst läuft sie nach 12 Stunden ab.
+- Die Passphrase tippst du nur im Terminal, nie im Dashboard. Ab Weg B tippst du sie vom Mac aus: `ssh -t kali-sl unlock`.
+- Lässt du die Kali allein, sperrst du Ariadne mit `ariadne lock`.
 
 **Was Ariadne zuerst bauen muss**
 
-Für Weg E (v0.1): den Webserver, der nur auf `127.0.0.1` startet und fremde Anfragen abweist, ablaufende Anmeldungen, `ariadne backup` und `restore`, die Selbstprüfung `ariadne remote check`. Für Weg B (v0.2): `ariadne remote serve` (der Mac-Schlüssel öffnet nur das Dashboard), Einrichtungsskript für die Kali, Mac-Helfer `ariadne-mac`.
+Für Weg E (v0.1): einen Webserver nur auf `127.0.0.1`, der fremde Anfragen abweist, ablaufende Anmeldungen, `ariadne backup` und `restore`, die Selbstprüfung `ariadne remote check`. Für Weg B (v0.2): `ariadne remote serve`, ein Einrichtungsskript für die Kali und den Mac-Helfer `ariadne-mac`.
 
-**Offene Fragen mit Empfehlung** (Abschnitt 9)
+**Offene Fragen mit Empfehlung** (Details in [Abschnitt 9](#9-fragen-an-dich))
 
-1. F3, erlaubt die Schule Tailscale? Per Ticket fragen, Antwort schriftlich.
+1. Erlaubt die Schule Tailscale? Per Ticket fragen, Antwort schriftlich ablegen.
 2. Welcher Tunnel? Tailscale.
-3. Mac-Browser für Weg B? Firefox nur für Ariadne, Profil erreicht nur `127.0.0.1`.
-4. Wie lange gilt eine Anmeldung? Höchstens 12 Stunden, Ende auch mit dem Tunnel.
-5. Was darf der Mac-Schlüssel? Nur Ariadne, keine Shell.
+3. Browser auf dem Mac (Weg B)? Firefox nur für Ariadne, abgeschottet auf `127.0.0.1`; die Webkonsole bleibt in Chrome oder Safari.
+4. Wie lange gilt eine Anmeldung? Höchstens 12 Stunden; sie endet auch mit `ariadne lock` und mit dem Tunnel.
+5. Was darf der SSH-Schlüssel des Macs? Nur Ariadne, keine Shell.
 6. Wann sichern? Nach jeder Session.
 7. Was kommt in v0.1? Sicherung und Schutz des Webservers, Fernzugriff erst in v0.2.
 
@@ -549,7 +548,7 @@ Das ist das heutige Design der Architektur, ohne Netzweg und ohne Regelfrage. Al
 - Mit 4 GB RAM wird es eng, wenn Burp, Firefox und die Karte gleichzeitig laufen. Eine kleinere Karte oder die Tabellenansicht hilft.
 - Was auf der Konsole steht, sieht eine Lehrperson im Beobachtungsmodus von SmartLearn mit, also auch das Dashboard. Vor dem Unterricht den Präsentationsmodus einschalten.
 
-**Alltag E:** In der Kali `ariadne ui` (nach dem Konzept Terminal und Web später zusammen mit `ariadne start`), Firefox rechts, Terminal links.
+**Alltag E:** In der Kali `ariadne start` (heute `ariadne unlock`, `ariadne project open` und `ariadne rec on`, siehe Konzept Terminal und Web), dann `ariadne ui`. Firefox rechts, Terminal links.
 
 ## 5 Sicherheitskonzept
 
@@ -606,7 +605,7 @@ Die Angreiferklassen aus Architektur 9.1 gelten weiter. Für den Fernzugriff zä
 | Erweiterung im Ariadne-Profil liest Seite und Token | Privatmodus (Erweiterungen dort aus), Installation gesperrt | Helfer bricht ab bei Erweiterungen im Profil oder per `policies.json` erzwungenen; R9, T15 | keins |
 | Lücke oder Erweiterung schickt Daten ins Internet | Insel: alles ausser `127.0.0.1` geht an einen toten Proxy, DoH und WebRTC aus | Helfer schreibt `user.js` (R9), T10 | Übergabe an andere Programme (z. B. `mailto:`) |
 | Schadsoftware mit deinen Rechten benutzt deinen SSH-Schlüssel | Passphrase, nicht im Schlüsselbund, höchstens 4 h im Agent; der Schlüssel kann nur Tunnel und `remote serve`, keine Shell | Forced Command R11, T12, T13 | Dashboard bleibt erreichbar, ein Tastatur-Logger sieht die Passphrase von `unlock`; gegen einen übernommenen Mac hilft kein Konzept ganz |
-| fremdes Programm hält Port 7330 auf dem Mac und zeigt eine falsche Seite, um den Code abzufangen | `ExitOnForwardFailure`; Helfer prüft vor dem Öffnen, dass 7330 seinem `ssh` gehört; Code nur im Fragment, nie getippt; Passphrase nie im Browser (E74) | Helfer R13, T15 | gering, der Code gilt 60 s und einmal |
+| fremdes Programm hält Port 7330 auf dem Mac und zeigt eine falsche Seite, um den Code abzufangen | `ExitOnForwardFailure`; Helfer prüft vor dem Öffnen, dass 7330 seinem `ssh` gehört; Code nur im Fragment, nie getippt; Passphrase nie in der Web-UI (E74) | Helfer R13, T15 | gering, der Code gilt 60 s und einmal |
 | globale SSH-Einstellungen (`Host *` mit `ForwardAgent yes`, `ControlPersist` hält den Tunnel nach `stop` offen) | Helfer nutzt nur `ssh -F ~/.ssh/ariadne.conf` mit `ControlMaster no` | Helfer R13, T15 | keins |
 | Token wird gestohlen und anderswo benutzt; vergessene Sitzung nach dem Zuklappen | Token an den sshd-Prozess des Tunnels gebunden; endet mit Tunnel, `lock`, `project close`, Neustart; der Daemon speichert nur einen Hash | Ariadne R2, R6; T6, T7 | keins |
 | Zwischenablage: Copy/Paste der Konsole, Handoff, Clipboard-Verläufe nehmen Secrets mit | UI kopiert Secrets nur in die Zwischenablage der Kali (`xclip`, 30 s) und nennt das Ziel, nie per `navigator.clipboard` | Ariadne R14, T11 | ist Copy/Paste der Konsole an, landet das Secret trotzdem auf dem Mac und deinen Apple-Geräten |
@@ -761,21 +760,21 @@ Grundsatz: Ariadne prüft und warnt, ändert aber keine Systemdienste. sshd, nft
 |---|---|---|---|---|
 | Loopback, Peer-Prüfung und Bindung (R1 bis R3) | Konfiguration lehnt Nicht-Loopback ab, Start fail-closed, `getsockname` nach dem Start; Peer-UID für TCP über `/proc/net/tcp`; Token an PID und Startzeit des Peers gebunden | T1, T2, T6 | v0.1, mit dem HTTP-Teil | 6 bis 9 h |
 | Middleware und Header (R12) | `same-site` 403, Origin Pflicht bei Schreiben, Fehlversuche erst nach der Middleware zählen, `frame-ancestors` und `X-Frame-Options` auf allen Antworten | T3 bis T5 | v0.1 | 1 bis 2 h |
-| `ariadne remote serve` (R5, R11) | Forced-Command-Programm mit fester Befehlsliste; `code` mit Schnellprüfung (R10) vorher; `restore` nur ohne Tresor; Tippcode nur mit Terminal | T4, T12 | v0.1 | 6 bis 10 h |
+| `ariadne remote serve` (R5, R11) | Forced-Command-Programm mit fester Befehlsliste; `code` mit Schnellprüfung (R10) vorher; `restore` nur ohne Tresor; Tippcode nur mit Terminal | T4, T12 | v0.2 nach Frage 7 (b), sonst v0.1 | 6 bis 10 h |
 | Sitzungen (R6, R7, R8) | Tokens als Hash, ungültig bei `lock`, `project close`, Neustart, Tunnelende; SSE schliesst sofort; `ui --sessions` mit Herkunft; `Clear-Site-Data` beim Abmelden | T7, T8 | v0.1 | 4 bis 6 h |
 | UI (R9, R14) | Herkunft der Sitzung anzeigen, Ziel der Kopie anzeigen, Tastenkürzel für den Präsentationsmodus, ESLint-Regel gegen `navigator.clipboard` | T9, T11 | v0.1 | 2 bis 3 h |
 | `ariadne remote check` (R10) | Bindung von 7330, `sshd -T -C`, Ports gegen Filter, `ssh.socket`, `Requires=`, Hostkey-Marker, `authorized_keys`, OpenSSH ab 9.8, Tailscale-Prefs, Swap, open-vm-tools, Python; Ausgabe wie `doctor` (ok, warn, fail) | T14 | v0.1 | 6 bis 9 h |
 | `ariadne backup` und `restore` | Stream mit Manifest (Version, Kettenköpfe, Hashes), mit `pyrage` an `backup.recipients`; Ausgabe auf ein Terminal verweigert; `--to-file` für die Datei-Übertragung; Eintrag in die Registry; Restore prüft Manifest und Version, legt Ordner mit 0700 an, ruft `verify` | T16 | **v0.1, vorgezogen aus v0.2** (Architektur 8.9) | 15 bis 25 h |
-| Mac-Helfer `ariadne-mac` | zsh-Skript unter `packaging/mac/`: `check`, `start` (Prüfungen R13, Tunnel, Code holen, Startdatei 0600 in `$TMPDIR`, Insel-Profil mit `MOZ_CRASHREPORTER_DISABLE=1`, Datei nach 10 s löschen), `stop` (widerrufen, sichern, Tunnel zu), `unlock`, `backup`, `restore` | T10, T15 | v0.1 | 6 bis 9 h |
-| Einrichtungsskript für die Kali | `packaging/smartlearn/kali-setup.sh` mit `--weg a`, `b` oder `c`: Hostkeys neu und Marker, sshd-Datei, Filter mit `Requires=`, `authorized_keys`-Zeile, `ListenAddress` und Tunnel-Unit für C, Empfänger der Sicherung; idempotent, zeigt jede Änderung vor dem Schreiben | Lauf im Container `kalilinux/kali-rolling`, zweimal hintereinander ohne Unterschied | v0.1 | 3 bis 5 h |
-| E2E über einen echten Tunnel | sshd im Container mit `10-ariadne.conf` und eingeschränktem Schlüssel, `ssh -L`, Playwright meldet sich an, SSE läuft; Tunnel weg, dann 401 und Anmeldeseite; Neuanmeldung geht | T13, Marker `remote` | v0.1 | 6 bis 10 h |
+| Mac-Helfer `ariadne-mac` | zsh-Skript unter `packaging/mac/`: `check`, `start` (Prüfungen R13, Tunnel, Code holen, Startdatei 0600 in `$TMPDIR`, Insel-Profil mit `MOZ_CRASHREPORTER_DISABLE=1`, Datei nach 10 s löschen), `stop` (widerrufen, sichern, Tunnel zu), `unlock`, `backup`, `restore` | T10, T15 | v0.2 nach Frage 7 (b), sonst v0.1 | 6 bis 9 h |
+| Einrichtungsskript für die Kali | `packaging/smartlearn/kali-setup.sh` mit `--weg a`, `b` oder `c`: Hostkeys neu und Marker, sshd-Datei, Filter mit `Requires=`, `authorized_keys`-Zeile, `ListenAddress` und Tunnel-Unit für C, Empfänger der Sicherung; idempotent, zeigt jede Änderung vor dem Schreiben | Lauf im Container `kalilinux/kali-rolling`, zweimal hintereinander ohne Unterschied | v0.2 nach Frage 7 (b), sonst v0.1 | 3 bis 5 h |
+| E2E über einen echten Tunnel | sshd im Container mit `10-ariadne.conf` und eingeschränktem Schlüssel, `ssh -L`, Playwright meldet sich an, SSE läuft; Tunnel weg, dann 401 und Anmeldeseite; Neuanmeldung geht | T13, Marker `remote` | v0.2 nach Frage 7 (b), sonst v0.1 | 6 bis 10 h |
 | `ariadne doctor` ausbauen | erkennt VMware (`systemd-detect-virt`), unverschlüsselten Swap, open-vm-tools, warnt bei Nicht-Loopback | Fixtures | v0.2 (Teile in `remote check` schon v0.1) | 3 bis 5 h |
 | Hinweisregel Übungs-Webserver | Webserver (`http.server`, `php -S`, `updog`), dessen Wurzel Ariadne-Daten oder `~/.ssh` enthält | Regel-Fixture | v0.2 | 1 bis 2 h |
 | Offline-Bundle | nur nötig, wenn F2 nein: Installation ohne Internet über die Datei-Übertragung | Install-Test mit `--network none` (geplant) | v0.2; nicht vorziehen, solange 3.2 dein F2 ja bestätigt | wie geplant |
 | Profil customer: Fernzugriff | `remote.allowed`, kürzere Tokens, Anmeldungen im Aktivitätsprotokoll | Policy-Tests | v0.3 | 4 bis 6 h |
 | Doku | Architektur 7.2 «Fernzugriff», 8.9, 9.1 (A8, A3 auf dem Mac); web-api.md 1.1 und 3; entwicklung.md | | v0.1 | 2 bis 3 h |
 
-**Summe für v0.1:** etwa 55 bis 90 Stunden zusätzlich, bei 20 Stunden pro Woche also drei bis fünf Wochen. Das ist viel neben der Rest-Liste von v0.1. Wenn es eng wird, behalte `backup` und `restore`, R1 bis R3 mit Middleware und `remote check`, weil sie auch ohne Fernzugriff wichtig sind. Mac-Helfer, `remote serve` und den E2E-Tunneltest schiebst du dann auf v0.2; bis dahin bleibt es bei Weg E.
+**Summe, wenn alles in v0.1 kommt (Frage 7 a):** etwa 55 bis 90 Stunden zusätzlich, bei 20 Stunden pro Woche also drei bis fünf Wochen. Das ist viel neben der Rest-Liste von v0.1. Darum empfehle ich (b): In v0.1 bleiben `backup` und `restore`, R1 bis R3 mit Middleware, Sitzungen und `remote check`, weil sie auch ohne Fernzugriff wichtig sind. `remote serve`, Einrichtungsskript, Mac-Helfer und den E2E-Tunneltest schiebst du auf v0.2; bis dahin bleibt es bei Weg E.
 
 ### 7.1 Tests, die Ariadne mitliefert
 
@@ -805,8 +804,8 @@ Jede Regel aus 5.4 hat mindestens einen automatischen Test. Die Tests laufen in 
 | Wann | Was |
 |---|---|
 | jetzt, ohne Code | Prüfliste, Ticket an die Schule, Weg E nutzen, Notlösung der Sicherung (6.4) |
-| v0.1 (Rest) | mit dem HTTP-Teil: R1 bis R3, R12, Sitzungen, `remote check`, `backup`/`restore`, dazu nach Frage 7 `remote serve`, Einrichtungsskript, Mac-Helfer, Doku |
-| v0.2 | `doctor` ausgebaut, Hinweisregel Übungs-Webserver, Offline-Bundle (früher, falls F2 nein), Sicherung inkrementell, launchd-Agent für automatischen Neuaufbau des Tunnels |
+| v0.1 (Rest) | mit dem HTTP-Teil: R1 bis R3, R12, Sitzungen, `remote check`, `backup`/`restore`, Doku; nur bei Frage 7 (a) auch `remote serve`, Einrichtungsskript, Mac-Helfer und Tunnel-E2E |
+| v0.2 | bei Frage 7 (b, empfohlen) `remote serve`, Einrichtungsskript, Mac-Helfer und Tunnel-E2E; `doctor` ausgebaut, Hinweisregel Übungs-Webserver, Offline-Bundle (früher, falls F2 nein), Sicherung inkrementell, launchd-Agent für automatischen Neuaufbau des Tunnels |
 | v0.3 | Fernzugriff im Profil customer, Anmeldungen im Aktivitätsprotokoll, Anleitung für Headscale oder Firmen-VPN |
 
 **Zu verifizieren**
@@ -851,7 +850,7 @@ Alles in dieser Tabelle ist ein **Vorschlag** (Quelle «KI-Vorschlag» bzw. «Nu
 4. **Sitzungsdauer.** (a) Token höchstens 12 h, endet bei `lock`, `project close`, Neustart und mit dem Tunnel; nach WLAN-Wechsel oder Zuklappen meldest du dich mit `ariadne-mac start` neu an. (b) wie (a), aber das Token überlebt einen Neuaufbau des Tunnels. (c) 12 h wie bisher geplant, ohne Widerruf bei `lock`. **Empfehlung (a)**: ein Befehl mehr nach dem Zuklappen, dafür ist ein gestohlenes Token wertlos.
 5. **Mac-Schlüssel.** (a) ein Schlüssel nur für Ariadne (Forced Command), Verwaltung über die Konsole. (b) zusätzlich ein zweiter Schlüssel mit Shell, ohne Agent, für Arbeit im Mac-Terminal. (c) ein Schlüssel mit voller Shell. **Empfehlung (a).** (b) ist bequem, weil Kopieren zwischen Mac und Kali dann einfach geht; dafür hat jedes Programm, das den zweiten Schlüssel nutzen kann, eine Shell auf der Kali.
 6. **Sicherung.** (a) nach jeder Session: heute bei Weg E als Datei über die Datei-Übertragung, mit Weg B automatisch bei `ariadne-mac stop`. (b) von Hand, wenn du daran denkst. (c) keine. **Empfehlung (a).** Den Recovery-Schlüssel legst du in jedem Fall ausserhalb der VM und nie als Datei ab.
-7. **Roadmap.** (a) alles aus Abschnitt 7 für v0.1 in v0.1 (etwa 55 bis 90 h zusätzlich). (b) nur `backup`/`restore`, R1 bis R3 mit Middleware und `remote check` in v0.1; `remote serve`, Mac-Helfer und Tunnel-E2E in v0.2, bis dahin Weg E. (c) alles wie bisher geplant in v0.2. **Empfehlung (b)**: Die Sicherung brauchst du sofort, und vor der Antwort der Schule darfst du den Fernzugriff ohnehin nicht nutzen.
+7. **Roadmap.** (a) alles aus Abschnitt 7 für v0.1 in v0.1 (etwa 55 bis 90 h zusätzlich). (b) nur `backup`/`restore`, R1 bis R3 mit Middleware, Sitzungen und `remote check` in v0.1; `remote serve`, Einrichtungsskript, Mac-Helfer und Tunnel-E2E in v0.2, bis dahin Weg E. (c) alles wie bisher geplant in v0.2. **Empfehlung (b)**: Die Sicherung brauchst du sofort, und vor der Antwort der Schule darfst du den Fernzugriff ohnehin nicht nutzen.
 
 ## 10 Quellen
 

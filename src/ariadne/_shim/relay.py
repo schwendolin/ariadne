@@ -130,6 +130,10 @@ class Shim:
         self._lost_since: int | None = 0
         self._lost_reason = "daemon_down"
         self._rec_broken = False
+        self._ctx_version: int | None = None  # STATE.ctx_version, zuletzt übernommen
+        self._daemon_id: str | None = None
+        self._bound_id: str | None = None
+        self._bound_slug: str | None = None
         self._disp = bytearray()
         self._delayed = bytearray()
         self._to_child = bytearray()
@@ -213,6 +217,10 @@ class Shim:
             "shim_version": __version__,
             "pid": os.getpid(),
             "display": {k: self.env.get(k) for k in DISPLAY_KEYS},
+            # Nach einem Daemon-Neustart kennt nur der Shim Stapel und Projektbindung.
+            "stack": self.stack.snapshot(),
+            "bound_project_id": self._bound_id,
+            "bound_slug": self._bound_slug,
         }
 
     # --------------------------------------------------------- Schleife
@@ -536,13 +544,28 @@ class Shim:
         ev = mark_event(v.marker, terminal_id=self.terminal_id, stream_off=item.stream_off,
                         fg_shell=v.fg_shell)
         self._emit("term.mark", ev)
-        before = self.stack.label()
-        if v.marker.mark == "C" and ev.get("cmd_typed"):
-            self.stack.on_command_start(context_argv(ev["cmd_typed"]), item.stream_off)
+        before = self.stack.snapshot()
+        label = self.stack.label()
+        cmd = ev.get("cmd_expanded") or ev.get("cmd_typed")  # wie Daemon und Segmenter (Aliase)
+        if v.marker.mark == "C" and cmd:
+            self.stack.on_command_start(context_argv(cmd), item.stream_off)
         elif v.marker.mark == "D" and v.fg_shell:
             self.stack.on_command_end(ev.get("exit"), item.stream_off)
-        if self.stack.label() != before:
+        if self.stack.snapshot() != before and not self.capture:
+            self._sync_stack()
+        if self.stack.label() != label:
             self._refresh_title(now)
+
+    def _sync_stack(self) -> None:
+        """Ohne Aufnahme sieht der Daemon keine Marker: Stapel nachführen (``req.ctx.sync``)."""
+        t = self.transport
+        if t is None or not t.ready or self._rec_broken:
+            return
+        try:
+            t.add_event("req.ctx.sync", {"terminal_id": self.terminal_id, "stream_off": self._offset(),
+                                         "stack": self.stack.snapshot()})
+        except Exception:
+            self._broken()
 
     def _emit(self, kind: str, fields: dict[str, Any]) -> None:
         t = self.transport
@@ -574,7 +597,7 @@ class Shim:
             return self._last_rec in (None, "on", "waiting")
         return self._last_rec in ("on", "waiting")
 
-    def _update_capture(self, now: float) -> None:
+    def _update_capture(self, now: float, reason: str | None = None) -> None:
         want = self._want_capture()
         if want == self.capture:
             return
@@ -597,7 +620,7 @@ class Shim:
             self._drop_from = None
             self._lost_since = lost
             ready_off = t is not None and t.ready and self._rec == "off"
-            self._lost_reason = "rec_off" if ready_off else "daemon_down"
+            self._lost_reason = reason or ("rec_off" if ready_off else "daemon_down")
 
     def _on_state_cb(self, st: dict[str, Any], first: bool) -> None:
         now = time.monotonic()
@@ -610,18 +633,40 @@ class Shim:
             rec = self._last_rec or "off"
         self._rec = rec
         self._last_rec = rec
+        reason = None
+        if first:
+            did = st.get("daemon_id") if isinstance(st.get("daemon_id"), str) else None
+            if self._daemon_id is not None and did != self._daemon_id and self.capture:
+                reason = "daemon_down"  # Daemon neu gestartet (gesperrt, REC aus): Puffer verloren
+            self._daemon_id = did
         if first and rec not in ("on", "waiting") and t is not None:
             self._drop_from = t.drop_unacked()
         if prev == "waiting" and rec == "on" and t is not None:
             t.rewind()
-        stack = _clean_stack(st.get("stack"))
-        if stack is not None:
-            with contextlib.suppress(Exception):
-                self.stack = ContextStack([Stage.from_dict(d) for d in stack])
+        # Den Stapel führt der Shim selbst (er sieht alle Marker, auch bei REC aus). Vom
+        # Daemon kommt er nur nach einem Kontext-Entscheid (neue ctx_version).
+        ver = st.get("ctx_version")
+        ver = ver if type(ver) is int else None
+        if first:
+            self._ctx_version = ver
+        elif ver is not None and ver != self._ctx_version:
+            self._ctx_version = ver
+            stack = _clean_stack(st.get("stack"))
+            if stack is not None:
+                with contextlib.suppress(Exception):
+                    self.stack = ContextStack([Stage.from_dict(d) for d in stack])
+        bound = st.get("bound_project_id")
+        if isinstance(bound, str) and 0 < len(bound) <= 64:
+            self._bound_id = bound
+            slug = st.get("project")
+            if st.get("project_id") == bound and isinstance(slug, str) and len(slug) <= 64:
+                self._bound_slug = slug
         hosts = st.get("hosts")
         if isinstance(hosts, list):
             self.hosts = [h for h in hosts[:500] if isinstance(h, str) and len(h) <= 255]
-        self._update_capture(now)
+        self._update_capture(now, reason)
+        if first and not self.capture:
+            self._sync_stack()
         self._refresh_title(now)
 
     def _on_disconnect_cb(self) -> None:
@@ -773,7 +818,7 @@ class Shim:
             if host is None:
                 self._note("kein Host angegeben", now)
                 return
-            self.stack.set_top(host=host, user=user, source="hotkey")
+            self.stack.set_top(host=host, user=user, source="hotkey", offset=self._offset())
             self._request("req.ctx.set", {"host": host, "user": user}, now)
             self._note(f"Host {host}", now)
         elif kind == "note" and self._keystep:

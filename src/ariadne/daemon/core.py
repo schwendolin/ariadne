@@ -26,6 +26,16 @@ Hotkey-Anfragen (EVENT ``req.*``, Felder neben ``seq`` und ``kind``):
 * ``req.ctx.pop``  ``{}`` schliesst die oberste Stufe
 * ``req.keystep``  ``{"step": foothold|privesc|pivot|loot, "host"?, "note"?}``
 * ``req.shot``     ``{}`` (v0.1: nur Rückmeldung im Titel)
+* ``req.ctx.sync`` ``{"stack": [...]}`` Stapel des Shims, solange er nicht aufnimmt
+
+Kontext-Stapel: Der Shim sieht alle Marker, auch bei REC aus; der Daemon nur die
+aufgenommenen. Der Daemon übernimmt deshalb den Stapel des Shims (HELLO bei einem
+neuen Terminal, ``req.ctx.sync`` bei REC aus, ``term.ctx_snapshot`` beim Start der
+Aufnahme). Umgekehrt übernimmt der Shim ``STATE.stack`` nur, wenn sich
+``STATE.ctx_version`` geändert hat, also nach einem Kontext-Entscheid (Hotkey, CLI).
+Entscheide eines Terminals, das gerade nicht aufnimmt, wirken nur auf Stapel und
+Anzeige; gespeichert wird der Stapel mit dem nächsten Schnappschuss beim REC-Start.
+Sonst hingen sie am Stromende des letzten REC-Stopps und träfen eine alte Stufe.
 
 Hosts werden als ``ip:default/<ip>`` oder ``name:<name>`` gespeichert, nie
 aufgelöst. Rückmeldungen kommen als ``STATE.title_extra`` (5 s).
@@ -85,6 +95,7 @@ from ariadne.daemon.terminal import (
     normalize_host,
     normalize_user,
     parse_hello,
+    parse_stack,
 )
 from ariadne.daemon.writer import Writer
 from ariadne.ingest import queries
@@ -112,7 +123,8 @@ TERM_EVENTS = frozenset({
     "term.mark", "term.resize", "term.ctx_snapshot", "term.gap", "term.close",
     "term.osc52_blocked", "term.marker_forged",
 })
-REQUESTS = frozenset({"req.rec", "req.ctx.set", "req.ctx.push", "req.ctx.pop", "req.keystep", "req.shot"})
+REQUESTS = frozenset({"req.rec", "req.ctx.set", "req.ctx.push", "req.ctx.pop", "req.ctx.sync", "req.keystep",
+                      "req.shot"})
 KEYSTEPS = frozenset({"foothold", "privesc", "pivot", "loot"})
 _MARK_TEXT_FIELDS = ("cmd_typed", "cmd_expanded", "cwd", "user")
 
@@ -156,6 +168,7 @@ class Daemon:
         self.operator = operator
         self.project: OpenProject | None = None
         self.rec_on = False
+        self.daemon_id = os.urandom(8).hex()  # STATE: der Shim erkennt daran einen Neustart
         self.terminals: dict[str, Terminal] = {}
         self.redactor = Redactor()
         self.writer = Writer(self, interval=batch_interval, max_bytes=batch_bytes)
@@ -309,9 +322,11 @@ class Daemon:
         for t in list(self.terminals.values()):
             if t.pause is not None and now >= t.pause.deadline:
                 self._end_pause(t, None)
-            if (t.recording and t.last_out and now - t.last_out >= self.idle_flush
+            if (t.recording and t.last_out and not t.idle_flushed and now - t.last_out >= self.idle_flush
                     and self.redactor.pending(t.terminal_id) is not None):
-                self.writer.add_flush(t)
+                # Stille: nur freigeben, was kein Secret beginnen kann (Pause beim Tippen)
+                self.writer.add_flush(t, soft=True)
+                t.idle_flushed = True
         if self.writer.pending or self.writer._carry:
             self.writer.flush_now()
 
@@ -357,6 +372,8 @@ class Daemon:
             "profile": p.info.profile if p else None,
             "bound_project_id": t.bound_project_id,
             "stack": t.stack.snapshot(),
+            "ctx_version": t.ctx_version,
+            "daemon_id": self.daemon_id,
             "suggestion": None,
             "hosts": [],
             "title_extra": extra,
@@ -527,6 +544,14 @@ class Daemon:
             resume = h["resume_from_seq"]
             if resume:
                 t.max_seq = t.acked_seq = max(0, resume - 1)
+            # Neues Terminal-Objekt (erster Kontakt oder Daemon-Neustart): Stapel und
+            # Projektbindung kennt nur der Shim. Ohne die Bindung landete eine laufende
+            # Sitzung zu Projekt A nach dem Neustart in Projekt B (Architektur 3.6).
+            if h["stack"] is not None:
+                t.stack = ContextStack.from_snapshot(h["stack"])
+            if h["bound_project_id"]:
+                t.bound_project_id = h["bound_project_id"]
+                t.bound_slug = h["bound_slug"]
             self.terminals[tid] = t
         elif t.conn is not None and t.conn is not writer:
             with contextlib.suppress(Exception):
@@ -545,11 +570,18 @@ class Daemon:
         return t
 
     def _on_bye(self, t: Terminal) -> None:
-        if t.recording and not t.closed:
+        p = self.project
+        known = (t.recording or (p is not None and p.info.id in t.opened_in
+                                 and t.bound_project_id == p.info.id))
+        if known and not t.closed:
+            # Auch bei REC aus: sonst bleibt die letzte Einheit offen und die Auswertung
+            # lädt das Terminal bei jedem Start neu.
+            if t.pause is not None:
+                self._end_pause(t, None)
             self.writer.add_event(AppendItem(
                 "term.close", {"terminal_id": t.terminal_id, "stream_off": t.recv_end},
                 origin="daemon", terminal_id=t.terminal_id, stream_off=t.recv_end), t)
-        if t.recording:
+        if known:
             self.writer.add_flush(t)
             self.writer.flush_now()
         self.terminals.pop(t.terminal_id, None)
@@ -620,6 +652,7 @@ class Daemon:
         t.recv_end = end
         t.note_frame(off, wall, mono)
         t.last_out = time.monotonic()
+        t.idle_flushed = False
         entry.need_end = end
         entry.need_gen = self.writer.pending_gen
         self.writer.add_out(t, off, data)
@@ -670,12 +703,19 @@ class Daemon:
         elif kind == "term.resize":
             t.rows, t.cols = int(header["rows"]), int(header["cols"])
         elif kind == "term.gap" and t.recording:
-            t.recv_end = max(t.recv_end, int(header["stream_off"]) + int(header.get("bytes_lost", 0)))
+            end = int(header["stream_off"]) + int(header.get("bytes_lost", 0))
+            if int(header["stream_off"]) > t.recv_end:
+                # Bytes zwischen dem gespeicherten Ende und dem Lückenbeginn des Shims hat
+                # der Daemon verworfen (z. B. Rahmen unterwegs, als REC ausging).
+                header["stream_off"] = t.recv_end
+                header["bytes_lost"] = end - t.recv_end
+                off = t.recv_end
+            t.recv_end = max(t.recv_end, end)
         elif kind == "term.close":
             t.closed = True
         if t.recording:
             self.writer.add_event(AppendItem(str(kind), header, origin="shim", terminal_id=t.terminal_id,
-                                             stream_off=off), t, mark_ctx)
+                                             stream_off=off, ts_utc_ns=time.time_ns()), t, mark_ctx)
             entry.need_gen = self.writer.pending_gen
         if labels:
             log.info("Redaktor: %d Treffer in Marker-Feldern", len(labels))
@@ -712,10 +752,17 @@ class Daemon:
                     raise ValueError("on")
                 self._set_rec(not self.rec_on if on is None else on, source="hotkey",
                               terminal_id=t.terminal_id)
+            elif kind == "req.ctx.sync":
+                stack = parse_stack(obj.get("stack"))
+                if stack is None:
+                    raise ValueError("stack")
+                if not t.recording:  # bei laufender Aufnahme führen die Marker den Stapel
+                    t.stack = ContextStack.from_snapshot(stack)
             elif kind in ("req.ctx.set", "req.ctx.push", "req.ctx.pop"):
                 stage_kind = obj.get("stage_kind", obj.get("ctx_kind"))
                 self._ctx_decision(t, kind.rsplit(".", 1)[1], host=obj.get("host"), user=obj.get("user"),
-                                   stage_kind=stage_kind, origin="shim", source="hotkey")
+                                   stage_kind=stage_kind, origin="shim", source="hotkey",
+                                   shim_off=obj.get("stream_off"))
             elif kind == "req.keystep":
                 self._keystep(t, obj)
             elif kind == "req.shot":
@@ -726,17 +773,21 @@ class Daemon:
             self._flash(t, "Eingabe ungültig")
 
     def _ctx_decision(self, t: Terminal, op: str, *, host: Any = None, user: Any = None,
-                      stage_kind: Any = None, origin: str, source: str) -> dict[str, Any]:
+                      stage_kind: Any = None, origin: str, source: str,
+                      shim_off: Any = None) -> dict[str, Any]:
         host_n = normalize_host(host) if isinstance(host, str) and host.strip() else None
         user_n = normalize_user(user) if isinstance(user, str) and user.strip() else None
         if stage_kind is not None and (not isinstance(stage_kind, str) or stage_kind not in STAGE_KINDS):
             raise ValueError("ungültige Stufe")
         off = t.recv_end
+        if (not t.recording and isinstance(shim_off, int) and not isinstance(shim_off, bool)
+                and shim_off >= 0):
+            off = shim_off  # Stromposition des Shims; recv_end ist das Ende des letzten REC
         tid = t.terminal_id
         if op == "set":
             if host_n is None and user_n is None and stage_kind is None:
                 raise ValueError("nichts zu setzen")
-            t.stack.set_top(host=host_n, user=user_n, kind=stage_kind, source=source)
+            t.stack.set_top(host=host_n, user=user_n, kind=stage_kind, source=source, offset=off)
             kind, header = "d.ctx.set", {"terminal_id": tid, "from_off": off, "host": host_n,
                                          "user": user_n, "kind": stage_kind}
         elif op == "push":
@@ -751,9 +802,12 @@ class Daemon:
         else:
             raise ValueError("unbekannte Kontext-Operation")
         header = {k: v for k, v in header.items() if v is not None}
-        stored = self._can_store_decision(t)
+        t.ctx_version += 1
+        stored = self._can_store_decision(t) and t.recording
         if stored:
             self.writer.add_event(AppendItem(kind, header, origin=origin, terminal_id=tid, stream_off=off), t)
+        elif not t.recording and origin == "shim":
+            self._flash(t, "Kontext gesetzt, gespeichert ab REC an")
         self._send_state(t)
         return {"stack": t.stack.snapshot(), "stored": stored}
 
@@ -771,10 +825,11 @@ class Daemon:
         if not self._can_store_decision(t):
             self._flash(t, "Schlüsselschritt nicht gespeichert: kein Projekt offen")
             return
-        header = {"terminal_id": t.terminal_id, "stream_off": t.recv_end, "step": step, "host": host_n,
-                  "note": note}
+        # Ohne Aufnahme gibt es keine Stromposition: recv_end wäre das Ende des letzten REC.
+        tid, off = (t.terminal_id, t.recv_end) if t.recording else (None, None)
+        header = {"terminal_id": tid, "stream_off": off, "step": step, "host": host_n, "note": note}
         self.writer.add_event(AppendItem("d.keystep.mark", {k: v for k, v in header.items() if v is not None},
-                                         origin="shim", terminal_id=t.terminal_id, stream_off=t.recv_end), t)
+                                         origin="shim", terminal_id=tid, stream_off=off), t)
         self._flash(t, f"Schlüsselschritt: {step}")
 
     # ================================================================== #
@@ -1260,7 +1315,7 @@ class Daemon:
         t = self.terminals.get(tid) if tid else None
         header: dict[str, Any] = {"step": step}
         item_tid = item_off = None
-        if t is not None and t.bound_project_id in (None, p.info.id):
+        if t is not None and t.recording and t.bound_project_id in (None, p.info.id):
             item_tid, item_off = t.terminal_id, t.recv_end
             header.update(terminal_id=item_tid, stream_off=item_off)
             if host is None:

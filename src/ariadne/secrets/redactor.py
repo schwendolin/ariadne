@@ -9,9 +9,14 @@ Secret-Liste.
   ``zsh-syntax-highlighting`` mit Farbsequenzen zerstückelt hat.
 * Ein Treffer ersetzt den ganzen zugehörigen Rohbereich (inklusive der
   eingestreuten Sequenzen) durch ``*`` gleicher Länge. Offsets bleiben stabil.
-* Pro Terminal bleiben die letzten ``max_len - 1`` Zeichen der Sicht (plus eine
-  unvollständige Sequenz am Ende) zurück, damit Treffer über Chunk-Grenzen
-  erkannt werden. :meth:`Redactor.flush` gibt den Rückhalt frei.
+* Inhalte von OSC- und DCS-Strings (Fenstertitel mit der Befehlszeile, OSC 8
+  mit Token in der URL) werden zusätzlich je für sich durchsucht.
+* Pro Terminal bleibt nur zurück, was ein Secret beginnen könnte: das längste
+  Ende der Sicht, das Anfang eines gesuchten Musters ist (höchstens
+  ``max_len - 1`` Zeichen), plus eine unvollständige Sequenz am Ende. So
+  werden Treffer über Chunk-Grenzen erkannt, und sonst wartet nichts.
+  :meth:`Redactor.flush` gibt den Rückhalt frei; ``keep_prefix=True`` (Stille)
+  behält einen echten Secret-Anfang, damit eine Pause beim Tippen nichts verrät.
 
 Generische Muster (Private Keys, ``sk-ant-``, ``AKIA``) schwärzt der Redaktor
 nie, denn Secrets vom Ziel sind Funde. :func:`scan_outgoing` meldet sie nur als
@@ -82,15 +87,20 @@ def variants(value: str) -> set[bytes]:
 
 
 class _View:
-    """Sicht ohne Escape-Sequenzen mit Rückabbildung auf Roh-Offsets."""
+    """Sicht ohne Escape-Sequenzen mit Rückabbildung auf Roh-Offsets.
 
-    __slots__ = ("text", "_vstarts", "_rstarts", "limit")
+    ``strings`` sind die Rohbereiche der Inhalte von OSC- und DCS-Strings; sie
+    gehören nicht zur Sicht, werden aber einzeln durchsucht.
+    """
+
+    __slots__ = ("text", "_vstarts", "_rstarts", "limit", "strings")
 
     def __init__(self, buf: bytes, limit: int) -> None:
         self.limit = limit  # Rohbytes ab hier gehören nicht zur Sicht
         parts: list[bytes] = []
         vstarts: list[int] = []
         rstarts: list[int] = []
+        self.strings: list[tuple[int, int]] = []
         pos = 0
         vlen = 0
         if b"\x1b" in buf[:limit]:
@@ -100,6 +110,10 @@ class _View:
                     rstarts.append(pos)
                     parts.append(buf[pos:m.start()])
                     vlen += m.start() - pos
+                if buf[m.start() + 1] in (0x5D, 0x50):  # OSC, DCS: Inhalt ohne Einleitung/Terminator
+                    end = m.end() - (1 if buf[m.end() - 1] == 0x07 else 2)
+                    if end > m.start() + 2:
+                        self.strings.append((m.start() + 2, end))
                 pos = m.end()
         if limit > pos:
             vstarts.append(vlen)
@@ -171,7 +185,7 @@ class Redactor:
         return [t for t, st in self._states.items() if st.buf]
 
     # ------------------------------------------------------------------ #
-    def _find(self, view: _View) -> list[Hit]:
+    def _find(self, view: _View, buf: bytes = b"") -> list[Hit]:
         """Treffer in der Sicht, abgebildet auf Roh-Bereiche, überlappende zusammengeführt."""
         text = view.text
         raw_hits: list[Hit] = []
@@ -180,6 +194,11 @@ class Redactor:
             while i >= 0:
                 raw_hits.append(Hit(label, view.raw(i), view.raw(i + len(pat) - 1) + 1))
                 i = text.find(pat, i + 1)
+            for a, b in view.strings:
+                i = buf.find(pat, a, b)
+                while i >= 0:
+                    raw_hits.append(Hit(label, i, i + len(pat)))
+                    i = buf.find(pat, i + 1, b)
         if not raw_hits:
             return []
         raw_hits.sort(key=lambda h: (h.start, -(h.end - h.start)))
@@ -197,9 +216,26 @@ class Redactor:
         """Alle Treffer in einem vollständigen Puffer (Roh-Offsets relativ zu ``data``)."""
         if not self._patterns:
             return []
-        return self._find(_View(data, len(data)))
+        return self._find(_View(data, len(data)), data)
 
-    def _process(self, st: _State, final: bool) -> Chunk | None:
+    def _prefix_hold(self, text: bytes) -> int:
+        """Länge des längsten Endes von ``text``, mit dem ein gesuchtes Muster beginnt."""
+        best = 0
+        tail = text[-(self.max_len - 1):] if self.max_len > 1 else b""
+        for pat, _label in self._patterns:
+            start = max(0, len(tail) - (len(pat) - 1))
+            i = tail.find(pat[:1], start)
+            while i >= 0:
+                k = len(tail) - i
+                if k <= best:
+                    break
+                if pat.startswith(tail[i:]):
+                    best = k
+                    break
+                i = tail.find(pat[:1], i + 1)
+        return best
+
+    def _process(self, st: _State, final: bool, keep_prefix: bool = False) -> Chunk | None:
         buf = st.buf
         if not buf:
             return None
@@ -208,18 +244,18 @@ class Redactor:
             hits: list[Hit] = []
         else:
             limit = len(buf)
-            if not final:
+            if not final and not keep_prefix:
                 tail = _ESC_TAIL_RE.search(buf, max(0, len(buf) - MAX_ESC))
                 if tail is not None:
                     limit = tail.start()
             view = _View(buf, limit)
-            hits = self._find(view)
+            hits = self._find(view, buf)
             if final:
                 emit = len(buf)
             else:
-                hold = self.max_len - 1
+                hold = self._prefix_hold(view.text)
                 n = len(view.text)
-                emit = view.raw(max(0, n - hold)) if n else limit
+                emit = view.raw(n - hold) if hold else limit
                 emit = min(emit, limit)
                 if len(buf) - emit > self.max_hold_raw:
                     emit = len(buf) - self.max_hold_raw
@@ -261,8 +297,21 @@ class Redactor:
             out.append(done)
         return out
 
-    def flush(self, terminal_id: str) -> list[Chunk]:
-        """Gibt den Rückhalt eines Terminals frei (Befehlsgrenze, Projektwechsel, Ende)."""
+    def flush(self, terminal_id: str, *, keep_prefix: bool = False) -> list[Chunk]:
+        """Gibt den Rückhalt eines Terminals frei (REC aus, Projektwechsel, Ende).
+
+        ``keep_prefix=True`` (Leerlauf): Ein Ende, das ein Secret beginnen könnte,
+        bleibt zurück. Sonst gäbe eine Pause beim Tippen den Anfang frei, und der
+        Rest würde nicht mehr erkannt.
+        """
+        if keep_prefix:
+            st = self._states.get(terminal_id)
+            if st is None:
+                return []
+            done = self._process(st, final=False, keep_prefix=True)
+            if not st.buf:
+                self._states.pop(terminal_id, None)
+            return [done] if done else []
         st = self._states.pop(terminal_id, None)
         if st is None:
             return []
