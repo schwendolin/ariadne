@@ -143,6 +143,15 @@ def scope() -> ScopeMatcher:
     ("10.10.10.0/16", "excluded"),
     ("mac:aa:bb:cc:dd:ee:ff", "unknown"),
     ("pаypal.lame.htb", "unknown"),
+    ("straße.lame.htb", "unknown"),  # IDNA2003 macht strasse daraus, curl xn--strae-oqa
+    ("http://straße.lame.htb/", "unknown"),
+    ("http://lame.htb/%6Cogout", "excluded"),  # Ausschluss mit kodiertem Buchstaben
+    ("http://lame.htb/LOGOUT", "excluded"),
+    ("http://lame.htb//logout", "excluded"),
+    ("http://lame.htb/logout;jsessionid=1", "excluded"),
+    ("http://lame.htb/x/..%2flogout", "excluded"),
+    ("http://lame.htb/x/..%252flogout", "excluded"),
+    ("http://lame.htb/logoutx", "in"),
     ("", "unknown"),
     ("10.10.10.*", "unknown"),
 ])
@@ -227,3 +236,11 @@ def test_window_over_midnight_and_invalid():
     assert bad.errors
     assert bad.check("10.0.0.1", _ns(2026, 3, 27, 12, 0)).verdict == "outside_window"  # fail-closed
     assert datetime.now(UTC).year >= 2026
+
+
+def test_idna_deviation_names_rejected_as_targets():
+    from ariadne.project.guardrails import InvalidTarget, parse_target
+
+    with pytest.raises(InvalidTarget):
+        parse_target("straße.htb")
+    assert parse_target("xn--strae-oqa.htb").value == "xn--strae-oqa.htb"

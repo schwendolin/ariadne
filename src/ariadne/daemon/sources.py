@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from ariadne.ctxrules import split_command
 from ariadne.daemon.terminal import MarkContext
 from ariadne.ids import cmd_id as make_cmd_id
+from ariadne.ingest.segmenter import KEEPS_MARKERS
 from ariadne.parsers.registry import companions_for
 from ariadne.scope.targets import extract_targets
 from ariadne.sources import safeopen
@@ -160,7 +161,7 @@ class LocalSources:
             if r.kind != "term.gap" or r.terminal_id is None:
                 continue
             h = r.header
-            if int(h.get("bytes_lost", 0) or 0) > 0 and h.get("reason") != "sensitive_output":
+            if int(h.get("bytes_lost", 0) or 0) > 0 and h.get("reason") not in KEEPS_MARKERS:
                 off = int(h.get("stream_off", 0) or 0)
                 self._gap_off[r.terminal_id] = max(off, self._gap_off.get(r.terminal_id, -1))
 
@@ -282,13 +283,26 @@ class LocalSources:
         if p is None:
             return None
         blob_id = None
-        if fd.data is not None:
-            blob_id = p.blobs.put_bytes(fd.data, kind="file").blob_id
-        mime, sniffed = safeopen.sniff(fd.data, path)
+        data = fd.data
+        reds: list[dict[str, Any]] = []
+        if data is not None:
+            # Eigene Secrets (z. B. in nmap-XML unter args="--script-args creds...") wie im
+            # Terminal-Strom schwärzen, bevor sie in Blob-Store und Volltextsuche gehen.
+            hits = self.d.redactor.scan(data)
+            if hits:
+                buf = bytearray(data)
+                for h in hits:
+                    buf[h.start:h.end] = b"*" * (h.end - h.start)
+                    reds.append({"label": h.label, "start": h.start, "end": h.end})
+                data = bytes(buf)
+            blob_id = p.blobs.put_bytes(data, kind="file").blob_id
+        mime, sniffed = safeopen.sniff(data, path)
         header: dict[str, Any] = {
             "path": path, "sha256": fd.sha256, "size": fd.size, "blob_id": blob_id, "mime": mime,
-            "sniff": sniffed if fd.data is not None else "too_large", **fields,
+            "sniff": sniffed if data is not None else "too_large", **fields,
         }
+        if reds:
+            header["redactions"] = reds
         header = {k: v for k, v in header.items() if v is not None}
         origin = "daemon" if fields.get("origin") == "companion" else "cli"
         self.d.submit(AppendItem("file.observed", header, origin=origin))

@@ -23,8 +23,22 @@ def hello() -> dict:
             "pid": 1, "display": {}}
 
 
+_MADE: list[T.Transport] = []
+
+
 def make(path, cap=MIN_CAPACITY, **kw) -> T.Transport:
-    return T.Transport(str(path), "t1", hello, FrameRing(cap), **kw)
+    t = T.Transport(str(path), "t1", hello, FrameRing(cap), **kw)
+    _MADE.append(t)
+    return t
+
+
+@pytest.fixture(autouse=True)
+def _close_transports():
+    yield
+    while _MADE:
+        t = _MADE.pop()
+        t.on_disconnect = None
+        t.close()
 
 
 def pump(t: T.Transport, cond, timeout=3.0) -> bool:
@@ -151,6 +165,19 @@ def test_overflow_produces_gap_event(tmp_path):
     ev = P.decode_json(P.FrameDecoder().feed(t.ring.get(t.ring.last_seq))[0].payload)
     assert ev["kind"] == "term.gap" and ev["reason"] == "buffer_overflow"
     assert ev["bytes_lost"] == lost and ev["stream_off"] == 0
+
+
+def test_overflow_reason_goes_with_hello(sock_path):
+    """Der Daemon sieht den Offset-Sprung vor unserem term.gap: Grund schon im HELLO."""
+    t = make(sock_path, cap=MIN_CAPACITY)
+    chunk = b"z" * T.BATCH_BYTES
+    for i in range(3 * MIN_CAPACITY // T.BATCH_BYTES):
+        t.add_out(chunk, i * len(chunk), 1, 1, 0.0)
+    t.flush_out()
+    assert t.gap_start is not None
+    with FakeDaemon(sock_path) as d:
+        assert pump(t, lambda: t.try_connect(time.monotonic()))
+        assert d.wait_for(lambda: d.hellos())[0]["gap_hint"] == "buffer_overflow"
 
 
 def test_foreign_uid_rejected(sock_path, monkeypatch):

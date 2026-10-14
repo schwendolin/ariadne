@@ -73,8 +73,8 @@ def test_d_after_rec_gap_does_not_read_companions_of_old_c():
     src2 = LocalSources(d, routes=False)  # type: ignore[arg-type]
     src2.on_mark(_rec("C", cmd_typed="nmap -oA x 10.0.0.1", cwd="/w"), local)
     pause = EventRecord(3, "p", "raw", "term.gap", 0, None, None, "op", "daemon", "t1", 20,
-                        {"terminal_id": "t1", "stream_off": 20, "reason": "sensitive_output", "bytes_lost": 9},
-                        None)
+                        {"terminal_id": "t1", "stream_off": 20, "reason": "sensitive_output",
+                         "bytes_lost": 9}, None)
     src2.on_commit([pause])
     co = src2.on_mark(_rec("D", exit=0), local)
     assert co is not None

@@ -82,6 +82,11 @@ def test_blocklist_and_vault(tmp_path):
     with pytest.raises(UnsafeFile):
         safeopen.read_absolute(str(extra / "log"), home=home, extra_blocked=(extra,))
     assert safeopen.blocked_reason(str(home / ".sshx" / "f"), home) is None
+    # POSIX: normpath lässt zwei führende Schrägstriche stehen; die Sperrliste nicht umgehbar
+    for variant in ("/" + str(home / ".ssh" / "id_rsa"), "//" + str(home / ".ssh" / "id_rsa")):
+        with pytest.raises(UnsafeFile) as e:
+            safeopen.read_absolute(variant, home=home)
+        assert e.value.reason == "blocked", variant
 
 
 def test_large_file_only_hash(ws, tmp_path):

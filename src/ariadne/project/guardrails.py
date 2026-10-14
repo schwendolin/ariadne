@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from ariadne.scope.normalize import has_idna_deviation
+
 __all__ = [
     "DEFAULT_NETWORKS",
     "DEFAULT_SUFFIXES",
@@ -60,6 +62,9 @@ def _normalize_name(raw: str) -> str:
     wildcard = name.startswith("*.")
     base = name[2:] if wildcard else name
     if not base.isascii():
+        if has_idna_deviation(base):
+            raise InvalidTarget("Name mit ß, ς oder ZWJ/ZWNJ: bitte in der xn--Form angeben "
+                                "(IDNA2003 und curl/Browser lesen ihn verschieden)")
         try:
             base = base.encode("idna").decode("ascii")
         except UnicodeError as exc:

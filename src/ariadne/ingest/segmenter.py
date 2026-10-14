@@ -15,8 +15,8 @@ Regeln:
   (``cmd_expanded`` vor ``cmd_typed``) oder, bei bash vor 5.3, aus D. Flags:
   ``partial`` (REC begann mitten im Befehl, D ohne C), ``truncated`` (ohne D
   beendet), ``gap`` (Lücke im Strom). Eine Lücke mit verlorenen Bytes (ausser
-  ``sensitive_output``) beendet den laufenden Befehl als ``truncated``: In ihr
-  können Marker fehlen.
+  ``sensitive_output`` und ``multiplexer``) beendet den laufenden Befehl als
+  ``truncated``: In ihr können Marker fehlen.
 * Der Kontext wird mit ``ariadne.ctxrules.ContextStack`` nachgespielt, sortiert
   nach (Offset, seq): Schnappschuss ersetzt den Stapel, C ->
   ``on_command_start``, D -> ``on_command_end``, ``d.ctx.push``/``pop``.
@@ -52,6 +52,7 @@ __all__ = [
     "Layout",
     "SEG_KINDS",
     "LOCAL_KINDS",
+    "KEEPS_MARKERS",
     "compute_layout",
     "event_offset",
     "unit_id_for",
@@ -62,6 +63,9 @@ SEG_KINDS = frozenset({
     "term.marker_forged", "d.ctx.set", "d.ctx.push", "d.ctx.pop", "d.ctx.accept", "d.keystep.mark",
 })
 LOCAL_KINDS = frozenset({"local", "su"})
+# Lücken, in denen keine Marker der Shell fehlen (die Shell lief weiter im Hintergrund bzw.
+# die Pause endet am nächsten Marker): der laufende Befehl gilt weiter.
+KEEPS_MARKERS = frozenset({"sensitive_output", "multiplexer"})
 _INF = 1 << 62
 
 
@@ -241,7 +245,7 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
             continue
         if ev.kind == "term.gap":
             lost = _int(h.get("bytes_lost")) or 0
-            if lost > 0 and h.get("reason") != "sensitive_output" and ev.off is not None:
+            if lost > 0 and h.get("reason") not in KEEPS_MARKERS and ev.off is not None:
                 # In der Lücke können Marker fehlen (REC aus, Überlauf, Daemon weg): Der
                 # laufende Befehl endet hier. Ein späterer D ohne C wird ``partial``,
                 # statt Exit-Code und Ende eines anderen Befehls zu übernehmen.

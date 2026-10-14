@@ -54,6 +54,7 @@ __all__ = [
 VAULT_FORMAT = "ariadne.operator/1"
 PAYLOAD_FORMAT = "ariadne.operator-payload/1"
 MIN_PASSPHRASE = 8
+MIN_SECRET_LEN = 4  # wie Redactor.min_len
 MAX_SECRET_LEN = 4096
 
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"  # Crockford, ohne I L O U
@@ -260,6 +261,10 @@ class UnlockedOperator:
             raise VaultError("ungültiges Label (erlaubt: A-Z a-z 0-9 . _ : -, höchstens 64)")
         if not value or len(value) > MAX_SECRET_LEN:
             raise VaultError("Secret leer oder zu lang")
+        if len(value) < MIN_SECRET_LEN:
+            # Der Redaktor schwärzt kürzere Werte nicht (sonst träfe er normalen Text).
+            raise VaultError(f"Secret zu kurz: mindestens {MIN_SECRET_LEN} Zeichen, kürzere schwärzt "
+                             "der Redaktor nicht")
         self._secrets = [(lb, v) for lb, v in self._secrets if lb != label] + [(label, value)]
 
     def remove_secret(self, label: str) -> bool:

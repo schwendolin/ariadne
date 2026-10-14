@@ -327,18 +327,29 @@ class Redactor:
         return scan_outgoing(text, self)
 
     # ------------------------------------------------------------------ #
-    def redact_text(self, text: str) -> tuple[str, list[str]]:
-        """Schwärzt eigene Secrets in einem Text (z. B. Befehlszeile im Marker)."""
+    def redact_text(self, text: str, *, truncated: bool = False) -> tuple[str, list[str]]:
+        """Schwärzt eigene Secrets in einem Text (z. B. Befehlszeile im Marker).
+
+        ``truncated``: Der Text wurde an einer Längengrenze abgeschnitten. Endet er
+        mit dem Anfang eines eigenen Secrets (mindestens ``min_len`` Zeichen), wird
+        auch dieser Anfang geschwärzt; sonst stünde er im Klartext im Journal.
+        """
         if not self._patterns or not text:
             return text, []
         data = text.encode("utf-8", "surrogateescape")
         hits = self.scan(data)
-        if not hits:
-            return text, []
+        labels = {h.label for h in hits}
         out = bytearray(data)
         for h in hits:
             out[h.start:h.end] = bytes([FILL]) * (h.end - h.start)
-        return out.decode("utf-8", "replace"), sorted({h.label for h in hits})
+        if truncated:
+            k = self._prefix_hold(bytes(out))
+            if k >= self.min_len:
+                out[len(out) - k:] = bytes([FILL]) * k
+                labels.add("truncated")
+        if not labels:
+            return text, []
+        return out.decode("utf-8", "replace"), sorted(labels)
 
 
 # --------------------------------------------------------------------------- #

@@ -27,6 +27,7 @@ import time
 from typing import Any
 
 from ariadne import __version__
+from ariadne._shim import procutil
 from ariadne._shim.hotkey import Armed, Cancelled, Forward, InputFilter, Key, describe_prefix, parse_hotkey
 from ariadne._shim.launch import Spawned, exit_code, make_raw, set_winsize, winsize
 from ariadne._shim.markers import MarkerValidator, mark_event
@@ -58,6 +59,7 @@ _STAGE_KINDS = {"local", "su", "ssh", "winrm", "remote", "revshell", "msf", "met
 _HELP = ("r REC, h Host, b Stufe zurück, k Schlüsselschritt, s Screenshot, "
          "2x Präfix sendet ihn durch. Taste schliesst.")
 _KEYSTEPS = {"f": "foothold", "p": "privesc", "v": "pivot", "l": "loot"}
+_MUX_COMM = ("tmux", "screen", "zellij", "dtach")  # Client im Vordergrund (comm "tmux: client")
 
 
 # --------------------------------------------------------------------------- #
@@ -131,6 +133,9 @@ class Shim:
         self._lost_reason = "daemon_down"
         self._rec_broken = False
         self._ctx_version: int | None = None  # STATE.ctx_version, zuletzt übernommen
+        self._mux_pgrp = -1  # Vordergrund-Prozessgruppe beim letzten Blick
+        self._mux_fg = False
+        self._mux_from: int | None = None  # Beginn der Pause (Multiplexer im Vordergrund)
         self._daemon_id: str | None = None
         self._bound_id: str | None = None
         self._bound_slug: str | None = None
@@ -513,13 +518,32 @@ class Shim:
             return
         self._apply_scan(res, off0, now)
 
+    def _multiplexer_fg(self) -> bool:
+        """Läuft ein tmux/screen-Client im Vordergrund? (Architektur 3.9: die Panes haben
+        eigene Shims, der äussere Shim nimmt die gerenderte Ausgabe nicht auf.)"""
+        try:
+            pgrp = os.tcgetpgrp(self.master)
+        except OSError:
+            return False
+        if pgrp != self._mux_pgrp:
+            self._mux_pgrp = pgrp
+            comm = procutil.read_comm(pgrp) or ""
+            self._mux_fg = comm.startswith(_MUX_COMM)
+        return self._mux_fg
+
     def _apply_scan(self, res: ScanResult, off0: int, now: float) -> None:
         self._show(res.display)
         if self._rec_broken:
             return
         try:
-            if res.record and self.capture and self.transport is not None:
-                self.transport.add_out(res.record, off0, time.time_ns(), time.monotonic_ns(), now)
+            if (res.record or self._mux_from is not None) and self.capture and self.transport is not None:
+                if self._multiplexer_fg():
+                    if self._mux_from is None:
+                        self._mux_from = off0
+                else:
+                    self._end_mux(off0)  # Lücke vor allem, was danach kommt (auch Marker)
+                    if res.record:
+                        self.transport.add_out(res.record, off0, time.time_ns(), time.monotonic_ns(), now)
             for item in res.items:
                 self._on_item(item, now)
         except Exception:
@@ -572,6 +596,11 @@ class Shim:
         except Exception:
             self._broken()
 
+    def _end_mux(self, off: int) -> None:
+        start, self._mux_from = self._mux_from, None
+        if start is not None and off > start:
+            self._emit("term.gap", {"stream_off": start, "reason": "multiplexer", "bytes_lost": off - start})
+
     def _emit(self, kind: str, fields: dict[str, Any]) -> None:
         t = self.transport
         if not self.capture or t is None or self._rec_broken:
@@ -622,6 +651,9 @@ class Shim:
                 t.flush_out()
             self.capture = False
             lost = off if self._drop_from is None else min(off, self._drop_from)
+            if self._mux_from is not None:
+                lost = min(lost, self._mux_from)
+                self._mux_from = None
             self._drop_from = None
             self._lost_since = lost
             ready_off = t is not None and t.ready and self._rec == "off"

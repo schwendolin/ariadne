@@ -102,6 +102,10 @@ class Transport:
         first = self.ring.first_seq
         hello = dict(self._hello())
         hello["resume_from_seq"] = first
+        if self.gap_start is not None:
+            # Rahmen sind verdrängt: Der Daemon sieht den Sprung im Offset vor unserem
+            # term.gap (das erst bei halb leerem Ring kommt) und braucht den Grund.
+            hello["gap_hint"] = "buffer_overflow"
         self._wbuf = bytearray(P.encode_json(P.HELLO, hello))
         self._queued_upto = (first - 1) if first is not None else self.next_seq - 1
         self._rewind = False

@@ -175,6 +175,8 @@ def test_secret_label_validation(operator):
         operator.add_secret("bad label", "x" * 8)
     with pytest.raises(VaultError):
         operator.add_secret("ok", "")
+    with pytest.raises(VaultError, match="zu kurz"):
+        operator.add_secret("pin", "123")  # würde nie geschwärzt
     operator.add_secret("ok", "wert-1")
     operator.add_secret("ok", "wert-2")
     assert operator.own_secrets[-1] == ("ok", "wert-2") and operator.secret_labels().count("ok") == 1

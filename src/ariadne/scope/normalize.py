@@ -82,6 +82,16 @@ def mixed_script(label: str) -> bool:
     return not any(scripts <= allowed for allowed in _SCRIPT_SETS)
 
 
+# UTS 46 «Deviation»-Zeichen: IDNA2003 (Pythons ``idna``-Codec) bildet sie ab (ß -> ss),
+# curl/libidn2 und Browser (UTS 46 nicht-transitional) behalten sie. Das Scope-Urteil
+# gälte sonst für einen anderen Host als den, den das Tool kontaktiert: fail-closed.
+IDNA_DEVIATIONS = frozenset("\u00df\u03c2\u200c\u200d")
+
+
+def has_idna_deviation(name: str) -> bool:
+    return any(c in IDNA_DEVIATIONS for c in name)
+
+
 def normalize_hostname(raw: str) -> str | None:
     """Hostname als A-Label-Form in Kleinschreibung oder ``None``.
 
@@ -95,7 +105,7 @@ def normalize_hostname(raw: str) -> str | None:
         return None
     if s.endswith("."):
         s = s[:-1]
-    if not s:
+    if not s or has_idna_deviation(s):
         return None
     try:
         ascii_name = s.encode("idna").decode("ascii").lower()

@@ -201,6 +201,117 @@ def test_import_and_redaction_rebuilds_index(paths, operator, tmp_path):
     run(paths, operator, scenario)
 
 
+def test_companion_file_with_own_secret_is_redacted(paths, operator, tmp_path):
+    """Befund: Begleitdateien gingen ohne Redaktor in Blob-Store und Volltextsuche."""
+    from tests.core.conftest import OWN_SECRET
+
+    async def scenario(d: Daemon) -> None:
+        shim, term, ws = await _start(paths)
+        args = b"-sV --script-args creds.global=admin:" + OWN_SECRET.encode() + b" -oA scans/lame"
+        xml = ms2("xml").replace(b"-sV -oA scans/lame", args)
+        assert OWN_SECRET.encode() in xml
+        (ws / "scans" / "lame.xml").write_bytes(xml)
+        await term.command(f"nmap -sV -oA scans/lame {TARGET}", b"Nmap done\r\n", cwd=str(ws))
+        await term.mark("A", cwd=str(ws))
+        await term.acked()
+        await ctl_ok(paths.ctl_sock, "show", what="hosts")
+        rec = next(r for r in d.project.journal.iter_events(kinds=["file.observed"])
+                   if r.header["path"] == "scans/lame.xml")
+        reds = rec.header["redactions"]
+        assert reds and all(r["label"] == "sudo" and r["end"] - r["start"] == len(OWN_SECRET) for r in reds)
+        blob = d.project.blobs.open_bytes(rec.header["blob_id"])
+        assert OWN_SECRET.encode() not in blob and len(blob) == len(xml)
+        assert not (await ctl_ok(paths.ctl_sock, "search", text=OWN_SECRET[:11]))["items"]
+        await shim.close()
+
+    run(paths, operator, scenario)
+
+
+def test_shred_overwrites_before_unlink(tmp_path):
+    from ariadne.daemon.ingest import _shred
+
+    f = tmp_path / "old.db"
+    f.write_bytes(b"klartext" * 1000)
+    keep = os.open(f, os.O_RDONLY)  # zweiter Verweis: Inhalt nach dem Löschen noch lesbar
+    try:
+        _shred(f)
+        assert not f.exists()
+        assert os.pread(keep, 8000, 0) == b"\0" * 8000
+    finally:
+        os.close(keep)
+
+
+def test_projection_failure_keeps_recording_and_recovers(paths, operator, monkeypatch):
+    """Fehler der Auswertung im Daemon-Pfad: Aufnahme und ACKs laufen weiter, ``show`` meldet
+    den Fehler, nach Wegfall holt die Auswertung auf."""
+    from ariadne.ingest import projection
+
+    orig = projection.Projector.rebuild
+    state = {"fail": True}
+
+    def rebuild(self: Any) -> int:
+        if state["fail"]:
+            raise RuntimeError("kaputt")
+        return orig(self)
+
+    monkeypatch.setattr(projection.Projector, "rebuild", rebuild)
+
+    async def scenario(d: Daemon) -> None:
+        shim, term, ws = await _start(paths)
+        await term.command(f"nmap -sV {TARGET}", ms2("text").replace(b"\n", b"\r\n"), cwd=str(ws))
+        await term.mark("A", cwd=str(ws))
+        await term.acked()
+        res = await ctl_ok(paths.ctl_sock, "show", what="hosts")
+        assert res["items"] == [] and res["ingest"]["last_error"] == "RuntimeError"
+        st = await ctl_ok(paths.ctl_sock, "status")
+        assert st["ingest"]["last_error"] == "RuntimeError"
+        await term.command("id", b"uid=1000(kali)\r\n", cwd=str(ws))  # Aufnahme läuft weiter
+        await term.mark("A", cwd=str(ws))
+        await term.acked()
+        state["fail"] = False
+        res = await ctl_ok(paths.ctl_sock, "show", what="hosts")
+        assert TARGET in {h["label"] for h in res["items"]} and res["ingest"]["last_error"] is None
+        assert (await ctl_ok(paths.ctl_sock, "search", text="uid=1000"))["items"]
+        await shim.close()
+
+    run(paths, operator, scenario)
+
+
+def test_two_terminals_interleaved_keep_their_context(paths, operator):
+    """Mehrere Terminals gleichzeitig (Normalfall): Ströme, Kontexte und Redaktor getrennt."""
+    from tests.core.conftest import OWN_SECRET
+
+    async def scenario(d: Daemon) -> None:
+        shim_a, a, ws = await _start(paths)
+        shim_b = await FakeShim(paths.term_sock).connect()
+        await shim_b.wait_state(rec="on")
+        b = Term(shim_b)
+        cwd = str(ws)
+        await b.command("ssh root@10.10.10.5", b"Welcome\r\n", cwd=cwd, end=False)
+        await b.request("req.ctx.set", host="10.10.10.5", user="root")
+        await a.command("echo LOCAL-A-1", b"LOCAL-A-1\r\n", cwd=cwd)
+        await a.out(b"pw: " + OWN_SECRET[:6].encode())  # Secret in A geteilt ...
+        await b.out(b"REMOTE-B-1\r\nroot@target:~# ")  # ... während B Ausgabe und Events schickt
+        await b.request("req.keystep", step="foothold")
+        await a.out(OWN_SECRET[6:].encode() + b"\r\n")
+        await a.command("echo LOCAL-A-2", b"LOCAL-A-2\r\n", cwd=cwd)
+        await b.out(b"REMOTE-B-2\r\n")
+        await b.mark("D", exit=0, cwd=cwd)  # ssh beendet: Segment fertig
+        await b.mark("A", cwd=cwd)
+        await a.mark("A", cwd=cwd)
+        await a.acked()
+        await b.acked()
+        hits = {h["text"]: h for h in (await ctl_ok(paths.ctl_sock, "search", text="LOCAL"))["items"]}
+        assert hits and all(h["context"] == "Kali" for h in hits.values())
+        remote = (await ctl_ok(paths.ctl_sock, "search", text="REMOTE"))["items"]
+        assert remote and all(h["context"].startswith("10.10.10.5") for h in remote)
+        assert not (await ctl_ok(paths.ctl_sock, "search", text=OWN_SECRET[:6]))["items"]
+        await shim_a.close()
+        await shim_b.close()
+
+    run(paths, operator, scenario)
+
+
 class _FlakyReparse(IngestService):
     """Der erste Neuaufbau scheitert (Platte voll); der Bedarf darf nicht verloren gehen."""
 

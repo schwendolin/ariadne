@@ -39,6 +39,7 @@ Mark = Literal["A", "B", "C", "D"]
 GapReason = Literal[
     "rec_off", "buffer_overflow", "daemon_down", "project_switch",
     "sensitive_output", "locked", "disk_low", "shim_error",
+    "multiplexer",  # tmux/screen-Client im Vordergrund: die Panes haben eigene Shims (A3.9)
 ]
 StageKind = Literal[
     "local", "su", "ssh", "winrm", "remote", "revshell", "msf", "meterpreter", "db", "unknown"
@@ -199,6 +200,9 @@ class FileObserved(_M):
     context_terminal: str | None = None
     host_hint: str | None = Field(default=None, description="Kennung bei `ariadne import --host`")
     rec: bool = True
+    redactions: tuple[Redaction, ...] = Field(
+        default=(), description="Eigene Secrets im Inhalt, vor dem Speichern längenerhaltend geschwärzt "
+                                "(start/end: Byte-Offsets in der Datei)")
 
 
 class ShotCaptured(_M):

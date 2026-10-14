@@ -7,6 +7,7 @@ import socket
 import stat
 import subprocess
 import sys
+from pathlib import Path
 
 from ariadne.daemon import hardening
 from ariadne.daemon.client import CtlClient
@@ -38,7 +39,7 @@ def test_daemon_process_is_hardened(tmp_path):
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             assert srv.recv(64) == b"READY=1"
-            limits = open(f"/proc/{proc.pid}/limits").read()
+            limits = Path(f"/proc/{proc.pid}/limits").read_text()
             core = next(line for line in limits.splitlines() if line.startswith("Max core file size"))
             assert core.split()[4:6] == ["0", "0"]
             assert stat.S_IMODE(os.stat(paths.runtime_dir).st_mode) == 0o700
@@ -56,6 +57,8 @@ def test_daemon_process_is_hardened(tmp_path):
                 proc.kill()
                 proc.wait()
         err = proc.stderr.read().decode() if proc.stderr else ""
+        if proc.stderr:
+            proc.stderr.close()
         assert "bereit" in err and "beendet" in err
 
 

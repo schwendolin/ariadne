@@ -46,7 +46,9 @@ __ariadne_vars() {
     [[ -v $name ]] || continue
     case ${!name@a} in *a*|*A*) continue ;; esac
     val=${!name}
-    __ariadne_enc "${val:0:128}"
+    # Längere Werte nie gekürzt senden: der Redaktor erkennt nur ganze Secrets.
+    (( ${#val} <= 128 )) || continue
+    __ariadne_enc "$val"
     out+="&var.$name=$__ariadne_r"
     n=$(( n + 1 ))
   done

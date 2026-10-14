@@ -126,7 +126,9 @@ TERM_EVENTS = frozenset({
 REQUESTS = frozenset({"req.rec", "req.ctx.set", "req.ctx.push", "req.ctx.pop", "req.ctx.sync", "req.keystep",
                       "req.shot"})
 KEYSTEPS = frozenset({"foothold", "privesc", "pivot", "loot"})
-_MARK_TEXT_FIELDS = ("cmd_typed", "cmd_expanded", "cwd", "user")
+# Längengrenzen der Shell-Hooks: ein Feld dieser Länge kann abgeschnitten sein
+_MARK_TEXT_FIELDS = {"cmd_typed": 1000, "cmd_expanded": 1000, "cwd": 300, "user": 64}
+_MARK_VAR_LIMIT = 128
 
 
 class OpError(Exception):
@@ -435,6 +437,10 @@ class Daemon:
                 ftype, payload, entry = t.buffer.popleft()
                 t.buffer_bytes -= len(payload)
                 self._process_frame(t, ftype, payload, entry)
+            if t.resend_from is not None:
+                # Der Shim sendet nach waiting -> on alles Unbestätigte erneut (rewind).
+                t.max_seq = t.resend_from - 1
+                t.resend_from = None
         elif status == "off":
             if t.recording:
                 self._stop_recording(t, "rec_off" if not self.rec_on else "project_switch")
@@ -442,6 +448,11 @@ class Daemon:
                 _, payload, entry = t.buffer.popleft()
                 entry.ready = True
             t.buffer_bytes = 0
+            if t.resend_from is not None:  # bewusst verworfen wie bei REC aus: bestätigen
+                t.resend_from = None
+                t.req_done.clear()
+                t.max_seq = max(t.max_seq, t.seen_seq)
+                t.ack_queue.append(AckEntry(t.max_seq, ready=True))
         self._advance_ack(t)
         self._send_state(t)
 
@@ -564,6 +575,8 @@ class Daemon:
         t.conn = writer
         t.closed = False
         t.last_state = None
+        if h["gap_hint"]:
+            t.gap_hint = h["gap_hint"]  # Grund einer Lücke, die gleich als Offset-Sprung kommt
         log.info("Terminal verbunden")
         self._refresh(t)
         if t.acked_seq:
@@ -602,22 +615,35 @@ class Daemon:
             if t.acked_seq:
                 self._send(t, P.encode_json(P.ACK, {"seq": t.acked_seq}))
             return
+        t.seen_seq = max(t.seen_seq, seq)
+        kind = obj.get("kind") if obj is not None else None
+        is_req = obj is not None and isinstance(kind, str) and kind in REQUESTS
+        if t.resend_from is not None and seq >= t.resend_from:
+            # Puffer voll (waiting): nichts annehmen, nichts bestätigen. Anfragen wirken
+            # trotzdem sofort, aber nur einmal (der Shim sendet sie später erneut).
+            if is_req and seq not in t.req_done:
+                t.req_done.add(seq)
+                self._on_request(t, str(kind), obj or {}, AckEntry(seq))
+            return
         t.max_seq = seq
         entry = AckEntry(seq)
         t.ack_queue.append(entry)
-        kind = obj.get("kind") if obj is not None else None
-        if obj is not None and isinstance(kind, str) and kind in REQUESTS:
-            self._on_request(t, kind, obj, entry)
+        if is_req:
+            if seq in t.req_done:  # schon ausgeführt, als der Puffer voll war
+                t.req_done.discard(seq)
+                entry.ready = True
+            else:
+                self._on_request(t, str(kind), obj or {}, entry)
             self._advance_ack(t)
             return
         if self.status_of(t) == "waiting":
+            if t.buffer_bytes + len(payload) > self.buffer_limit:
+                t.ack_queue.pop()
+                t.max_seq = seq - 1
+                t.resend_from = seq
+                return
             t.buffer.append((ftype, payload, entry))
             t.buffer_bytes += len(payload)
-            while t.buffer_bytes > self.buffer_limit and t.buffer:
-                _, old, old_entry = t.buffer.popleft()
-                t.buffer_bytes -= len(old)
-                old_entry.ready = True
-                t.gap_hint = "buffer_overflow"
             return
         self._process_frame(t, ftype, payload, entry)
         self._advance_ack(t)
@@ -649,7 +675,7 @@ class Daemon:
                 {"terminal_id": t.terminal_id, "stream_off": t.recv_end,
                  "reason": t.gap_hint or "shim_error", "bytes_lost": off - t.recv_end},
                 origin="daemon", terminal_id=t.terminal_id, stream_off=t.recv_end), t)
-        t.gap_hint = None
+            t.gap_hint = None  # gilt für den nächsten Sprung, nicht für den nächsten Rahmen
         t.recv_end = end
         t.note_frame(off, wall, mono)
         t.last_out = time.monotonic()
@@ -668,14 +694,16 @@ class Daemon:
         header["terminal_id"] = t.terminal_id
         labels: list[str] = []
         if kind == "term.mark":
-            for key in _MARK_TEXT_FIELDS:
+            for key, limit in _MARK_TEXT_FIELDS.items():
                 if isinstance(header.get(key), str):
-                    header[key], hit = self.redactor.redact_text(header[key])
+                    header[key], hit = self.redactor.redact_text(header[key],
+                                                                 truncated=len(header[key]) >= limit)
                     labels += hit
             if isinstance(header.get("cmd_vars"), dict):
                 cleaned = {}
                 for k, v in header["cmd_vars"].items():
-                    cleaned[k], hit = self.redactor.redact_text(v) if isinstance(v, str) else (v, [])
+                    cleaned[k], hit = (self.redactor.redact_text(v, truncated=len(v) >= _MARK_VAR_LIMIT)
+                                       if isinstance(v, str) else (v, []))
                     labels += hit
                 header["cmd_vars"] = cleaned
         try:
@@ -704,7 +732,13 @@ class Daemon:
         elif kind == "term.resize":
             t.rows, t.cols = int(header["rows"]), int(header["cols"])
         elif kind == "term.gap" and t.recording:
+            t.gap_hint = None
             end = int(header["stream_off"]) + int(header.get("bytes_lost", 0))
+            if int(header.get("bytes_lost", 0)) > 0 and end <= t.recv_end:
+                # Bereich schon gespeichert oder als Lücke vermerkt (Daemon sah den Sprung
+                # zuerst, z. B. nach einem Überlauf des Shim-Puffers): kein zweites term.gap.
+                entry.ready = True
+                return
             if int(header["stream_off"]) > t.recv_end:
                 # Bytes zwischen dem gespeicherten Ende und dem Lückenbeginn des Shims hat
                 # der Daemon verworfen (z. B. Rahmen unterwegs, als REC ausging).

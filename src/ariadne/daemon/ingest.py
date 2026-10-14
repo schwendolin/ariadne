@@ -45,6 +45,7 @@ __all__ = ["IngestService", "REPARSE_NAME"]
 log = logging.getLogger("ariadne.ingest")
 
 REPARSE_NAME = "derived.reparse.db"
+OLD_NAME = "derived.old.db"
 T = TypeVar("T")
 
 
@@ -55,6 +56,38 @@ class _ThreadState:
     conn: Any
     pipeline: Pipeline
     scope_version: int
+
+
+def _shred(path: Any) -> None:
+    """Datei mit Nullen überschreiben und löschen (nach bestem Bemühen; SSD, COW)."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:
+        return
+    try:
+        size = os.fstat(fd).st_size
+        zero = b"\0" * (1 << 20)
+        done = 0
+        while done < size:
+            done += os.write(fd, zero[: min(len(zero), size - done)])
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
+
+
+def _shred_db_files(vault: Any, name: str, rename_to: str | None = None) -> None:
+    """``rename_to``: Hauptdatei nur umbenennen (atomar), WAL/SHM überschreiben."""
+    for suffix in ("-wal", "-shm", "-journal"):
+        _shred(vault / f"{name}{suffix}")
+    if rename_to is not None:
+        with contextlib.suppress(FileNotFoundError):
+            os.replace(vault / name, vault / rename_to)
+    else:
+        _shred(vault / name)
 
 
 def _remove_db_files(vault: Any, name: str, *, main: bool = True) -> None:
@@ -280,10 +313,13 @@ class IngestService:
             raise
         new_conn.close()
         self._drop_state()
-        # Reste der alten Datei dürfen nie auf die neue angewendet werden.
-        _remove_db_files(vault, "derived.db", main=False)
+        # Die alte Datei enthält den Klartext geschwärzter Werte (FTS): erst beiseite,
+        # dann die neue an ihren Platz, dann die alte überschreiben und löschen. Bricht
+        # der Ablauf dazwischen ab, fehlt derived.db höchstens und wird neu berechnet.
+        _shred_db_files(vault, "derived.db", OLD_NAME)
         os.replace(vault / REPARSE_NAME, vault / "derived.db")
         _remove_db_files(vault, REPARSE_NAME, main=False)
+        _shred_db_files(vault, OLD_NAME)
         self._ensure(snap)
         log.info("derived.db neu aufgebaut")
         return diff

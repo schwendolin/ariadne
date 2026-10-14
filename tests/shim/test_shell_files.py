@@ -80,6 +80,21 @@ def test_var_references_resolved_without_eval(shell, tmp_path):
     assert not (tmp_path / "nope").exists()
 
 
+@pytest.mark.parametrize("shell", available_shells())
+def test_long_var_values_are_never_sent_truncated(shell, tmp_path):
+    """Ein gekürzter Wert (z. B. die ersten 128 Zeichen eines JWT) fände der Redaktor nie."""
+    kind = shell_kind(shell)
+    script = tmp_path / "vars"
+    out = "$REPLY" if kind == "zsh" else "$__ariadne_r"
+    script.write_text(
+        f'. "{INIT[kind]}"\nLC_ALL=C\nTOKEN=$(printf "x%.0s" $(seq 1 162)); IP=10.0.0.5\n'
+        f'__ariadne_vars "$1"\nprintf %s "{out}"\n'
+    )
+    env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path)}
+    r = run([shell, str(script), 'curl -H "Bearer $TOKEN" http://$IP/'], env=env, cwd=tmp_path)
+    assert r.stdout == b"&var.IP=10.0.0.5"
+
+
 # ----------------------------------------------------------------- Launcher
 
 

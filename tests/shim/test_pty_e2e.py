@@ -488,3 +488,32 @@ def test_loop_failure_keeps_shell_and_keystrokes(shell, box_factory, tmp_path):
         out = run_cmd(c, "echo weiter-$((2+3))")
         assert b"weiter-5" in out
         finish(c, 4)
+
+
+@pytest.mark.skipif(not shutil.which("tmux"), reason="tmux fehlt")
+def test_outer_shim_pauses_while_tmux_client_in_foreground(box_factory, tmp_path_factory):
+    """Befund: Die Multiplexer-Pause (A3.9) fehlte; der äussere Shim nahm die Panes auf."""
+    shell = SHELLS[0]
+    box = box_factory(shell=shell)
+    sock = tmp_path_factory.mktemp("tm") / "s"
+    with FakeDaemon(box.sock) as d:
+        c = spawn(box, shell)
+        d.wait_for(lambda: d.hellos())
+        outer = d.frames(P.HELLO)[0].conn
+        c.sendline(f"tmux -S {sock} -f /dev/null new-session")
+        d.wait_for(lambda: len(d.hellos()) >= 2, timeout=8)
+        c.expect_exact(PROMPT)  # Prompt im Pane
+        c.sendline("echo PANE-$((6*7))")
+        c.expect_exact("PANE-42")
+        time.sleep(0.3)
+        c.sendline("exit")  # Pane und Sitzung enden, tmux kehrt zurück
+        c.expect_exact(PROMPT)
+        run_cmd(c, "echo AUSSEN-$((7*6))")
+        assert d.wait_for(lambda: [r for r in d.frames(P.OUT)
+                                   if r.conn == outer and b"AUSSEN-42" in r.obj[4]])
+        outer_bytes = b"".join(r.obj[4] for r in d.frames(P.OUT) if r.conn == outer)
+        assert b"PANE-42" not in outer_bytes  # nur im Strom des Pane-Shims
+        assert any(b"PANE-42" in r.obj[4] for r in d.frames(P.OUT) if r.conn != outer)
+        gaps = [e for e in d.events("term.gap") if e["reason"] == "multiplexer"]
+        assert gaps and gaps[0]["bytes_lost"] > 0
+        finish(c)

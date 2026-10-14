@@ -34,6 +34,7 @@ from ariadne.scope.normalize import (
     normalize_hostname,
     normalize_ip,
     normalize_url,
+    remove_dot_segments,
     split_host_port,
 )
 
@@ -258,8 +259,11 @@ class ScopeMatcher:
 
     def _judge_url(self, t: _Target) -> tuple[VerdictKind, str | None]:
         url = t.url or ""
+        loose = _loose_url(url)
         for r in self._exc:
-            if r.url and _url_prefix(r.url, url):
+            # Ausschlüsse fail-closed: auch jede Lesart, die ein Server gleich behandeln kann
+            # (%61dmin, ADMIN, //admin, admin;x=1, ..%2fadmin), schliesst aus.
+            if r.url and (_url_prefix(r.url, url) or _url_prefix(_loose_url(r.url), loose)):
                 return "excluded", f"exclude:{r.entry}"
         host = _Target(addrs=t.addrs, name=t.name)
         host_v = self._judge(host)
@@ -280,6 +284,34 @@ def _name_hit(r: _Rule, name: str) -> bool:
     if r.wildcard is not None:
         return name.endswith("." + r.wildcard)
     return False
+
+
+_UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_PCT = re.compile(r"%([0-9A-Fa-f]{2})")
+_URL_BASE = re.compile(r"^([a-z][a-z0-9+.-]*://[^/?#]*)(.*)$", re.S)
+
+
+def _loose_url(url: str) -> str:
+    """Lockere Lesart einer URL nur für Ausschlüsse: kodierte unreservierte Zeichen und
+    ``%2f`` dekodiert, Backslash als ``/``, ``//`` zusammengefasst, ``;params`` entfernt,
+    Punkt-Segmente aufgelöst, alles klein (IIS)."""
+    m = _URL_BASE.match(url)
+    if m is None:
+        return url.lower()
+    base, tail = m.group(1), m.group(2)
+    path, sep, query = tail.partition("?")
+
+    def dec(mm: re.Match[str]) -> str:
+        c = chr(int(mm.group(1), 16))
+        return c if c in _UNRESERVED else ("/" if c in "/\\" else mm.group(0))
+
+    for _ in range(2):  # auch doppelt kodiert (%252f)
+        path = _PCT.sub(dec, path.replace("%25", "%"))
+    path = path.replace("\\", "/")
+    path = "/".join(seg.split(";", 1)[0] for seg in path.split("/"))
+    path = re.sub(r"/{2,}", "/", path)
+    path = remove_dot_segments(path if path.startswith("/") else "/" + path)
+    return (base + path + sep + query).lower()
 
 
 def _url_prefix(rule_url: str, url: str) -> bool:

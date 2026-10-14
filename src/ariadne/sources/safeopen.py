@@ -166,14 +166,22 @@ def _read(fd: int, *, limit: int, dev: int | None) -> FileData:
         os.close(fd)
 
 
+def _canon(path: str) -> str:
+    """``normpath`` plus POSIX-Sonderfall: ``//home`` ist ``/home`` (normpath lässt ``//`` stehen)."""
+    norm = os.path.normpath(path)
+    if norm.startswith("//"):
+        norm = "/" + norm.lstrip("/")
+    return norm
+
+
 def blocked_reason(path: str, home: Path | str, extra: tuple[Path, ...] = ()) -> str | None:
     """Grund, warum ein (absoluter, normalisierter) Pfad nie gelesen wird, sonst ``None``."""
-    norm = os.path.normpath(path)
+    norm = _canon(path)
     if ".vault" in norm.split("/"):
         return "vault"
     roots = [os.path.join(str(home), b) for b in _BLOCKED_HOME] + [str(e) for e in extra]
     for r in roots:
-        r = os.path.normpath(r)
+        r = _canon(r)
         if norm == r or norm.startswith(r + "/"):
             return "blocked"
     return None
@@ -181,8 +189,8 @@ def blocked_reason(path: str, home: Path | str, extra: tuple[Path, ...] = ()) ->
 
 def inside(path: str, root: Path | str) -> str | None:
     """Pfad relativ zu ``root``, wenn ``path`` (lexikalisch) darin liegt, sonst ``None``."""
-    norm = os.path.normpath(path)
-    base = os.path.normpath(str(root))
+    norm = _canon(path)
+    base = _canon(str(root))
     if not norm.startswith(base + "/"):
         return None
     return norm[len(base) + 1:]

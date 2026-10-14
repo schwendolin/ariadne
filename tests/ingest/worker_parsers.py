@@ -51,9 +51,11 @@ class EnvParser(_Base):
         with open("/proc/self/status") as f:
             nnp = [ln.split(":", 1)[1].strip() for ln in f if ln.startswith("NoNewPrivs")]
         yield Mention("nnp", nnp[0] if nnp else "?", s)
+        target = os.path.join(unit.cwd or "/nonexistent", "ariadne-worker-test")  # tmp_path des Tests
         try:
-            with open("/tmp/ariadne-worker-test", "w") as f:  # noqa: S108 - muss scheitern
+            with open(target, "w") as f:  # muss scheitern (RLIMIT_FSIZE=0)
                 f.write("x")
+                f.flush()
             yield Mention("write", "ok", s)
         except OSError as exc:
             yield Mention("write", type(exc).__name__, s)

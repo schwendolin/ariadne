@@ -206,3 +206,14 @@ def test_property_random_chunking(prefix, middle, cuts, color):
     assert got == ref
     assert len(got) == len(data)
     assert SECRET.encode() not in got
+
+
+def test_truncated_field_tail_is_redacted():
+    """Befehlszeile an der Längengrenze abgeschnitten: der Secret-Anfang am Ende fällt auch weg."""
+    token = "eyJhbGciOiJIUzI1NiJ9.geheim-und-lang-1234567890"
+    r = Redactor([("jwt", token)])
+    text = "curl -H 'Authorization: Bearer " + token[:20]
+    assert r.redact_text(text) == (text, [])
+    red, labels = r.redact_text(text, truncated=True)
+    assert red.endswith("*" * 20) and token[:20] not in red and labels == ["truncated"]
+    assert r.redact_text("ls -la", truncated=True) == ("ls -la", [])

@@ -473,6 +473,7 @@ def test_bye_after_rec_off_writes_term_close(paths, operator):
         await shim._wait(lambda: shim.closed, 3)
         closes = [r.header for r in d.project.journal.iter_events(kinds=["term.close"])]
         assert closes == [{"terminal_id": shim.terminal_id, "stream_off": 6}]
+        await shim.close()
 
     run(paths, operator, scenario, idle_flush=0.05)
 
@@ -554,3 +555,58 @@ def test_term_out_keeps_receive_time(paths, operator):
         await shim.close()
 
     run(paths, operator, scenario, idle_flush=10.0)
+
+
+def test_waiting_overflow_is_never_acked_and_resent(paths, operator):
+    """Befund: Bei vollem RAM-Puffer (waiting) bestätigte der Daemon verworfene Rahmen; der
+    Shim gab sie frei, obwohl er sie nach dem Entsperren hätte nachliefern können."""
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "project.new", slug="ovf", targets=["10.10.10.0/24"])
+        await ctl_ok(paths.ctl_sock, "rec.on")
+        shim = await FakeShim(paths.term_sock).connect()
+        await shim.wait_state(rec="on")
+        await shim.out(1, 0, b"vorher\r\n")
+        await shim.wait_ack(1)
+        backup = dataclasses.replace(operator, _secrets=list(operator.own_secrets))
+        await ctl_ok(paths.ctl_sock, "lock")
+        await shim.wait_state(rec="waiting")
+        frames = [(2, 8, b"a" * 20), (3, 28, b"b" * 20), (4, 48, b"c" * 20), (5, 68, b"\r\n")]
+        for seq, off, data in frames:
+            await shim.out(seq, off, data)
+        await shim.event(6, "req.shot")  # Anfrage im übergelaufenen Bereich: wirkt, ohne ACK
+        await asyncio.sleep(0.2)
+        assert shim.acked == 1
+        d.operator = backup
+        await ctl_ok(paths.ctl_sock, "project.open", slug="ovf")
+        await shim.wait_state(rec="on")
+        for seq, off, data in frames:  # wie der echte Shim nach waiting -> on (rewind)
+            if seq > shim.acked:
+                await shim.out(seq, off, data)
+        await shim.event(6, "req.shot")
+        await shim.wait_ack(6)
+        d.flush()
+        j = d.project.journal
+        assert stream_of(j, shim.terminal_id) == b"vorher\r\n" + b"a" * 20 + b"b" * 20 + b"c" * 20 + b"\r\n"
+        assert [g.header for g in j.iter_events(kinds=["term.gap"])] == []
+        await shim.close()
+
+    run(paths, operator, scenario, idle_flush=0.05, buffer_limit=32)
+
+
+def test_shim_overflow_gap_reason_from_hello_and_no_duplicate(paths, operator):
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "project.new", slug="gap", targets=["10.10.10.0/24"])
+        await ctl_ok(paths.ctl_sock, "rec.on")
+        shim = await FakeShim(paths.term_sock).connect(gap_hint="buffer_overflow")
+        await shim.wait_state(rec="on")
+        await shim.out(1, 0, b"x" * 10)
+        await shim.out(2, 100, b"y\r\n")  # Rahmen dazwischen im Shim-Ring verdrängt
+        await shim.event(3, "term.gap", stream_off=10, reason="buffer_overflow", bytes_lost=90)
+        await shim.wait_ack(3)
+        d.flush()
+        gaps = [r.header for r in d.project.journal.iter_events(kinds=["term.gap"])]
+        assert gaps == [{"terminal_id": shim.terminal_id, "stream_off": 10, "reason": "buffer_overflow",
+                         "bytes_lost": 90}]
+        await shim.close()
+
+    run(paths, operator, scenario, idle_flush=0.05)

@@ -215,8 +215,8 @@ def test_ctx_set_targets_running_stage_not_older_parsed_one():
     obs = [ObsRow(1, u1.unit_id, "shell.context", "1", "tool_text", False, 10, "ctx:host", "host.os",
                   "Linux", "Linux", '{"line_end":0,"line_start":0}', 0.85, {}, 1_000, True, False, False)]
     decisions = [
-        DecisionRow(5, "d1", "d.ctx.set", {"terminal_id": t, "from_off": 150, "host": "ip:default/10.10.10.5"},
-                    500),
+        DecisionRow(5, "d1", "d.ctx.set",
+                    {"terminal_id": t, "from_off": 150, "host": "ip:default/10.10.10.5"}, 500),
         DecisionRow(20, "d2", "d.ctx.set", {"terminal_id": t, "from_off": 3000,
                                             "host": "ip:default/10.10.10.7"}, 5000),
     ]

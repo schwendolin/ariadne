@@ -22,10 +22,10 @@ def runner(**kw) -> SubprocessRunner:
     return SubprocessRunner(extra_paths=[ROOT], allowed_prefixes=("ariadne.parsers.", "tests.ingest."), **kw)
 
 
-def unit(n: int = 3) -> Unit:
+def unit(n: int = 3, cwd: str = "/nonexistent") -> Unit:
     lines = [Line("$ id", 0, 5, prompt_echo=True)] + [Line(f"line {i} 10.10.10.{i}", 5 + i * 20, 25 + i * 20)
                                                       for i in range(n)]
-    return Unit("u:t@0", "command", 123, argv=("id",), cmd_text="id", exit_code=0, cwd="/tmp",
+    return Unit("u:t@0", "command", 123, argv=("id",), cmd_text="id", exit_code=0, cwd=cwd,
                 context={"kind": "local", "host": "local"}, all_lines=tuple(lines), terminal_id="t",
                 cmd_id="t@5", start_off=0, end_off=100)
 
@@ -57,8 +57,8 @@ def test_subprocess_roundtrip():
     assert [(x.parser_id, x.items) for x in inproc] == [(r.parser_id, r.items)]
 
 
-def test_worker_is_isolated():
-    res = runner().run(unit(), [wp.EnvParser()])[0]
+def test_worker_is_isolated(tmp_path):
+    res = runner().run(unit(cwd=str(tmp_path)), [wp.EnvParser()])[0]
     assert res.error is None
     vals = {}
     for m in res.items:
@@ -71,7 +71,16 @@ def test_worker_is_isolated():
     assert limits == {"RLIMIT_AS": str(1 << 30), "RLIMIT_CPU": "30", "RLIMIT_FSIZE": "0", "RLIMIT_CORE": "0",
                       "RLIMIT_NOFILE": "64"}
     assert vals["nnp"] == ["1"]
-    assert vals["write"] != ["ok"]
+    assert vals["write"] != ["ok"]  # Daten schreiben scheitert (RLIMIT_FSIZE=0) ...
+    target = tmp_path / "ariadne-worker-test"
+    assert not target.exists() or target.stat().st_size == 0
+
+
+@pytest.mark.xfail(strict=True, reason="v0.1 ohne Landlock: O_CREAT/O_TRUNC, rename und unlink gehen "
+                                        "trotz RLIMIT_FSIZE=0 (Architektur 9.3, v0.2)")
+def test_worker_cannot_create_files(tmp_path):
+    runner().run(unit(cwd=str(tmp_path)), [wp.EnvParser()])
+    assert not (tmp_path / "ariadne-worker-test").exists()
 
 
 def test_memory_bomb_is_contained():

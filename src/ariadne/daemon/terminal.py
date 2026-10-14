@@ -12,7 +12,7 @@ from typing import Any, get_args
 
 from ariadne._shim.protocol import PROTO_VERSION, ProtocolError
 from ariadne.ctxrules import ContextStack
-from ariadne.events import StageKind
+from ariadne.events import GapReason, StageKind
 
 __all__ = [
     "AckEntry",
@@ -27,6 +27,7 @@ __all__ = [
 ]
 
 STAGE_KINDS = frozenset(get_args(StageKind))
+GAP_REASONS = frozenset(get_args(GapReason))
 _TID_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z-]{7,63}$")
 _NAME_RE = re.compile(r"^[a-z0-9_][a-z0-9_.-]{0,252}$")
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -93,6 +94,11 @@ class Terminal:
     ack_queue: deque[AckEntry] = field(default_factory=deque)
     buffer: deque[tuple[int, bytes, AckEntry]] = field(default_factory=deque)
     buffer_bytes: int = 0
+    # Puffer im Zustand waiting voll: ab dieser seq nichts mehr annehmen und nichts
+    # bestätigen; der Shim hält die Rahmen und sendet sie nach dem Entsperren erneut.
+    resend_from: int | None = None
+    req_done: set[int] = field(default_factory=set)  # Anfragen aus diesem Bereich, schon ausgeführt
+    seen_seq: int = 0
     gap_hint: str | None = None
     pause: Pause | None = None
     frame_offs: list[int] = field(default_factory=list)
@@ -187,7 +193,9 @@ def parse_hello(obj: dict[str, Any]) -> dict[str, Any]:
     slug = obj.get("bound_slug")
     if not isinstance(slug, str) or not _SLUG_RE.match(slug):
         slug = None
+    hint = obj.get("gap_hint")
     return {
+        "gap_hint": hint if isinstance(hint, str) and hint in GAP_REASONS else None,
         "stack": parse_stack(obj.get("stack")),
         "bound_project_id": bound,
         "bound_slug": slug if bound else None,
