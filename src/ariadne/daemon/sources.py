@@ -284,25 +284,14 @@ class LocalSources:
             return None
         blob_id = None
         data = fd.data
-        reds: list[dict[str, Any]] = []
         if data is not None:
-            # Eigene Secrets (z. B. in nmap-XML unter args="--script-args creds...") wie im
-            # Terminal-Strom schwärzen, bevor sie in Blob-Store und Volltextsuche gehen.
-            hits = self.d.redactor.scan(data)
-            if hits:
-                buf = bytearray(data)
-                for h in hits:
-                    buf[h.start:h.end] = b"*" * (h.end - h.start)
-                    reds.append({"label": h.label, "start": h.start, "end": h.end})
-                data = bytes(buf)
+            # Seit E72 ungeschwärzt (nur verschlüsselt); eigene Secrets ersetzen die Ausgänge.
             blob_id = p.blobs.put_bytes(data, kind="file").blob_id
         mime, sniffed = safeopen.sniff(data, path)
         header: dict[str, Any] = {
             "path": path, "sha256": fd.sha256, "size": fd.size, "blob_id": blob_id, "mime": mime,
             "sniff": sniffed if data is not None else "too_large", **fields,
         }
-        if reds:
-            header["redactions"] = reds
         header = {k: v for k, v in header.items() if v is not None}
         origin = "daemon" if fields.get("origin") == "companion" else "cli"
         self.d.submit(AppendItem("file.observed", header, origin=origin))
@@ -326,7 +315,7 @@ class LocalSources:
                                          extra_blocked=self._blocked_extra())
         if self.d.project is not p:
             raise safeopen.UnsafeFile("project_changed")
-        fields: dict[str, Any] = {"origin": "import", "rec": bool(self.d.rec_on)}
+        fields: dict[str, Any] = {"origin": "import", "rec": True}  # Daueraufnahme (E22)
         if host:
             fields["host_hint"] = host
         header = self._store(rel if rel is not None else norm, fd, **fields)

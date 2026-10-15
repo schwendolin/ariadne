@@ -31,6 +31,9 @@ class FakeUnit:
     terminal_id: str | None = None
     data: bytes = b""
     extra: dict[str, Any] = field(default_factory=dict)
+    cmd_id: str | None = None
+    flags: tuple[str, ...] = ()
+    mono_ns: int | None = None
 
     def open_bytes(self) -> bytes:
         return self.data
@@ -78,6 +81,9 @@ def make_unit(
     exit_code: int | None = 0,
     start: int = 0,
     flags: Mapping[int, str] | None = None,
+    cmd_id: str | None = None,
+    unit_flags: Sequence[str] = (),
+    mono_ns: int | None = None,
 ) -> FakeUnit:
     if data is not None and not text:
         text = data.decode("utf-8", "replace")
@@ -105,6 +111,9 @@ def make_unit(
         ts_utc_ns=ts,
         terminal_id=terminal_id if kind != "file" else None,
         data=data if data is not None else b"",
+        cmd_id=cmd_id,
+        flags=tuple(unit_flags),
+        mono_ns=mono_ns,
     )
 
 

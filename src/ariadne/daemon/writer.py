@@ -1,51 +1,57 @@
-"""Writer des Daemons (Architektur 5.4): bündelt, schwärzt, schreibt, bestätigt.
+"""Writer des Daemons (Architektur 5.4, Vertrag v0.1-Bedienung 4.6): bündelt, schreibt, bestätigt.
 
 Ein Commit alle 200 ms oder ab 256 KiB. Reihenfolge pro Commit:
 
-1. ``term.out`` läuft durch den Redaktor (eigene Secrets, längenerhaltend).
-   Vor einem anderen Event eines Terminals gibt der Writer vom Rückhalt nur
-   frei, was kein eigenes Secret beginnen kann (wie bei Stille). Hält der
-   Redaktor danach noch einen echten Secret-Anfang, wartet das Event dahinter
-   und geht an seiner Stromposition ins Journal (das ``term.out`` wird dort
-   geteilt). Sonst könnte ein Ereignis, das ein Ziel auslösen kann
-   (``term.marker_forged``, ``term.osc52_blocked``), oder ein ``term.resize``
-   ein Secret zerteilen und den Anfang im Klartext schreiben. Nur REC aus,
-   Projektwechsel, Pause und das Ende des Terminals geben den Rückhalt hart frei.
+1. Aufeinanderfolgende Ausgabe-Rahmen eines Terminals werden zu einem ``term.out``
+   zusammengefasst (lückenlos, gleiche Herkunft, höchstens 256 KiB und
+   :data:`ariadne.events.MAX_TIX` Einträge im Zeitindex, nie über ein anderes
+   Event desselben Terminals hinweg). Der Zeitindex wandert mit: Ein Rahmen, der
+   bei Byte ``n`` beginnt, ergibt den Eintrag ``(n, (mono_i - mono_0) // 1000)``,
+   seine eigenen Einträge werden um ``n`` und diese Zeit verschoben. Rahmen mit
+   unplausibler Zeit (``time_suspect``) bleiben eigene Zeilen.
 2. ``append_many`` in einer Transaktion.
 3. ACK an die Shims (nur für vollständig gespeicherte Rahmen).
 4. Commit- und Mark-Hooks, ausserhalb der Transaktion. Fehler dort stoppen
    den Daemon nie.
+
+Seit E72 schwärzt der Writer nichts mehr: Das Journal speichert alles (verschlüsselt),
+eigene Secrets ersetzt der Redaktor erst an den Ausgängen (``Redactor.redact_for_exit``).
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ariadne import events
 from ariadne.daemon.terminal import MarkContext, Terminal
-from ariadne.secrets.redactor import Chunk
 from ariadne.store.api import AppendItem, EventRecord
 
 if TYPE_CHECKING:
     from ariadne.daemon.core import Daemon
 
-__all__ = ["Writer"]
+__all__ = ["Writer", "OutChunk", "MERGE_MAX", "merge_tix"]
 
 log = logging.getLogger("ariadne.daemon")
 
+MERGE_MAX = 256 * 1024
+DT_MAX = (1 << 31) - 1  # µs; grössere Abstände werden nicht zusammengefasst
+
 
 @dataclass
-class _Out:
+class OutChunk:
+    """Ein angenommener Ausgabe-Rahmen mit Shim-Zeit und Zeitindex."""
+
     t: Terminal
     off: int
     data: bytes
-
-
-@dataclass
-class _Flush:
-    t: Terminal
-    soft: bool = False  # Leerlauf: möglichen Secret-Anfang behalten
+    wall: int
+    mono: int | None = None
+    tix: tuple[tuple[int, int], ...] = ()
+    recv: int = 0
+    origin: str = "shim"
+    suspect: bool = False
 
 
 @dataclass
@@ -55,37 +61,103 @@ class _Event:
     mark_ctx: MarkContext | None
 
 
+def _dt_us(a_wall: int, a_mono: int | None, b_wall: int, b_mono: int | None) -> int | None:
+    """Abstand von Rahmen a zu Rahmen b in µs (monotone Uhr, ohne sie die Wanduhr)."""
+    if a_mono is not None and b_mono is not None:
+        d = b_mono - a_mono
+    elif a_mono is None and b_mono is None:
+        d = b_wall - a_wall
+    else:
+        return None
+    return d // 1000 if 0 <= d // 1000 <= DT_MAX else None
+
+
+def merge_tix(base: list[tuple[int, int]], length: int, dt0: int,
+              tix: tuple[tuple[int, int], ...]) -> list[tuple[int, int]]:
+    """Zeitindex eines angehängten Rahmens (ab Byte ``length``, Zeit ``dt0``) anfügen."""
+    out = list(base)
+    last = out[-1][1] if out else 0
+    if dt0 != last:
+        out.append((length, dt0))
+    for rel, dt in tix:
+        out.append((length + rel, dt0 + dt))
+    return out
+
+
+@dataclass
+class _Merge:
+    first: OutChunk
+    buf: bytearray = field(default_factory=bytearray)
+    tix: list[tuple[int, int]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.buf = bytearray(self.first.data)
+        self.tix = list(self.first.tix)
+
+    def take(self, c: OutChunk) -> bool:
+        f = self.first
+        if c.t is not f.t or c.origin != f.origin or c.suspect or f.suspect:
+            return False
+        if f.off + len(self.buf) != c.off or len(self.buf) + len(c.data) > MERGE_MAX:
+            return False
+        if len(self.tix) + 1 + len(c.tix) > events.MAX_TIX:
+            return False
+        dt0 = _dt_us(f.wall, f.mono, c.wall, c.mono)
+        if dt0 is None or dt0 < (self.tix[-1][1] if self.tix else 0):
+            return False
+        if c.tix and dt0 + c.tix[-1][1] > DT_MAX:
+            return False
+        self.tix = merge_tix(self.tix, len(self.buf), dt0, c.tix)
+        self.buf += c.data
+        return True
+
+    def item(self) -> AppendItem:
+        f = self.first
+        header: dict[str, Any] = {
+            "terminal_id": f.t.terminal_id, "stream_off": f.off, "length": len(self.buf),
+            "t_shim_ns": f.wall,
+        }
+        if f.mono is not None:
+            header["mono_ns"] = f.mono
+        if self.tix:
+            header["tix"] = [list(x) for x in self.tix]
+        if f.suspect:
+            header["time_suspect"] = True
+        return AppendItem("term.out", header, bytes(self.buf), origin=f.origin, terminal_id=f.t.terminal_id,
+                          stream_off=f.off, ts_utc_ns=f.recv or None)
+
+
 class Writer:
     def __init__(self, daemon: Daemon, *, interval: float = 0.2, max_bytes: int = 256 * 1024) -> None:
         self.d = daemon
         self.interval = interval
         self.max_bytes = max_bytes
-        self.pending: list[_Out | _Flush | _Event] = []
+        self.pending: list[OutChunk | _Event] = []
         self.pending_bytes = 0
         self.committed_gen = 0
         self._carry: list[AppendItem] = []
         self._carry_marks: list[MarkContext | None] = []
         self._carry_journal: Any = None
-        self._deferred: dict[str, list[_Event]] = {}  # Events hinter dem Redaktor-Rückhalt
 
     @property
     def pending_gen(self) -> int:
         """Generation, mit der alles jetzt Eingereihte committed wird."""
         return self.committed_gen + 1
 
+    @property
+    def busy(self) -> bool:
+        return bool(self.pending or self._carry)
+
     # ------------------------------------------------------------------ #
-    def add_out(self, t: Terminal, off: int, data: bytes) -> None:
-        self.pending.append(_Out(t, off, data))
-        self.pending_bytes += len(data)
+    def add_out(self, chunk: OutChunk) -> None:
+        self.pending.append(chunk)
+        self.pending_bytes += len(chunk.data)
         if self.pending_bytes >= self.max_bytes:
             self.flush_now()
 
     def add_event(self, item: AppendItem, t: Terminal | None = None,
                   mark_ctx: MarkContext | None = None) -> None:
         self.pending.append(_Event(item, t, mark_ctx))
-
-    def add_flush(self, t: Terminal, *, soft: bool = False) -> None:
-        self.pending.append(_Flush(t, soft))
 
     def drop_carry(self) -> None:
         if self._carry:
@@ -102,73 +174,37 @@ class Writer:
             t.stored_end = max(t.stored_end, end)
 
     # ------------------------------------------------------------------ #
-    def _out_item(self, t: Terminal, chunk: Chunk) -> AppendItem:
-        off, data, reds = chunk
-        wall, mono, recv = t.time_at(off)
-        header: dict[str, Any] = {
-            "terminal_id": t.terminal_id,
-            "stream_off": off,
-            "length": len(data),
-            "t_shim_ns": wall,
-            "redactions": [r.model_dump() for r in reds],
-        }
-        if mono is not None:
-            header["mono_ns"] = mono
-        # Empfangszeit des Rahmens, nicht die Commit-Zeit (der Rückhalt kann warten)
-        return AppendItem("term.out", header, data, origin="shim", terminal_id=t.terminal_id,
-                          stream_off=off, ts_utc_ns=recv or None)
-
-    @staticmethod
-    def _event_off(e: _Event) -> int:
-        off = e.item.stream_off
-        return off if isinstance(off, int) else 0
-
-    def _put_event(self, e: _Event, items: list[AppendItem], marks: list[MarkContext | None]) -> None:
-        items.append(e.item)
-        if e.item.kind == "term.mark":
-            marks.append(e.mark_ctx)
-
-    def _put_chunks(self, t: Terminal, chunks: list[Chunk], items: list[AppendItem],
-                    marks: list[MarkContext | None]) -> None:
-        """Ausgabe-Stücke ins Journal; wartende Events an ihrer Stromposition dazwischen."""
-        q = self._deferred.get(t.terminal_id)
-        for off, data, reds in chunks:
-            while q:
-                x = self._event_off(q[0])
-                if x > off + len(data):
-                    break
-                if x > off:
-                    cut = x - off
-                    items.append(self._out_item(t, (off, data[:cut], _clip(reds, off, x))))
-                    reds = _clip(reds, x, off + len(data))
-                    data, off = data[cut:], x
-                self._put_event(q.pop(0), items, marks)
-            if data:
-                items.append(self._out_item(t, (off, data, reds)))
-        self._release(t, items, marks)
-
-    def _release(self, t: Terminal, items: list[AppendItem], marks: list[MarkContext | None]) -> None:
-        q = self._deferred.get(t.terminal_id)
-        if not q:
-            self._deferred.pop(t.terminal_id, None)
-            return
-        pend = self.d.redactor.pending(t.terminal_id)
-        limit = pend[0] if pend is not None else None
-        while q and (limit is None or self._event_off(q[0]) <= limit):
-            self._put_event(q.pop(0), items, marks)
-        if not q:
-            self._deferred.pop(t.terminal_id, None)
+    def _collect(self, pending: list[OutChunk | _Event], items: list[AppendItem],
+                 marks: list[MarkContext | None]) -> None:
+        slots: list[AppendItem | _Merge] = []
+        cur: dict[str, _Merge] = {}
+        for e in pending:
+            if isinstance(e, OutChunk):
+                tid = e.t.terminal_id
+                m = cur.get(tid)
+                if m is None or not m.take(e):
+                    m = _Merge(e)
+                    cur[tid] = m
+                    slots.append(m)
+                continue
+            if e.t is not None:
+                cur.pop(e.t.terminal_id, None)
+            elif e.item.terminal_id is not None:
+                cur.pop(e.item.terminal_id, None)
+            slots.append(e.item)
+            if e.item.kind == "term.mark":
+                marks.append(e.mark_ctx)
+        items.extend(s.item() if isinstance(s, _Merge) else s for s in slots)
 
     def flush_now(self) -> list[EventRecord]:
         """Schreibt alles Eingereihte synchron. Gibt die neuen Records zurück."""
         project = self.d.project
         pending, self.pending, self.pending_bytes = self.pending, [], 0
         if project is None:
-            self._deferred.clear()
             if pending:
                 log.warning("Writer: %d Einträge ohne offenes Projekt verworfen", len(pending))
                 for e in pending:
-                    if isinstance(e, _Out):
+                    if isinstance(e, OutChunk):
                         self._forget(e.t.terminal_id, e.off + len(e.data))
                 self.committed_gen += 1
                 self.d.advance_acks()
@@ -178,24 +214,7 @@ class Writer:
             self.drop_carry()
         items: list[AppendItem] = list(self._carry)
         marks: list[MarkContext | None] = list(self._carry_marks)
-        redactor = self.d.redactor
-        for e in pending:
-            if isinstance(e, _Out):
-                self._put_chunks(e.t, redactor.feed(e.t.terminal_id, e.off, e.data), items, marks)
-            elif isinstance(e, _Flush):
-                self._put_chunks(e.t, redactor.flush(e.t.terminal_id, keep_prefix=e.soft), items, marks)
-            elif e.t is None:
-                self._put_event(e, items, marks)
-            else:
-                # Vor einem Event nur freigeben, was kein Secret beginnen kann; ein echter
-                # Secret-Anfang bleibt, das Event wartet dahinter.
-                tid = e.t.terminal_id
-                self._put_chunks(e.t, redactor.flush(tid, keep_prefix=True), items, marks)
-                pend = redactor.pending(tid)
-                if tid in self._deferred or (pend is not None and self._event_off(e) > pend[0]):
-                    self._deferred.setdefault(tid, []).append(e)  # wartet hinter dem Rückhalt
-                else:
-                    self._put_event(e, items, marks)
+        self._collect(pending, items, marks)
         if not items:
             self.committed_gen += 1
             self.d.advance_acks()
@@ -220,13 +239,3 @@ class Writer:
         for rec, ctx in zip(mark_records, marks, strict=False):
             self.d.run_mark_hooks(rec, ctx)
         return records
-
-
-def _clip(reds: list[Any], start: int, end: int) -> list[Any]:
-    """Redaktionsvermerke auf den Bereich ``[start, end)`` beschneiden."""
-    out = []
-    for r in reds:
-        a, b = max(r.start, start), min(r.end, end)
-        if a < b:
-            out.append(r.model_copy(update={"start": a, "end": b}))
-    return out

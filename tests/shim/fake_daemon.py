@@ -1,7 +1,8 @@
 """Fake-Daemon für Shim-Tests: nimmt Shim-Verbindungen auf ``term.sock`` an.
 
 Läuft in einem Thread, zeichnet alle Rahmen auf, schickt nach ``HELLO`` einen
-``STATE`` und bestätigt OUT und EVENT per ``ACK`` (abschaltbar).
+``STATE`` und bestätigt OUT, OUTX, INPUT und EVENT per ``ACK`` (abschaltbar).
+``req.pause`` schaltet wie der echte Daemon um (``paused`` mit ``pause_until_ns``).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from ariadne._shim import protocol as P
 class Rec:
     conn: int
     type: int
-    obj: Any  # dict für JSON-Rahmen, Tupel (seq, off, wall, mono, data) für OUT
+    obj: Any  # dict für JSON, (seq, off, wall, mono, data, tix) für OUT/OUTX, InputFrame für INPUT
     t: float = field(default_factory=time.monotonic)
 
 
@@ -33,7 +34,8 @@ class FakeDaemon:
         self.sock_path = Path(sock_path)
         self.state: dict[str, Any] = {
             "rec": rec, "project": project, "project_id": "p1", "profile": "lab",
-            "bound_project_id": None, "stack": [], "suggestion": None,
+            "bound_project_id": None, "stack": [], "suggestion": None, "pause_until_ns": None,
+            "preroll_minutes": 15,
             "hosts": hosts if hosts is not None else ["web01", "web02", "db01"], "title_extra": None,
         }
         self.ack = ack
@@ -91,10 +93,19 @@ class FakeDaemon:
     def out_bytes(self) -> bytes:
         """Aufgezeichneter Strom, nach Offset sortiert, Duplikate entfernt."""
         chunks: dict[int, bytes] = {}
-        for r in self.frames(P.OUT):
-            _seq, off, _w, _m, data = r.obj
+        for r in self.frames(P.OUT) + self.frames(P.OUTX):
+            off, data = r.obj[1], r.obj[4]
             chunks.setdefault(off, data)
         return b"".join(chunks[k] for k in sorted(chunks))
+
+    def outs(self) -> list[Rec]:
+        return self.frames(P.OUT) + self.frames(P.OUTX)
+
+    def inputs(self) -> list[P.InputFrame]:
+        return [r.obj for r in self.frames(P.INPUT)]
+
+    def input_bytes(self) -> bytes:
+        return b"".join(f.data for f in self.inputs())
 
     def marks(self, mark: str | None = None) -> list[dict]:
         return [e for e in self.events("term.mark") if mark is None or e.get("mark") == mark]
@@ -157,8 +168,15 @@ class FakeDaemon:
 
     def _handle(self, c: int, conn: socket.socket, fr: P.Frame) -> None:
         if fr.type == P.OUT:
-            obj: Any = P.decode_out(fr.payload)
+            obj: Any = (*P.decode_out(fr.payload), ())
             seq = obj[0]
+        elif fr.type == P.OUTX:
+            ox = P.decode_outx(fr.payload)
+            obj = (ox.seq, ox.stream_off, ox.t_wall_ns, ox.t_mono_ns, ox.data, ox.tix)
+            seq = ox.seq
+        elif fr.type == P.INPUT:
+            obj = P.decode_input(fr.payload)
+            seq = obj.seq
         else:
             obj = P.decode_json(fr.payload)
             seq = obj.get("seq")
@@ -167,7 +185,7 @@ class FakeDaemon:
         try:
             if fr.type == P.HELLO:
                 conn.sendall(P.encode_json(P.STATE, self.state))
-            elif fr.type in (P.OUT, P.EVENT) and self.ack and isinstance(seq, int):
+            elif fr.type in (P.OUT, P.OUTX, P.INPUT, P.EVENT) and self.ack and isinstance(seq, int):
                 conn.sendall(P.encode_json(P.ACK, {"seq": seq}))
             if fr.type == P.EVENT and obj.get("kind") == "req.rec":
                 on = obj.get("on")
@@ -175,6 +193,18 @@ class FakeDaemon:
                     on = self.state["rec"] != "on"
                 new = "on" if on else "off"
                 self.state["rec"] = new
+                conn.sendall(P.encode_json(P.STATE, self.state))
+            if fr.type == P.EVENT and obj.get("kind") == "req.pause":
+                minutes = obj.get("minutes")
+                paused = self.state["rec"] == "paused"
+                if minutes is None:
+                    minutes = 0 if paused else 10
+                if minutes:
+                    self.state["rec"] = "paused"
+                    self.state["pause_until_ns"] = time.time_ns() + minutes * 60_000_000_000
+                else:
+                    self.state["rec"] = "on"
+                    self.state["pause_until_ns"] = None
                 conn.sendall(P.encode_json(P.STATE, self.state))
         except OSError:
             pass

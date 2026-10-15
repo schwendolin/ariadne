@@ -12,16 +12,24 @@ Architektur 5.3. Regeln:
 
 Ein neues Event braucht hier ein Modell und einen Eintrag in :data:`KINDS`.
 Änderungen an bestehenden Modellen nur abwärtskompatibel oder mit neuer Version.
+
+**Zeit (E96).** Massgeblich ist die Zeit, die der Shim beim Lesen misst:
+``t_shim_ns`` (Wanduhr, CLOCK_REALTIME) und ``mono_ns`` (CLOCK_MONOTONIC) im
+Header. Die Spalte ``ts_utc_ns`` des Journals ist nur noch die Empfangszeit im
+Daemon (Kontrollfeld). ``term.out`` und ``term.input`` tragen zusätzlich einen
+Zeitindex ``tix``: Paare ``(rel_off, dt_us)``, ab dem Byte ``rel_off`` des Bodys
+gilt die Zeit ``t_shim_ns + dt_us * 1000`` (bzw. ``mono_ns + dt_us * 1000``).
+Das erste Byte hat implizit ``(0, 0)``. Siehe :func:`body_time`.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "Layer",
@@ -32,6 +40,9 @@ __all__ = [
     "layer_of",
     "Redaction",
     "Stage",
+    "MAX_TIX",
+    "body_time",
+    "shim_time",
 ]
 
 Layer = Literal["raw", "decision", "system"]
@@ -40,6 +51,8 @@ GapReason = Literal[
     "rec_off", "buffer_overflow", "daemon_down", "project_switch",
     "sensitive_output", "locked", "disk_low", "shim_error",
     "multiplexer",  # tmux/screen-Client im Vordergrund: die Panes haben eigene Shims (A3.9)
+    "pause",  # Pause des Nutzers (F12 r, ariadne pause), E22
+    "no_project",  # kein Projekt aktiv und Vorlauf nicht übernommen (E95)
 ]
 StageKind = Literal[
     "local", "su", "ssh", "winrm", "remote", "revshell", "msf", "meterpreter", "db", "unknown"
@@ -49,11 +62,38 @@ StageSource = Literal["auto", "hotkey", "webui", "cli", "suggestion"]
 Keystep = Literal["foothold", "privesc", "pivot", "loot"]
 WorkStatus = Literal["open", "in_progress", "dead_end", "done", "out_of_scope"]
 AccessLevel = Literal["none", "user", "admin"]
-Origin = Literal["shim", "webui", "cli", "watcher", "gateway", "daemon", "import"]
+Origin = Literal["shim", "webui", "cli", "watcher", "gateway", "daemon", "import", "preroll"]
+PauseSource = Literal["hotkey", "cli", "webui"]
+ProjectEndReason = Literal["stop", "idle", "switch", "lock", "shutdown"]
+
+MAX_TIX = 4096  # Einträge im Zeitindex eines term.out/term.input
 
 
 class _M(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class _ShimTime(_M):
+    """Zeit des Shims beim Lesen (E96). Fehlt bei alten Shims und bei Events des Daemons,
+    deren Shim-Zeit er nicht kennt; dann gilt die Empfangszeit (Spalte ``ts_utc_ns``)."""
+
+    t_shim_ns: int | None = None
+    mono_ns: int | None = None
+
+
+def _check_tix(tix: Sequence[Sequence[int]] | None, length: int) -> None:
+    if not tix:
+        return
+    if len(tix) > MAX_TIX:
+        raise ValueError("Zeitindex zu lang")
+    prev_off, prev_dt = 0, 0
+    for entry in tix:
+        if len(entry) != 2:
+            raise ValueError("Zeitindex: Paare (rel_off, dt_us) erwartet")
+        rel, dt = entry
+        if not prev_off < rel < length or dt < prev_dt:
+            raise ValueError("Zeitindex: rel_off steigend innerhalb des Bodys, dt_us nicht fallend")
+        prev_off, prev_dt = rel, dt
 
 
 # --------------------------------------------------------------------------- #
@@ -86,6 +126,9 @@ class Stage(_M):
     state: StageState = "active"
     source: StageSource = "auto"
     candidate: str | None = Field(default=None, description="Ziel-Kandidat aus argv, unbestätigt")
+    host_source: StageSource | None = Field(
+        default=None, description="Herkunft des Hosts; 'auto' = aus der Auswertung (erster Callback, E23). "
+                                  "Solche Hosts stehen nie im Journal (ContextStack.journal_snapshot)")
 
 
 # --------------------------------------------------------------------------- #
@@ -93,7 +136,7 @@ class Stage(_M):
 # --------------------------------------------------------------------------- #
 
 
-class TermOpen(_M):
+class TermOpen(_ShimTime):
     terminal_id: str
     tty: str | None = None
     shell: str
@@ -111,7 +154,14 @@ class TermBind(_M):
 
 
 class TermOut(_M):
-    """Output-Chunk. Die Bytes stehen im Body, nicht im Header."""
+    """Output-Chunk. Die Bytes stehen im Body, nicht im Header.
+
+    ``t_shim_ns``/``mono_ns`` gelten für das erste Byte, ``tix`` für spätere
+    Lesevorgänge (siehe Moduldoku). ``time_suspect`` setzt der Daemon, wenn die
+    Shim-Zeit unplausibel ist (Abweichung zur Empfangszeit über 5 s oder
+    rückwärts laufende monotone Uhr). ``redactions`` bleibt seit E72 leer
+    (der Daemon schwärzt nicht mehr vor dem Speichern); alte Journale haben Einträge.
+    """
 
     terminal_id: str
     stream_off: int = Field(ge=0)
@@ -119,9 +169,67 @@ class TermOut(_M):
     t_shim_ns: int
     mono_ns: int | None = None
     redactions: tuple[Redaction, ...] = ()
+    tix: tuple[tuple[int, int], ...] | None = None
+    time_suspect: bool | None = None
+
+    @model_validator(mode="after")
+    def _tix_ok(self) -> TermOut:
+        _check_tix(self.tix, self.length)
+        return self
 
 
-class TermMarkEv(_M):
+class TermInput(_M):
+    """Eingabe ans Kind (E26): genau die Bytes, die der Shim an das Programm im PTY
+    weitergibt, auch Passwörter ohne Echo. Nicht dabei: Hotkey-Folgen und Eingaben
+    im Mini-Prompt, die Ariadne selbst verbraucht. Die Bytes stehen im Body.
+
+    ``stream_off`` ist der Ausgabe-Offset beim ersten Byte, ``out_end`` der beim
+    letzten (Bezug zum Output). ``paste``: der ganze Inhalt kam als Bracketed Paste.
+    Nie in Logs; an Terminal-Senken nur über ``term_safe``.
+    """
+
+    terminal_id: str
+    stream_off: int = Field(ge=0)
+    out_end: int = Field(ge=0)
+    length: int = Field(ge=0)
+    t_shim_ns: int
+    mono_ns: int | None = None
+    tix: tuple[tuple[int, int], ...] | None = None
+    paste: bool | None = None
+    time_suspect: bool | None = None
+
+    @model_validator(mode="after")
+    def _ok(self) -> TermInput:
+        if self.out_end < self.stream_off:
+            raise ValueError("out_end vor stream_off")
+        _check_tix(self.tix, self.length)
+        return self
+
+
+class TermPause(_M):
+    """Pause des Nutzers beginnt (E22). Das Ende markiert das ``term.gap`` mit Grund
+    ``pause``, das der Shim beim Fortsetzen schickt (auch mit ``bytes_lost=0``)."""
+
+    terminal_id: str
+    stream_off: int = Field(ge=0)
+    until_ns: int = Field(ge=0, description="geplantes Ende, Wanduhr in ns")
+    source: PauseSource
+
+
+class TermPreroll(_M):
+    """Vorlauf übernommen (E95): Davor geschriebene Events dieses Terminals mit
+    ``origin='preroll'`` stammen aus dem RAM-Puffer, mit ihren Original-Zeiten."""
+
+    terminal_id: str
+    from_off: int = Field(ge=0)
+    to_off: int = Field(ge=0)
+    frames: int = Field(ge=0)
+    t_first_ns: int | None = None
+    t_last_ns: int | None = None
+    dropped_bytes: int = Field(ge=0, default=0)
+
+
+class TermMarkEv(_ShimTime):
     """Gültiger Shell-Marker (Nonce geprüft). Siehe Architektur 3.3.
 
     ``fg_shell`` sagt, ob beim Lesen die Vordergrund-Prozessgruppe die der
@@ -144,45 +252,48 @@ class TermMarkEv(_M):
     user: str | None = None
 
 
-class TermResize(_M):
+class TermResize(_ShimTime):
     terminal_id: str
     stream_off: int = Field(ge=0)
     rows: int = Field(ge=0, le=1000)
     cols: int = Field(ge=0, le=1000)
 
 
-class TermCtxSnapshot(_M):
+class TermCtxSnapshot(_ShimTime):
     terminal_id: str
     stream_off: int = Field(ge=0)
     stack: tuple[Stage, ...]
 
 
-class TermGap(_M):
+class TermGap(_ShimTime):
     terminal_id: str
     stream_off: int = Field(ge=0)
     reason: GapReason
     bytes_lost: int = Field(ge=0, default=0)
 
 
-class TermClose(_M):
+class TermClose(_ShimTime):
     terminal_id: str
     stream_off: int = Field(ge=0)
     exit_code: int | None = None
 
 
-class TermOsc52Blocked(_M):
+class TermOsc52Blocked(_ShimTime):
     terminal_id: str
     stream_off: int = Field(ge=0)
     length: int = Field(ge=0)
 
 
-class TermMarkerForged(_M):
+class TermMarkerForged(_ShimTime):
     terminal_id: str
     stream_off: int = Field(ge=0)
     reason: Literal["bad_nonce", "replay", "not_foreground", "malformed", "oversize"]
 
 
 class RecSet(_M):
+    """Globaler REC-Schalter bis v0.1. Seit E22 (Daueraufnahme) schreibt der Daemon
+    kein ``rec.set`` mehr; alte Journale enthalten es noch."""
+
     on: bool
     source: Literal["webui", "cli", "hotkey", "system"]
     terminal_id: str | None = None
@@ -229,6 +340,21 @@ class NetRoute(_M):
     via: str | None = None
 
 
+class NetLocalAddrs(_M):
+    """Adressen der eigenen Interfaces von Kali (A5), gelesen aus ``/proc/net/fib_trie``
+    und ``/proc/net/if_inet6`` (eigener Kernel, kein Befehl, kein Paket).
+
+    Immer die vollständige aktuelle Menge, kanonisch (``ipaddress``), sortiert,
+    ohne Duplikate; Loopback und Link-Local dürfen dabei sein. Der Daemon schreibt
+    es beim Öffnen eines Projekts und wenn sich die Menge ändert. Die Auswertung
+    behandelt jede Adresse, die je in einem solchen Event oder als ``net.route.src_ip``
+    vorkam, als eigene Adresse.
+    """
+
+    addrs: tuple[str, ...] = Field(max_length=256)
+    source: Literal["proc"] = "proc"
+
+
 class ClockCheck(_M):
     synced: bool | None = None
     ntp_server: str | None = None
@@ -272,6 +398,14 @@ class SystemClockJump(_M):
 class SystemMigration(_M):
     from_version: int
     to_version: int
+
+
+class SystemProjectEnd(_M):
+    """Das Projekt endet (E22): ``stop``, Leerlauf (``idle``, mit Dauer), Wechsel zu einem
+    anderen Projekt, ``lock`` oder Daemon-Ende. Steht vor dem Checkpoint ``close``."""
+
+    reason: ProjectEndReason
+    idle_s: int | None = Field(default=None, ge=0)
 
 
 class ProjectCreated(_M):
@@ -416,6 +550,16 @@ class DLabNotCustomer(_M):
     scope_version: int
 
 
+class DUnitDistrust(_M):
+    """Rückgängig pro Befehl (E42): Alle Claims, die nur aus der Evidenzgruppe dieses
+    Befehls stammen (Einheiten mit dieser ``cmd_id`` und Dateien mit
+    ``file.observed.produced_by_cmd`` = ``cmd_id``), werden verworfen; Claims mit
+    weiteren Quellen verlieren diese Quellen. Übersteht Reparse, aufhebbar mit ``d.revoke``."""
+
+    cmd_id: str = Field(min_length=3, max_length=200)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class DGeneric(_M):
     """Platzhalter für Entscheide, deren Modell erst später kommt (Findings,
     Artefakte, Hypothesen, Prüfziele). Felder werden später typisiert."""
@@ -447,6 +591,9 @@ KINDS: dict[str, KindSpec] = {
         _k("term.open", "raw", TermOpen),
         _k("term.bind", "raw", TermBind),
         _k("term.out", "raw", TermOut, has_body=True),
+        _k("term.input", "raw", TermInput, has_body=True),
+        _k("term.pause", "raw", TermPause),
+        _k("term.preroll", "raw", TermPreroll),
         _k("term.mark", "raw", TermMarkEv),
         _k("term.resize", "raw", TermResize),
         _k("term.ctx_snapshot", "raw", TermCtxSnapshot),
@@ -458,6 +605,7 @@ KINDS: dict[str, KindSpec] = {
         _k("file.observed", "raw", FileObserved),
         _k("shot.captured", "raw", ShotCaptured),
         _k("net.route", "raw", NetRoute),
+        _k("net.local_addrs", "raw", NetLocalAddrs),
         _k("clock.check", "raw", ClockCheck),
         _k("ai.call", "raw", AiCall),
         # System
@@ -466,6 +614,7 @@ KINDS: dict[str, KindSpec] = {
         _k("system.redaction", "system", SystemRedaction, has_body=True),
         _k("system.clock_jump", "system", SystemClockJump),
         _k("system.migration", "system", SystemMigration),
+        _k("system.project_end", "system", SystemProjectEnd),
         # Schicht 3
         _k("d.claim.confirm", "decision", DClaim),
         _k("d.claim.reject", "decision", DClaim),
@@ -490,6 +639,7 @@ KINDS: dict[str, KindSpec] = {
         _k("d.suggestion.done", "decision", DSuggestion),
         _k("d.suggestion.dismiss", "decision", DSuggestion),
         _k("d.lab.not_customer", "decision", DLabNotCustomer),
+        _k("d.unit.distrust", "decision", DUnitDistrust),
         _k("d.finding", "decision", DGeneric),
         _k("d.artifact", "decision", DGeneric),
         _k("d.hypothesis", "decision", DGeneric),
@@ -531,3 +681,40 @@ def canonical_json(obj: Any) -> bytes:
     """Kanonisches JSON: sortierte Schlüssel, keine Leerzeichen, UTF-8, keine Floats."""
     _reject_floats(obj, "canonical_json")
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+# --------------------------------------------------------------------------- #
+# Zeit (E96)
+# --------------------------------------------------------------------------- #
+
+
+def _int(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def shim_time(header: Mapping[str, Any], fallback_ns: int) -> int:
+    """Wanduhr eines Events: ``t_shim_ns`` aus dem Header, sonst ``fallback_ns``
+    (die Empfangszeit ``ts_utc_ns`` des Journals)."""
+    t = _int(header.get("t_shim_ns"))
+    return t if t is not None else fallback_ns
+
+
+def body_time(header: Mapping[str, Any], rel: int) -> tuple[int | None, int | None]:
+    """Shim-Zeit (Wanduhr, monotone Uhr) des Bytes ``rel`` im Body von ``term.out``
+    oder ``term.input`` (``rel = offset - stream_off`` bei ``term.out``).
+
+    Ohne ``t_shim_ns`` ergibt sich ``(None, None)``. ``mono_ns`` ist ``None``, wenn
+    der Header keine monotone Zeit hat.
+    """
+    wall = _int(header.get("t_shim_ns"))
+    mono = _int(header.get("mono_ns"))
+    if wall is None:
+        return None, None
+    dt = 0
+    for entry in header.get("tix") or ():
+        r, d = entry[0], entry[1]
+        if r > rel:
+            break
+        dt = d
+    add = dt * 1000
+    return wall + add, (mono + add if mono is not None else None)

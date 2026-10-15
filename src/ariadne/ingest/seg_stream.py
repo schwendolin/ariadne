@@ -14,16 +14,22 @@ Abgleich mit dem Layout (:func:`ariadne.ingest.unit_store.sync_layout`) gleich
 mit ihrer Einheit gespeichert. Nach einem Neustart setzt :meth:`TermStream.load`
 an der letzten Grenze wieder auf; die gleichen Zeilen entstehen mit den
 gleichen Nummern und überschreiben nur ihren eigenen Inhalt.
+
+Zeit (E96): Ein ``term.out`` trägt die Shim-Zeit seines ersten Bytes
+(``t_shim_ns``, ``mono_ns``) und einen Zeitindex ``tix``. Daraus entsteht pro
+Terminal ein Index Offset -> (Wanduhr, monotone Uhr, boot_id);
+:meth:`TermStream.time_at` und :meth:`TermStream.mono_at` lesen ihn.
 """
 
 from __future__ import annotations
 
 import bisect
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ariadne.events import shim_time
 from ariadne.ingest.normalizer import FLAG_ALTSCREEN, Normalizer, NormLine
 from ariadne.ingest.segmenter import SEG_KINDS, SegEvent, event_offset
 
@@ -57,6 +63,8 @@ class TermStream:
         self.events: list[SegEvent] = []
         self.chunk_offs: list[int] = []
         self.chunk_ts: list[int] = []
+        self.chunk_mono: list[int | None] = []
+        self.chunk_boot: list[str | None] = []
         self.pending: list[_Chunk] = []
         self.bounds: list[SegEvent] = []
         self.norm: Normalizer | None = None
@@ -83,13 +91,19 @@ class TermStream:
         self._replaying = False
 
     # ------------------------------------------------------------------ Eingang
-    def add_chunk(self, seq: int, off: int, data: bytes | None, length: int, ts: int) -> None:
-        """``term.out``. ``data=None`` (redigiert) zählt als Lücke."""
+    def add_chunk(self, seq: int, off: int, data: bytes | None, length: int, ts: int,
+                  mono: int | None = None, boot: str | None = None,
+                  tix: Iterable[Any] | None = None) -> None:
+        """``term.out``. ``data=None`` (redigiert) zählt als Lücke. ``ts``/``mono`` gelten für
+        das erste Byte, ``tix`` (``[rel_off, dt_us]``) für spätere."""
         self.last_seq = max(self.last_seq, seq)
         if not self._replaying:
-            self.conn.execute("INSERT OR IGNORE INTO seg_chunk(terminal_id, off, len, seq, ts_utc_ns) "
-                              "VALUES (?, ?, ?, ?, ?)", (self.tid, off, length, seq, ts))
-            self._index_chunk(off, ts)
+            pairs = _tix(tix)
+            self.conn.execute(
+                "INSERT OR IGNORE INTO seg_chunk(terminal_id, off, len, seq, ts_utc_ns, mono_ns, boot_id, "
+                "tix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (self.tid, off, length, seq, ts, mono, boot, json.dumps(pairs) if pairs else None))
+            self._index_chunk(off, ts, mono, boot, pairs)
         self.last_out_ns = ts
         end = off + length
         if end <= self.stream_end:
@@ -117,9 +131,9 @@ class TermStream:
         if not self._replaying:
             self.conn.execute(
                 "INSERT OR IGNORE INTO seg_event(terminal_id, seq, kind, off, ts_utc_ns, operator_id, "
-                "header) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "header, mono_ns, boot_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (self.tid, ev.seq, ev.kind, ev.off, ev.ts, ev.operator_id,
-                 json.dumps(dict(ev.header), ensure_ascii=False, sort_keys=True)),
+                 json.dumps(dict(ev.header), ensure_ascii=False, sort_keys=True), ev.mono, ev.boot),
             )
             self.events.append(ev)
         if ev.kind == "term.open":
@@ -266,16 +280,32 @@ class TermStream:
         return min(offs)
 
     # ------------------------------------------------------------------ Zeit
-    def _index_chunk(self, off: int, ts: int) -> None:
-        if not self.chunk_offs or off > self.chunk_offs[-1]:
-            self.chunk_offs.append(off)
-            self.chunk_ts.append(ts)
+    def _index_chunk(self, off: int, ts: int, mono: int | None = None, boot: str | None = None,
+                     tix: Iterable[tuple[int, int]] = ()) -> None:
+        points = [(off, ts, mono)]
+        for rel, dt in tix:
+            points.append((off + rel, ts + dt * 1000, mono + dt * 1000 if mono is not None else None))
+        for o, w, m in points:
+            if not self.chunk_offs or o > self.chunk_offs[-1]:
+                self.chunk_offs.append(o)
+                self.chunk_ts.append(w)
+                self.chunk_mono.append(m)
+                self.chunk_boot.append(boot)
+
+    def _point(self, off: int) -> int | None:
+        if not self.chunk_offs:
+            return None
+        return max(0, bisect.bisect_right(self.chunk_offs, off) - 1)
 
     def time_at(self, off: int) -> int | None:
-        i = bisect.bisect_right(self.chunk_offs, off) - 1
-        if i < 0:
-            return self.chunk_ts[0] if self.chunk_ts else None
-        return self.chunk_ts[i]
+        """Wanduhr des Shims für das Byte ``off`` (genau auf den Zeitindex, sonst Chunk-Anfang)."""
+        i = self._point(off)
+        return None if i is None else self.chunk_ts[i]
+
+    def mono_at(self, off: int) -> tuple[int | None, str | None]:
+        """Monotone Uhr und boot_id für das Byte ``off``."""
+        i = self._point(off)
+        return (None, None) if i is None else (self.chunk_mono[i], self.chunk_boot[i])
 
     # ------------------------------------------------------------------ Zustand
     def save(self) -> None:
@@ -299,13 +329,14 @@ class TermStream:
             "SELECT operator_id, cols, rows, closed, norm_off, norm_n, norm_prompt, norm_seq, last_out_ns "
             "FROM seg_term "
             "WHERE terminal_id = ?", (terminal_id,)).fetchone()
-        for seq, kind, off, t, op, header in conn.execute(
-                "SELECT seq, kind, off, ts_utc_ns, operator_id, header FROM seg_event WHERE terminal_id = ? "
-                "ORDER BY seq", (terminal_id,)):
-            ts.events.append(SegEvent(int(seq), kind, off, int(t), json.loads(header), op))
-        for off, t in conn.execute("SELECT off, ts_utc_ns FROM seg_chunk WHERE terminal_id = ? ORDER BY off",
-                                   (terminal_id,)):
-            ts._index_chunk(int(off), int(t))
+        for seq, kind, off, t, op, header, mono, boot in conn.execute(
+                "SELECT seq, kind, off, ts_utc_ns, operator_id, header, mono_ns, boot_id FROM seg_event "
+                "WHERE terminal_id = ? ORDER BY seq", (terminal_id,)):
+            ts.events.append(SegEvent(int(seq), kind, off, int(t), json.loads(header), op, mono, boot))
+        for off, t, mono, boot, tix in conn.execute(
+                "SELECT off, ts_utc_ns, mono_ns, boot_id, tix FROM seg_chunk WHERE terminal_id = ? "
+                "ORDER BY off", (terminal_id,)):
+            ts._index_chunk(int(off), int(t), mono, boot, _tix(json.loads(tix) if tix else None))
         top = conn.execute("SELECT MAX(n) FROM unit_line WHERE terminal_id = ?", (terminal_id,)).fetchone()
         ts.max_n = int(top[0]) if top and top[0] is not None else -1
         ts.alt_offsets = {int(r[0]) for r in conn.execute(
@@ -358,7 +389,7 @@ class TermStream:
                         ts.pending.append(_Chunk(off + cut, bytes(item.body[cut:])))
                     ts.stream_end = max(ts.stream_end, off + length)
                     continue
-                ts.add_chunk(seq, off, item.body, length, item.ts_utc_ns)
+                ts.add_chunk(seq, off, item.body, length, *chunk_time(item))
         finally:
             ts._replaying = False
         ts.last_seq = max([ts.last_seq] + [e.seq for e in ts.events])
@@ -366,12 +397,42 @@ class TermStream:
         return ts
 
 
+def _int(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _tix(raw: Iterable[Any] | None) -> list[tuple[int, int]]:
+    """Zeitindex prüfen: ``rel_off`` streng steigend, ``dt_us`` nie fallend (sonst verworfen)."""
+    out: list[tuple[int, int]] = []
+    for entry in raw or ():
+        if not isinstance(entry, list | tuple) or len(entry) != 2:
+            return []
+        rel, dt = _int(entry[0]), _int(entry[1])
+        if rel is None or dt is None or rel <= (out[-1][0] if out else 0) or dt < (out[-1][1] if out else 0):
+            return []
+        out.append((rel, dt))
+    return out
+
+
+def record_time(rec: Any) -> tuple[int, int | None, str | None]:
+    """(Wanduhr, monotone Uhr, boot_id) eines Events: Shim-Zeit, sonst Empfangszeit ohne ``mono``."""
+    h: Mapping[str, Any] = rec.header
+    return shim_time(h, rec.ts_utc_ns), _int(h.get("mono_ns")), rec.boot_id
+
+
+def chunk_time(rec: Any) -> tuple[int, int | None, str | None, list[tuple[int, int]]]:
+    """Argumente für :meth:`TermStream.add_chunk` ab ``ts`` aus einem ``term.out``."""
+    wall, mono, boot = record_time(rec)
+    return wall, mono, boot, _tix(rec.header.get("tix"))
+
+
 def seg_event_from_record(rec: Any) -> SegEvent:
     h = dict(rec.header)
     off = event_offset(rec.kind, h)
     if off is None and rec.stream_off is not None and rec.kind.startswith("term."):
         off = int(rec.stream_off)
-    return SegEvent(rec.seq, rec.kind, off, rec.ts_utc_ns, h, rec.operator_id)
+    wall, mono, boot = record_time(rec)
+    return SegEvent(rec.seq, rec.kind, off, wall, h, rec.operator_id, mono, boot)
 
 
-__all__.append("seg_event_from_record")
+__all__ += ["seg_event_from_record", "record_time", "chunk_time"]

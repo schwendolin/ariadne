@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -87,8 +88,26 @@ class FakeShim:
         self._writer.write(frame)
         await self._writer.drain()
 
-    async def out(self, seq: int, off: int, data: bytes) -> None:
-        await self.send(P.encode_out(seq, off, 1_000_000_000 + off, 5_000 + off, data))
+    async def out(self, seq: int, off: int, data: bytes, *, wall: int | None = None,
+                  mono: int | None = None) -> None:
+        """OUT (v1) mit der Zeit jetzt (Wanduhr und monotone Uhr wie ein echter Shim)."""
+        await self.send(P.encode_out(seq, off, time.time_ns() if wall is None else wall,
+                                     time.monotonic_ns() if mono is None else mono, data))
+
+    async def outx(self, seq: int, off: int, data: bytes, tix: tuple[tuple[int, int], ...] = (), *,
+                   wall: int | None = None, mono: int | None = None) -> None:
+        """OUTX (v2) mit Zeitindex."""
+        await self.send(P.encode_outx(seq, off, time.time_ns() if wall is None else wall,
+                                      time.monotonic_ns() if mono is None else mono, data, tix))
+
+    async def input(self, seq: int, off: int, data: bytes, *, out_end: int | None = None,
+                    paste: bool = False, tix: tuple[tuple[int, int], ...] = (), wall: int | None = None,
+                    mono: int | None = None) -> None:
+        """INPUT (v2): Eingabe ans Kind."""
+        await self.send(P.encode_input(seq, off, off if out_end is None else out_end,
+                                       time.time_ns() if wall is None else wall,
+                                       time.monotonic_ns() if mono is None else mono, data, tix,
+                                       paste=paste))
 
     async def event(self, seq: int, kind: str, **fields: Any) -> None:
         await self.send(P.encode_json(P.EVENT, {"seq": seq, "kind": kind, **fields}))

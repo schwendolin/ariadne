@@ -54,10 +54,10 @@ def fake_ip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 async def _start(paths) -> tuple[FakeShim, Term, Path]:
+    """Projekt anlegen; läuft mit altem (REC-Schalter) und neuem Daemon (Daueraufnahme)."""
     res = await ctl_ok(paths.ctl_sock, "project.new", slug="lame", targets=[TARGET])
     ws = Path(res["workspace"])
     shim = await FakeShim(paths.term_sock).connect()
-    await shim.wait_state(rec="off")
     await ctl_ok(paths.ctl_sock, "rec.on")
     await shim.wait_state(rec="on")
     return shim, Term(shim), ws
@@ -90,7 +90,10 @@ def test_nmap_flow_companions_routes_views_and_decisions(paths, operator, fake_i
         svcs = {(s["port"], s["proto"]): s for s in hosts[TARGET]["services"]}
         assert svcs[(21, "tcp")]["product"] == "vsftpd" and svcs[(21, "tcp")]["version"] == "2.3.4"
         assert len(svcs) >= 20
-        assert hosts[TARGET]["scope"] == "in" and hosts[TARGET]["claim_state"] == "candidate"
+        # Drei-Spuren-Regel (Profil lab): nmap im Scope geht direkt auf die Karte
+        assert hosts[TARGET]["scope"] == "in" and hosts[TARGET]["claim_state"] == "auto"
+        assert svcs[(21, "tcp")]["claim_state"] == "auto"
+        assert LHOST not in hosts  # eigene Adresse (net.route) wird nie Host
 
         j = d.project.journal
         files = [r for r in j.iter_events(kinds=["file.observed"])]
@@ -110,26 +113,25 @@ def test_nmap_flow_companions_routes_views_and_decisions(paths, operator, fake_i
         tl = (await ctl_ok(paths.ctl_sock, "show", what="timeline"))["items"]
         nmap_rows = [e for e in tl if e["type"] == "command" and (e["title"] or "").startswith("nmap -sV")]
         assert nmap_rows and nmap_rows[0]["src_ip"] == LHOST and nmap_rows[0]["context"] == "Kali"
+        nmap_row = nmap_rows[0]
+        assert nmap_row["adopted"] >= 50 and not nmap_row["distrusted"]
+        assert nmap_row["cmd_ref"] == f"{shim.terminal_id[:8]}@{nmap_row['cmd_id'].rpartition('@')[2]}"
         assert any(e["type"] == "file" and e["title"] == "scans/lame.xml" for e in tl)
 
-        inbox = (await ctl_ok(paths.ctl_sock, "show", what="inbox"))["items"]
-        groups = [g for g in inbox if g["kind"] == "candidate_group"]
-        nmap_group = next(g for g in groups if g["title"].startswith(f"nmap -sV -oA scans/lame {TARGET}"))
-        assert nmap_group["summary"]["services"] >= 20
+        # Nichts zu entscheiden: kein Eintrag für den nmap-Lauf (vorher eine Gruppe pro Lauf)
+        res = await ctl_ok(paths.ctl_sock, "show", what="inbox")
+        assert [g for g in res["items"] if g["kind"] in ("candidate_group", "decide_value")] == []
+        assert set(res["quiet"]) >= {"heuristic", "out_of_scope", "mentions", "system_accounts"}
 
-        # Sammelbestätigung über den kurzen Gruppenverweis
-        res = await ctl_ok(paths.ctl_sock, "claim.confirm", ref=nmap_group["ref"])
-        assert res["confirmed"] == len(nmap_group["items"])
-        assert all(c["state"] == "confirmed" for c in res["claims"])
-        hosts = {h["label"]: h for h in (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]}
-        assert hosts[TARGET]["claim_state"] == "confirmed"
-
-        assert not [g for g in (await ctl_ok(paths.ctl_sock, "show", what="inbox"))["items"]
-                    if g["kind"] == "candidate_group"]
-
-        # Einzelnen Claim über ein Präfix verwerfen
-        some = next(c for c in res["claims"] if c["predicate"] == "service.product")
-        res = await ctl_ok(paths.ctl_sock, "claim.reject", ref=some["claim_key"][:10])
+        # Einzelnen Claim bestätigen und verwerfen (Präfix)
+        cid = (await ctl_ok(paths.ctl_sock, "search", text="vsftpd 2.3.4"))["items"]
+        assert cid
+        claims_ = await d.ingest.query(lambda c: c.execute(
+            "SELECT claim_key, predicate FROM claim WHERE predicate = 'service.product' "
+            "AND state = 'auto' ORDER BY claim_key").fetchall())
+        res = await ctl_ok(paths.ctl_sock, "claim.confirm", ref=claims_[0][0][:12])
+        assert res["confirmed"] == 1 and res["claims"][0]["state"] == "confirmed" and not res["group"]
+        res = await ctl_ok(paths.ctl_sock, "claim.reject", ref=claims_[1][0][:10])
         assert res["claims"][0]["state"] == "rejected"
         bad = await ctl(paths.ctl_sock, "claim.confirm", ref="g00000000")
         assert not bad["ok"] and bad["error"]["code"] == "not_found"
@@ -147,14 +149,35 @@ def test_nmap_flow_companions_routes_views_and_decisions(paths, operator, fake_i
         hits = (await ctl_ok(paths.ctl_sock, "search", text="vsftpd 2.3.4"))["items"]
         assert hits and all("vsftpd" in h["text"].lower() for h in hits)
 
-        # Reparse: gleiche Claims, Entscheide bleiben, nichts verwaist
+        # Reparse: gleiche Claims, auto und Entscheide bleiben, nichts verwaist
         diff = await ctl_ok(paths.ctl_sock, "reparse")
         assert diff["added"] == 0 and diff["removed"] == 0 and diff["changed"] == 0, diff
         assert diff["orphans"] == [] and diff["claims_after"] == diff["claims_before"] > 0
+        assert diff["auto"] > 50
         hosts = {h["label"]: h for h in (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]}
-        assert hosts[TARGET]["claim_state"] == "confirmed"
+        svcs = {(sv["port"], sv["proto"]): sv for sv in hosts[TARGET]["services"]}
+        assert hosts[TARGET]["claim_state"] == "auto"
+        assert "confirmed" in {sv["claim_state"] for sv in svcs.values()}
         vault = d.project.info.vault
         assert not (vault / "derived.reparse.db").exists()
+
+        # Rückgängig pro Befehl (A2): Werte nur aus diesem nmap-Lauf (Text und Begleitdateien) fallen weg
+        res = await ctl_ok(paths.ctl_sock, "unit.distrust", ref=nmap_row["cmd_ref"], reason="falsches Ziel")
+        assert res["cmd_id"] == nmap_row["cmd_id"] and res["rejected"] >= 50 and res["weakened"] == 0
+        state = await d.ingest.query(lambda c: c.execute(
+            "SELECT state, lane FROM claim WHERE claim_key = ?", (claims_[0][0],)).fetchone())
+        assert tuple(state) == ("rejected", "user")  # der spätere Entscheid gilt (auch gegen confirm)
+        tl = (await ctl_ok(paths.ctl_sock, "show", what="timeline"))["items"]
+        row = next(e for e in tl if e.get("cmd_id") == nmap_row["cmd_id"])
+        assert row["distrusted"] and row["adopted"] == 0
+        svcs = {h["label"]: h for h in (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]}
+        assert all(sv["claim_state"] != "auto" for sv in svcs.get(TARGET, {}).get("services", []))
+        diff = await ctl_ok(paths.ctl_sock, "reparse")  # übersteht Reparse
+        assert diff["added"] == 0 and diff["removed"] == 0 and diff["changed"] == 0, diff
+        dis = next(d.project.journal.iter_events(kinds=["d.unit.distrust"]))
+        assert dis.header == {"cmd_id": nmap_row["cmd_id"], "reason": "falsches Ziel"}
+        bad = await ctl(paths.ctl_sock, "unit.distrust", ref="ffffffff@1")
+        assert not bad["ok"] and bad["error"]["code"] == "not_found"
         await shim.close()
 
     run(paths, operator, scenario)
@@ -202,7 +225,8 @@ def test_import_and_redaction_rebuilds_index(paths, operator, tmp_path):
 
 
 def test_companion_file_with_own_secret_is_redacted(paths, operator, tmp_path):
-    """Befund: Begleitdateien gingen ohne Redaktor in Blob-Store und Volltextsuche."""
+    """E72: Begleitdateien werden vollständig (verschlüsselt) gespeichert; eigene Secrets
+    ersetzt erst der Ausgang (``show``, ``search``) über ``redact_json``."""
     from tests.core.conftest import OWN_SECRET
 
     async def scenario(d: Daemon) -> None:
@@ -217,11 +241,15 @@ def test_companion_file_with_own_secret_is_redacted(paths, operator, tmp_path):
         await ctl_ok(paths.ctl_sock, "show", what="hosts")
         rec = next(r for r in d.project.journal.iter_events(kinds=["file.observed"])
                    if r.header["path"] == "scans/lame.xml")
-        reds = rec.header["redactions"]
-        assert reds and all(r["label"] == "sudo" and r["end"] - r["start"] == len(OWN_SECRET) for r in reds)
+        assert not rec.header.get("redactions")  # nicht mehr vor dem Speichern geschwärzt
         blob = d.project.blobs.open_bytes(rec.header["blob_id"])
-        assert OWN_SECRET.encode() not in blob and len(blob) == len(xml)
-        assert not (await ctl_ok(paths.ctl_sock, "search", text=OWN_SECRET[:11]))["items"]
+        assert blob == xml
+        hits = (await ctl_ok(paths.ctl_sock, "search", text="creds.global"))["items"]
+        assert hits and all(OWN_SECRET not in h["text"] for h in hits)
+        assert any("*" * len(OWN_SECRET) in h["text"] for h in hits)
+        for what in ("hosts", "services", "timeline", "inbox"):
+            res = await ctl_ok(paths.ctl_sock, "show", what=what)
+            assert OWN_SECRET not in repr(res), what
         await shim.close()
 
     run(paths, operator, scenario)
@@ -305,7 +333,8 @@ def test_two_terminals_interleaved_keep_their_context(paths, operator):
         assert hits and all(h["context"] == "Kali" for h in hits.values())
         remote = (await ctl_ok(paths.ctl_sock, "search", text="REMOTE"))["items"]
         assert remote and all(h["context"].startswith("10.10.10.5") for h in remote)
-        assert not (await ctl_ok(paths.ctl_sock, "search", text=OWN_SECRET[:6]))["items"]
+        hits = (await ctl_ok(paths.ctl_sock, "search", text=OWN_SECRET[:6]))["items"]
+        assert all(OWN_SECRET not in h["text"] for h in hits)  # Ausgang ersetzt eigene Secrets (E72)
         await shim_a.close()
         await shim_b.close()
 
@@ -388,6 +417,93 @@ def test_scope_update_reaches_projection(paths, operator):
         hosts = {h["label"]: h for h in (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]}
         assert d.project.settings_version == 2
         assert hosts[TARGET]["scope"] == "excluded"
+        await shim.close()
+
+    run(paths, operator, scenario)
+
+
+def test_callback_sets_auto_context_and_hotkey_overrides(paths, operator):
+    """A7/E23: Der erste Callback auf eine Listener-Stufe setzt den Host im Live-Stapel
+    (Titel ``(auto)``), ins Journal kommt nichts; ``ctx.set`` (wie F12 h) geht vor."""
+
+    async def scenario(d: Daemon) -> None:
+        shim, term, ws = await _start(paths)
+        cwd = str(ws)
+        await term.command("nc -lvnp 4444", b"listening on [any] 4444 ...\r\n"
+                           + f"connect to [{LHOST}] from (UNKNOWN) [{TARGET}] 4711\r\n".encode()
+                           + b"uid=33(www-data) gid=33(www-data)\r\n", cwd=cwd, end=False)
+        await term.acked()
+        tl = (await ctl_ok(paths.ctl_sock, "show", what="timeline"))["items"]
+        label = ""
+        for _ in range(50):
+            label = (await ctl_ok(paths.ctl_sock, "ctx.show", terminal_id=shim.terminal_id))["label"]
+            if "(auto)" in label:
+                break
+            await asyncio.sleep(0.05)
+        assert label == f"{TARGET} revshell (auto)", label
+        assert tl
+        auto = await d.ingest.query(lambda c: c.execute("SELECT host FROM ctx_auto").fetchall())
+        assert [tuple(r) for r in auto] == [(f"ip:default/{TARGET}",)]
+        assert not [r for r in d.project.journal.iter_events(kinds=["d.ctx.set"])]
+        inbox = (await ctl_ok(paths.ctl_sock, "show", what="inbox"))["items"]
+        assert not [g for g in inbox if g["kind"] in ("ctx_unknown", "ctx_suggestion")]
+        # F12 h: Entscheid des Nutzers überschreibt, rückwirkend für die Stufe
+        await ctl_ok(paths.ctl_sock, "ctx.set", terminal_id=shim.terminal_id, host="10.10.10.9")
+        await ctl_ok(paths.ctl_sock, "show", what="hosts")
+        label = (await ctl_ok(paths.ctl_sock, "ctx.show", terminal_id=shim.terminal_id))["label"]
+        assert "(auto)" not in label and "10.10.10.9" in label
+        auto = await d.ingest.query(lambda c: c.execute("SELECT COUNT(*) FROM ctx_auto").fetchone()[0])
+        assert auto == 0
+        # zweites Terminal: Sitzung beendet, die Zeitachse zeigt den Kontext mit (auto)
+        shim2 = await FakeShim(paths.term_sock).connect()
+        await shim2.wait_state(rec="on")
+        t2 = Term(shim2)
+        await t2.command("nc -lvnp 5555", b"listening on [any] 5555 ...\r\n"
+                         + f"connect to [{LHOST}] from (UNKNOWN) [{TARGET}] 4712\r\n".encode()
+                         + b"whoami\r\nwww-data\r\n", cwd=cwd)
+        await t2.mark("A", cwd=cwd)
+        await t2.acked()
+        tl = (await ctl_ok(paths.ctl_sock, "show", what="timeline"))["items"]
+        seg = [e for e in tl if e["type"] == "segment" and e["terminal_id"] == shim2.terminal_id]
+        assert seg and seg[0]["context"] == f"{TARGET} [revshell] (auto)", seg
+        hits = (await ctl_ok(paths.ctl_sock, "search", text="www-data"))["items"]
+        assert any(h["context"] == f"{TARGET} [revshell] (auto)" for h in hits), hits
+        await shim2.close()
+        await shim.close()
+
+    run(paths, operator, scenario)
+
+
+def test_stale_derived_db_is_rebuilt_before_queries(paths, operator):
+    """Schema von derived.db älter als der Code: beim Anhängen neu bauen (wie Reparse)."""
+
+    async def scenario(d: Daemon) -> None:
+        shim, term, ws = await _start(paths)
+        await term.command(f"nmap -sV {TARGET}", ms2("text").replace(b"\n", b"\r\n"), cwd=str(ws))
+        await term.mark("A", cwd=str(ws))
+        await term.acked()
+        before = (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]
+        assert before
+        ing = d.ingest
+        assert ing is not None and d.project is not None
+        ing.detach()
+        conn = d.project.connect_derived()
+        try:  # alte Datei nachstellen: Version 1, ohne neue Spalten
+            conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_claims_version'")
+            conn.execute("DROP VIEW v_claim")
+            conn.execute("ALTER TABLE claim DROP COLUMN group_key")
+            conn.commit()
+        finally:
+            conn.close()
+        ing.attach(d.project)
+        after = (await ctl_ok(paths.ctl_sock, "show", what="hosts"))["items"]
+        assert after == before
+        conn = d.project.connect_derived(readonly=True)
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = 'schema_claims_version'").fetchone()
+            assert tuple(row) == ("2",)
+        finally:
+            conn.close()
         await shim.close()
 
     run(paths, operator, scenario)

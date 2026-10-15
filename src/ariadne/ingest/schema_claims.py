@@ -11,15 +11,27 @@ laufen mit ``sqlite3`` wie mit ``sqlcipher3``.
 * ``secret_value`` hält Klartext von Secrets nur hier (die Datei ist
   verschlüsselt). Keine Sicht liest daraus; überall sonst stehen HMAC-Kennungen.
 * ``generation`` und ``projection_delta`` sind der Änderungsfeed.
+* ``own_addr`` (eigene Adressen von Kali aus ``net.local_addrs`` und
+  ``net.route``, A5) schreibt die Pipeline; ``ctx_auto`` (Auto-Kontext aus dem
+  ersten Callback, E23) und ``unit_distrust`` (Rückgängig pro Befehl, A2) sind
+  abgeleitet.
+* Spuren (E42): ``claim.lane`` ist ``auto``, ``quiet``, ``decide`` oder ``user``,
+  ``lane_reason`` der Grund; ``history = 1`` heisst durch einen neueren Zustand
+  oder eine genauere Version abgelöst (E45). ``group_key`` ist die Evidenzgruppe.
+
+:data:`CLAIMS_VERSION` steht als ``schema_claims_version`` in ``meta``. Weicht sie
+ab, baut die Auswertung ``derived.db`` neu (``CREATE ... IF NOT EXISTS`` ergänzt
+keine Spalten).
 
 Sichten zeigen Secret-Werte nur maskiert (:data:`MASK`, wörtlich im SQL).
 """
 
 from __future__ import annotations
 
-__all__ = ["SCHEMA_SQL", "VIEWS_SQL", "MASK", "statements"]
+__all__ = ["SCHEMA_SQL", "VIEWS_SQL", "MASK", "statements", "CLAIMS_VERSION"]
 
 MASK = "••••••••"
+CLAIMS_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS obs_unit (
@@ -38,8 +50,11 @@ CREATE TABLE IF NOT EXISTS obs_unit (
   ctx_opened_at  INTEGER,
   ctx_candidate  TEXT,
   from_target    INTEGER NOT NULL DEFAULT 0,
-  journal_seq    INTEGER NOT NULL DEFAULT 0
+  journal_seq    INTEGER NOT NULL DEFAULT 0,
+  flags          TEXT NOT NULL DEFAULT '[]',
+  mono_ns        INTEGER
 );
+CREATE INDEX IF NOT EXISTS obs_unit_cmd ON obs_unit(cmd_id);
 
 CREATE TABLE IF NOT EXISTS observation (
   obs_id          INTEGER PRIMARY KEY,
@@ -88,7 +103,9 @@ CREATE TABLE IF NOT EXISTS decision (
   id            TEXT NOT NULL UNIQUE,
   kind          TEXT NOT NULL,
   payload_json  TEXT NOT NULL,
-  ts            INTEGER NOT NULL
+  ts            INTEGER NOT NULL,
+  mono_ns       INTEGER,
+  boot_id       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS secret_value (
@@ -148,9 +165,14 @@ CREATE TABLE IF NOT EXISTS claim (
   is_secret           INTEGER NOT NULL DEFAULT 0,
   suspect             INTEGER NOT NULL DEFAULT 0,
   scope               TEXT,
-  decision_id         TEXT
+  decision_id         TEXT,
+  lane                TEXT NOT NULL DEFAULT 'quiet' CHECK (lane IN ('auto','quiet','decide','user')),
+  lane_reason         TEXT,
+  group_key           TEXT,
+  history             INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS claim_entity ON claim(entity_id);
+CREATE INDEX IF NOT EXISTS claim_lane ON claim(lane, lane_reason);
 CREATE INDEX IF NOT EXISTS claim_subject ON claim(subject_identifier, predicate);
 
 CREATE TABLE IF NOT EXISTS claim_source (
@@ -165,9 +187,13 @@ CREATE TABLE IF NOT EXISTS claim_source (
   confidence      REAL NOT NULL,
   span_json       TEXT,
   journal_seq     INTEGER,
-  ts_utc_ns       INTEGER
+  ts_utc_ns       INTEGER,
+  group_key       TEXT,
+  side            INTEGER NOT NULL DEFAULT 0,
+  distrusted      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS claim_source_key ON claim_source(claim_key);
+CREATE INDEX IF NOT EXISTS claim_source_group ON claim_source(group_key);
 
 CREATE TABLE IF NOT EXISTS conflict (
   conflict_key        TEXT PRIMARY KEY,
@@ -182,8 +208,8 @@ CREATE TABLE IF NOT EXISTS conflict (
 
 CREATE TABLE IF NOT EXISTS inbox_item (
   item_key      TEXT PRIMARY KEY,
-  kind          TEXT NOT NULL CHECK (kind IN ('candidate_group','conflict','merge_suggestion',
-                  'ctx_suggestion','ctx_unknown','orphan_decision','mass_find')),
+  kind          TEXT NOT NULL CHECK (kind IN ('candidate_group','decide_value','conflict',
+                  'merge_suggestion','ctx_suggestion','ctx_unknown','orphan_decision','mass_find')),
   group_key     TEXT NOT NULL,
   title         TEXT NOT NULL,
   payload_json  TEXT NOT NULL,
@@ -201,7 +227,30 @@ CREATE TABLE IF NOT EXISTS keystep (
   terminal_id  TEXT,
   stream_off   INTEGER,
   note         TEXT,
-  ts_utc_ns    INTEGER NOT NULL
+  ts_utc_ns    INTEGER NOT NULL,
+  mono_ns      INTEGER,
+  boot_id      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS own_addr (
+  addr       TEXT PRIMARY KEY,
+  source     TEXT NOT NULL,
+  first_seq  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ctx_auto (
+  terminal_id  TEXT NOT NULL,
+  opened_at    INTEGER NOT NULL,
+  host         TEXT NOT NULL,
+  claim_key    TEXT,
+  PRIMARY KEY (terminal_id, opened_at)
+);
+
+CREATE TABLE IF NOT EXISTS unit_distrust (
+  cmd_id       TEXT PRIMARY KEY,
+  decision_id  TEXT NOT NULL,
+  rejected     INTEGER NOT NULL,
+  weakened     INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS generation (
@@ -230,7 +279,8 @@ SELECT e.entity_id AS host_id, e.label, e.scope, e.claim_state, e.knowledge, e.a
        json_extract(e.attrs_json, '$.conflicts') AS conflicts,
        json_extract(e.attrs_json, '$.placeholder') AS placeholder,
        e.first_seen, e.last_seen, e.first_unit, e.tags_json, e.note
-FROM entity e WHERE e.type = 'host';
+FROM entity e WHERE e.type = 'host'
+  AND NOT EXISTS (SELECT 1 FROM own_addr o WHERE e.entity_id = 'ip:default/' || o.addr);
 
 CREATE VIEW IF NOT EXISTS v_service AS
 SELECT e.entity_id AS service_id, json_extract(e.attrs_json, '$.host_id') AS host_id,
@@ -241,14 +291,17 @@ SELECT e.entity_id AS service_id, json_extract(e.attrs_json, '$.host_id') AS hos
        json_extract(e.attrs_json, '$.conflicts') AS conflicts,
        e.scope, e.claim_state, e.knowledge, e.work, e.work_reason, e.first_seen, e.last_seen, e.tags_json,
        e.note
-FROM entity e WHERE e.type = 'service';
+FROM entity e WHERE e.type = 'service'
+  AND NOT EXISTS (SELECT 1 FROM own_addr o
+                  WHERE json_extract(e.attrs_json, '$.host_id') = 'ip:default/' || o.addr);
 
 CREATE VIEW IF NOT EXISTS v_claim AS
 SELECT c.claim_key, c.subject_identifier, c.entity_id, c.predicate,
        CASE WHEN c.is_secret THEN NULL ELSE c.value_json END AS value_json,
        CASE WHEN c.is_secret THEN '••••••••' ELSE c.value_text END AS value_text,
        c.confidence, c.state, c.trust, c.parser_id, c.sources, c.from_target, c.suspect, c.scope,
-       c.conflict_key, c.first_unit, c.last_unit, c.first_ts, c.last_ts, c.is_secret
+       c.conflict_key, c.first_unit, c.last_unit, c.first_ts, c.last_ts, c.is_secret, c.lane,
+       c.lane_reason, c.group_key, c.history
 FROM claim c;
 
 CREATE VIEW IF NOT EXISTS v_mention AS
@@ -264,7 +317,7 @@ FROM inbox_item i WHERE i.state = 'open';
 
 CREATE VIEW IF NOT EXISTS v_keystep AS
 SELECT ROW_NUMBER() OVER (ORDER BY k.seq) AS ordinal, k.seq, k.decision_id, k.step, k.host_ident,
-       k.entity_id, k.terminal_id, k.stream_off, k.note, k.ts_utc_ns
+       k.entity_id, k.terminal_id, k.stream_off, k.note, k.ts_utc_ns, k.mono_ns, k.boot_id
 FROM keystep k;
 """
 

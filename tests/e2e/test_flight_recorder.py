@@ -5,13 +5,16 @@ Ablauf wie in der Vision (Abschnitt «Zielbild»), mit nachgestellten Tools:
 1. Isoliertes HOME/XDG, ``ariadne setup --no-systemd``, ``ariadne init`` und
    ``ariadne secrets add`` nur über Dateideskriptoren, Projekt ``lame``.
 2. Daemon als eigener Prozess, zsh per pexpect mit den echten RC-Zeilen
-   (Launcher, Shim, Marker-Hooks), REC per CLI.
+   (Launcher, Shim, Marker-Hooks). ``ariadne start`` (Daueraufnahme, E22).
 3. Ein Fake-``nmap`` schreibt bei ``-oA`` die Golden-XML des Metasploitable2-Falls
    und gibt die Normalausgabe aus; ein eigenes Secret wird per ``echo`` ausgegeben.
 4. Ein Fake-``nc -lvnp`` meldet einen Callback und ahmt eine Remote-Shell nach;
    mit ``F12 h`` wird der Host gesetzt, danach gehören Ausgaben zu diesem Host.
-5. Prüfung über die CLI (``show``, ``search``, ``confirm``, ``mark``, ``verify``,
-   ``reparse``), danach über das Journal selbst und ein Canary-Scan unter HOME.
+5. ``F12 r`` pausiert das Terminal, ein zweites ``F12 r`` setzt fort.
+6. Prüfung über die CLI (``show``, ``search``, ``mark``, ``verify``, ``reparse``) nur mit
+   Aussagen, die vor und nach der Drei-Spuren-Regel gelten; danach über das Journal
+   selbst (Shim-Zeit, Eingaben, Pause, eigenes Secret nur verschlüsselt) und ein
+   Canary-Scan unter HOME.
 
 Ein Fake-``ip`` liefert die Quell-IP für ``ip route get`` (es wird nichts gesendet).
 """
@@ -211,8 +214,6 @@ def test_flight_recorder(lab: Lab) -> None:
     assert "Recovery-Code" in out and PASSPHRASE not in out
     out = lab.cli("secrets", "add", "canary", secret=SECRET, fd_flag="--value-fd")
     assert "canary" in out and SECRET not in out
-    out = lab.cli("project", "new", "lame", "--target", TARGET)
-    assert "Projekt lame angelegt" in out
     workspace = lab.home / "ariadne" / "lame"
 
     # ---- Terminal mit Shim ---------------------------------------------------------
@@ -221,7 +222,9 @@ def test_flight_recorder(lab: Lab) -> None:
     try:
         c.expect_exact(PROMPT)
         lab.wait_status("Terminals: 1 verbunden")
-        assert "REC: an [lame]" in lab.cli("rec", "on")
+        c.expect(re.compile(rb"\x1b\]2;\[kein Projekt \(Vorlauf 15 min\)\]"))
+        out = lab.cli("start", "lame", "--target", TARGET, "--preroll", "no")
+        assert "Projekt lame angelegt" in out and "Aufnahme läuft" in out
         lab.wait_status("1 nehmen auf")
         c.expect(re.compile(rb"\x1b\]2;\[REC lame\]"))
 
@@ -230,7 +233,19 @@ def test_flight_recorder(lab: Lab) -> None:
         assert "vsftpd 2.3.4" in out
         assert (workspace / "scans" / "lame.xml").exists()
         out = run_cmd(c, f"echo {SECRET}")
-        assert SECRET in out  # der Bildschirm zeigt es, gespeichert wird es geschwärzt
+        assert SECRET in out  # gespeichert wird es verschlüsselt, ersetzt erst an den Ausgängen (E72)
+
+        # F12 r: Pause dieses Terminals, Titel mit Restzeit, zweites F12 r setzt fort
+        c.send(F12)
+        time.sleep(0.3)
+        c.send(b"r")
+        c.expect_exact(b"[PAUSE 10 min lame]")
+        out = run_cmd(c, "echo pausiert-$((6*7))")
+        assert "pausiert-42" in out
+        c.send(F12)
+        time.sleep(0.3)
+        c.send(b"r")
+        c.expect(re.compile(rb"\x1b\]2;\[REC lame\]"))
 
         # Listener mit Callback, Remote-Shell nachgeahmt, Host per F12 h
         c.sendline("nc -lvnp 4444")
@@ -261,23 +276,16 @@ def test_flight_recorder(lab: Lab) -> None:
         assert f"Schlüsselschritt foothold gespeichert für {TARGET}." in out
 
         # ---- Auswertung über die CLI -------------------------------------------------
+        # Nur Aussagen, die vor und nach der Drei-Spuren-Regel gelten (Vertrag 9)
         hosts = lab.cli("show", "hosts")
-        assert re.search(rf"^{re.escape(TARGET)}  \[Kandidat, in Scope\]", hosts, re.M), hosts
+        assert re.search(rf"^{re.escape(TARGET)}  \[", hosts, re.M), hosts
         assert re.search(r"^  21/tcp\s+open\s+ftp\s+vsftpd 2\.3\.4", hosts, re.M), hosts
         assert re.search(r"^  22/tcp\s+open\s+ssh\s+OpenSSH 4\.7p1", hosts, re.M), hosts
-        assert "Zugriff: user" in hosts
-
-        inbox = lab.cli("show", "inbox")
-        group = rf"^\[(g[0-9a-f]{{8}})\] [^\n]*nmap -sV -oA scans/lame {re.escape(TARGET)}"
-        m = re.search(group, inbox, re.M)
-        assert m, inbox
-        assert "Callback" in inbox or "access.callback" in inbox
 
         timeline = lab.cli("show", "timeline")
-        assert re.search(rf"Befehl\s+Kali\s+nmap -sV -oA scans/lame {re.escape(TARGET)}\s+\[exit 0; Quelle "
-                         rf"{re.escape(LHOST)}\]", timeline), timeline
-        assert re.search(rf"Segment\s+{re.escape(TARGET)} \[revshell\]", timeline), timeline
-        assert "Datei" in timeline and "scans/lame.xml" in timeline
+        assert f"nmap -sV -oA scans/lame {TARGET}" in timeline, timeline
+        assert re.search(rf"{re.escape(TARGET)}[^\n]*revshell", timeline), timeline
+        assert "scans/lame.xml" in timeline
 
         # Ausgaben nach F12 h gehören zum Host
         hits = lab.cli("search", "uid=33")
@@ -285,19 +293,11 @@ def test_flight_recorder(lab: Lab) -> None:
         hits = lab.cli("search", "lame")
         assert re.search(rf"{re.escape(TARGET)} \[revshell\]\s+lame\s*$", hits, re.M), hits
 
-        out = lab.cli("confirm", m.group(1))
-        assert re.search(r"^\d+ Claim\(s\) bestätigt", out, re.M), out
-        assert re.search(rf"^{re.escape(TARGET)}  \[bestätigt, in Scope\]", lab.cli("show", "hosts"), re.M)
+        assert "pausiert-42" not in lab.cli("search", "pausiert")
         ks = lab.cli("show", "keysteps")
         assert re.search(rf"foothold\s+{re.escape(TARGET)}\s+Callback über nc", ks), ks
 
-        # Callback-Kandidat verwerfen, Loot ausdrücklich importieren
-        inbox = lab.cli("show", "inbox")
-        line = r"^    ([0-9a-f]{12})  " + re.escape(TARGET) + r"  access\.callback = nc:4444"
-        cb = re.search(line, inbox, re.M)
-        assert cb, inbox
-        out = lab.cli("reject", cb.group(1), "--reason", "Test")
-        assert f"Verworfen: {TARGET} access.callback = nc:4444" in out
+        # Loot ausdrücklich importieren
         loot = lab.base / "passwd"
         loot.write_text("root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33::/var/www:/usr/sbin/nologin\n")
         out = lab.cli("import", str(loot), "--host", TARGET)
@@ -307,17 +307,18 @@ def test_flight_recorder(lab: Lab) -> None:
 
         assert "in Ordnung" in lab.cli("verify")
         rep = lab.cli("reparse")
-        assert "Neu: 0, entfallen: 0, geändert: 0" in rep and "Verwaiste Entscheide: keine" in rep, rep
+        assert "Neu: 0, entfallen: 0, geändert: 0" in rep, rep
+        # E72: eigene Secrets erscheinen an keinem Ausgang im Klartext
         for view in ("hosts", "services", "inbox", "timeline", "keysteps", "pending"):
             assert SECRET not in lab.cli("show", view)
-        assert "Keine Treffer" in lab.cli("search", SECRET)
+        assert SECRET not in lab.cli("search", SECRET)
 
         c.sendline("exit")
         c.expect(pexpect.EOF)
     finally:
         c.close(force=True)
 
-    assert "Projekt geschlossen" in lab.cli("project", "close")
+    assert "Projekt lame beendet und gesperrt" in lab.cli("stop")
     assert lab.stop_daemon() == 0
     assert not lab.paths.ctl_sock.exists() and not lab.paths.term_sock.exists()
 
@@ -330,10 +331,22 @@ def test_flight_recorder(lab: Lab) -> None:
             assert j.verify().ok
             outs = list(j.iter_events(kinds=["term.out"]))
             stream = b"".join(r.body or b"" for r in sorted(outs, key=lambda r: r.stream_off))
-            assert SECRET.encode() not in stream
-            assert b"*" * len(SECRET) in stream
-            reds = [x for r in outs for x in r.header.get("redactions", [])]
-            assert {x["label"] for x in reds} >= {"canary"}
+            assert SECRET.encode() in stream  # E72: ungeschwärzt, aber nur im verschlüsselten Journal
+            assert all(not r.header.get("redactions") for r in outs)
+            assert b"pausiert-42" not in stream
+            # Shim-Zeit (E96): an jedem Chunk, monotone Uhr steigt mit dem Strom
+            assert all(r.header.get("t_shim_ns") and r.header.get("mono_ns") for r in outs)
+            monos = [r.header["mono_ns"] for r in sorted(outs, key=lambda r: r.stream_off)]
+            assert monos == sorted(monos)
+            # Eingaben (E26): lokal und in der Remote-Shell, nichts aus der Pause, kein Hotkey
+            inputs = b"".join(r.body or b"" for r in j.iter_events(kinds=["term.input"]))
+            assert f"nmap -sV -oA scans/lame {TARGET}".encode() in inputs and b"hostname" in inputs
+            assert b"pausiert" not in inputs and b"\x1b[24~" not in inputs
+            pauses = [r.header for r in j.iter_events(kinds=["term.pause"])]
+            assert [h["source"] for h in pauses] == ["hotkey"]
+            assert "pause" in [r.header["reason"] for r in j.iter_events(kinds=["term.gap"])]
+            ends = [r.header for r in j.iter_events(kinds=["system.project_end"])]
+            assert ends == [{"reason": "stop"}]
             files = {r.header["path"]: r.header for r in j.iter_events(kinds=["file.observed"])}
             assert files["scans/lame.xml"]["origin"] == "companion"
             assert files["scans/lame.xml"]["produced_by_cmd"]
@@ -342,9 +355,10 @@ def test_flight_recorder(lab: Lab) -> None:
             routes = [r.header for r in j.iter_events(kinds=["net.route"])]
             assert routes and routes[0]["src_ip"] == LHOST
             marks = [r.header for r in j.iter_events(kinds=["term.mark"]) if r.header["mark"] == "C"]
-            assert not any(SECRET in (h.get("cmd_typed") or "") for h in marks)
+            assert any(SECRET in (h.get("cmd_typed") or "") for h in marks)  # E72: nur verschlüsselt
             kinds = {r.kind for r in j.iter_events()}
-            assert {"term.open", "term.bind", "term.close", "d.claim.confirm", "d.keystep.mark"} <= kinds
+            assert {"term.open", "term.bind", "term.close", "d.keystep.mark", "term.input"} <= kinds
+            assert "rec.set" not in kinds
         finally:
             project.close()
     finally:
@@ -355,28 +369,30 @@ def test_flight_recorder(lab: Lab) -> None:
     assert hits == []
 
 
-def test_context_survives_rec_toggle_and_daemon_restart(lab: Lab) -> None:
-    """Befunde Kontext-Stapel und Daemon-Neustart, mit echter zsh, echtem Shim und Daemon:
+def test_context_survives_preroll_and_daemon_restart(lab: Lab) -> None:
+    """Kontext-Stapel, Vorlauf (E95) und Daemon-Neustart mit echter zsh, echtem Shim und Daemon:
 
-    * Reverse Shell beginnt bei REC aus: nach ``rec on`` gehört ihre Ausgabe nicht zu Kali.
-    * SIGKILL des Daemons mitten in der Sitzung: nach Neustart, ``unlock``, ``project open``
-      und ``rec on`` stimmt der Kontext weiter, die Lücke heisst ``daemon_down``.
+    * Reverse Shell beginnt ohne Projekt: der Vorlauf wird übernommen, ihre Ausgabe gehört
+      nicht zu Kali.
+    * SIGKILL des Daemons mitten in der Sitzung: nach dem Neustart ist das Projekt aktiv,
+      aber gesperrt (``locked``); der Shim sendet Unbestätigtes erneut, ``ariadne start``
+      übernimmt es, der Kontext stimmt weiter und der Strom hat keine Lücke.
     """
     (lab.home / ".zshrc").write_text(f"PS1='{PROMPT}'\nunset HISTFILE\n")
     lab.cli("setup", "--no-systemd")
     lab.start_daemon()
     lab.cli("init", "--handle", "e2e", secret=PASSPHRASE)
-    lab.cli("project", "new", "lame", "--target", TARGET)
     c = pexpect.spawn(lab.env["SHELL"], ["-i"], env=lab.env, cwd=str(lab.home), timeout=20,
                       dimensions=(40, 160))
     try:
         c.expect_exact(PROMPT)
         lab.wait_status("Terminals: 1 verbunden")
-        run_cmd(c, "cd ~/ariadne/lame")
-        c.sendline("nc -lvnp 4444")  # REC ist noch aus
+        c.sendline("nc -lvnp 4444")  # noch kein Projekt: nur Vorlauf im RAM
         c.expect_exact(f"from (UNKNOWN) [{TARGET}] 49152")
         c.expect_exact("$ ")
-        assert "REC: an [lame]" in lab.cli("rec", "on")
+        lab.wait_status("Vorlauf:  1 min aus 1 Terminals")
+        out = lab.cli("start", "lame", "--target", TARGET, "--preroll", "yes")
+        assert "Vorlauf übernommen" in out, out
         lab.wait_status("1 nehmen auf")
         c.sendline("id")
         c.expect_exact("uid=33(www-data)")
@@ -391,9 +407,10 @@ def test_context_survives_rec_toggle_and_daemon_restart(lab: Lab) -> None:
         c.expect_exact("lame")
         c.expect_exact("$ ")
         lab.start_daemon()
-        lab.cli("unlock", secret=PASSPHRASE)
-        lab.cli("project", "open", "lame")
-        lab.cli("rec", "on")
+        lab.wait_status("lame aktiv, gesperrt")
+        c.expect(re.compile(rb"\x1b\]2;\[gesperrt: ariadne start\]"))
+        out = lab.cli("start", "--preroll", "yes", secret=PASSPHRASE)
+        assert "Projekt lame geöffnet" in out and "Vorlauf übernommen" in out, out
         lab.wait_status("1 nehmen auf")
         c.sendline("id")
         c.expect_exact("uid=33(www-data)")
@@ -402,12 +419,12 @@ def test_context_survives_rec_toggle_and_daemon_restart(lab: Lab) -> None:
         c.expect_exact(PROMPT)
         hits = lab.cli("search", "uid=33")
         lines = [ln for ln in hits.splitlines() if "uid=33" in ln]
-        assert len(lines) == 2 and all("[revshell]" in ln and "Kali" not in ln for ln in lines), hits
+        assert len(lines) == 2 and all("revshell" in ln and "Kali" not in ln for ln in lines), hits
         c.sendline("exit")
         c.expect(pexpect.EOF)
     finally:
         c.close(force=True)
-    lab.cli("project", "close")
+    lab.cli("stop")
     assert lab.stop_daemon() == 0
     op = OperatorVault(lab.paths.operator_dir).unlock(PASSPHRASE)
     try:
@@ -415,10 +432,89 @@ def test_context_survives_rec_toggle_and_daemon_restart(lab: Lab) -> None:
         try:
             j = project.journal
             assert j.verify().ok
-            reasons = [r.header["reason"] for r in j.iter_events(kinds=["term.gap"])]
-            assert "daemon_down" in reasons, reasons
-            snaps = [r.header["stack"] for r in j.iter_events(kinds=["term.ctx_snapshot"])]
-            assert snaps and all(s[-1]["kind"] == "revshell" for s in snaps), snaps
+            assert [r.header["reason"] for r in j.iter_events(kinds=["term.gap"])] == []
+            outs = sorted(j.iter_events(kinds=["term.out"]), key=lambda r: r.stream_off)
+            end = 0
+            for r in outs:  # lückenlos über Vorlauf, Absturz und Neustart
+                assert r.stream_off == end, (r.stream_off, end)
+                end += r.header["length"]
+            stream = b"".join(r.body for r in outs)
+            assert b"listening on" in stream and stream.count(b"uid=33") >= 2 and b"lame\r\n" in stream
+            assert {r.origin for r in outs} == {"shim", "preroll"}
+            assert len(list(j.iter_events(kinds=["term.preroll"]))) == 2
+            # Fensteranfang vor nc: Kali; nach dem Neustart beginnt das Fenster in der Reverse Shell
+            snaps = [(r.stream_off, r.header["stack"]) for r in j.iter_events(kinds=["term.ctx_snapshot"])]
+            nc_off = next(r.stream_off for r in j.iter_events(kinds=["term.mark"])
+                          if (r.header.get("cmd_typed") or "").startswith("nc "))
+            assert snaps[-1][1][-1]["kind"] == "revshell", snaps
+            assert all(st[-1]["kind"] == "revshell" for off, st in snaps if off > nc_off), snaps
+        finally:
+            project.close()
+    finally:
+        op.wipe()
+
+
+def test_cli_pause_stop_rebind_and_preroll_in_terminal(lab: Lab) -> None:
+    """``ariadne pause``/``resume`` im Terminal selbst, ``ariadne stop``: das Terminal ist an der
+    lokalen Shell sofort wieder frei (Vorlauf), ``ariadne start`` übernimmt ihn."""
+    (lab.home / ".zshrc").write_text(f"PS1='{PROMPT}'\nunset HISTFILE\n")
+    lab.cli("setup", "--no-systemd")
+    lab.start_daemon()
+    lab.cli("init", "--handle", "e2e", secret=PASSPHRASE)
+    lab.cli("start", "lame", "--target", TARGET)
+    cli = f"{sys.executable} -m ariadne.cli.main"
+    c = pexpect.spawn(lab.env["SHELL"], ["-i"], env=lab.env, cwd=str(lab.home), timeout=20,
+                      dimensions=(40, 160))
+    try:
+        c.expect_exact(PROMPT)
+        lab.wait_status("1 nehmen auf")
+        run_cmd(c, "echo eins-$((1+1))")
+        out = run_cmd(c, f"{cli} pause --minutes 3")
+        assert "Pause bis" in out, out
+        c.expect(re.compile(rb"\x1b\]2;\[PAUSE 3 min lame\]"))
+        run_cmd(c, "echo heimlich-$((2+2))")
+        assert "Pause bis" in lab.cli("status")
+        out = run_cmd(c, f"{cli} resume")
+        assert "Aufnahme läuft weiter (1 Terminal)." in out, out
+        run_cmd(c, "echo drei-$((1+2))")
+        out = run_cmd(c, f"{cli} stop")
+        assert "Projekt lame beendet und gesperrt" in out, out
+        # am Prompt mit lokalem Stapel: req.rebind, dann Vorlauf ohne Projekt
+        c.expect(re.compile(rb"\x1b\]2;\[kein Projekt \(Vorlauf 15 min\)\]"), timeout=10)
+        run_cmd(c, "echo vergessen-$((2+3))")
+        out = lab.cli("start", "--preroll", "yes", "lame", secret=PASSPHRASE)
+        assert "Vorlauf übernommen" in out, out
+        run_cmd(c, "echo danach-$((3+3))")
+        hits = lab.cli("search", "vergessen")
+        assert "vergessen-5" in hits, hits
+        c.sendline("exit")
+        c.expect(pexpect.EOF)
+    finally:
+        c.close(force=True)
+    lab.cli("stop")
+    assert lab.stop_daemon() == 0
+    op = OperatorVault(lab.paths.operator_dir).unlock(PASSPHRASE)
+    try:
+        project = ProjectService(lab.paths, op).open("lame")
+        try:
+            j = project.journal
+            outs = sorted(j.iter_events(kinds=["term.out"]), key=lambda r: r.stream_off)
+            stream = b"".join(r.body for r in outs)
+            for word in (b"eins-2", b"drei-3", b"vergessen-5", b"danach-6"):
+                assert word in stream, word
+            assert b"heimlich-4" not in stream
+            inputs = b"".join(r.body for r in j.iter_events(kinds=["term.input"]))
+            assert b"echo eins-$((1+1))" in inputs and b"heimlich" not in inputs
+            assert PASSPHRASE.encode() not in inputs + stream
+            pauses = [r.header for r in j.iter_events(kinds=["term.pause"])]
+            assert [p["source"] for p in pauses] == ["cli"]
+            gaps = [r.header["reason"] for r in j.iter_events(kinds=["term.gap"])]
+            assert "pause" in gaps
+            ends = [r.header["reason"] for r in j.iter_events(kinds=["system.project_end"])]
+            assert ends == ["stop", "stop"]
+            # Zeit: monotone Uhr steigt mit dem Strom, Zeitachse sortiert nach ihr
+            monos = [r.header["mono_ns"] for r in outs]
+            assert monos == sorted(monos)
         finally:
             project.close()
     finally:

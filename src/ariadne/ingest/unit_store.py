@@ -32,7 +32,7 @@ __all__ = ["SyncResult", "sync_layout", "load_unit", "save_unit", "delete_unit",
 _UNIT_COLS = (
     "unit_id", "kind", "terminal_id", "cmd_id", "span_id", "start_off", "end_off", "argv", "cmd_text",
     "exit_code", "cwd", "context", "path", "mime", "sniff", "blob_id", "sha256", "size", "ts_utc_ns",
-    "ts_end_ns", "state", "flags", "sig", "line_count", "vis_count", "event_seq",
+    "ts_end_ns", "state", "flags", "sig", "line_count", "vis_count", "event_seq", "mono_ns", "boot_id",
 )
 _INSERT_LINE = ("INSERT INTO unit_line(unit_id, pos, idx, terminal_id, n, text, raw_start, raw_end, flags, "
                 "sgr, colmap) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -142,9 +142,10 @@ def _unit_row(ts: TermStream, u: UnitPlan, state: str, counts: Sequence[int]) ->
     command = u.kind == "command" and b is not None
     end = u.end if u.end is not None else None
     if b is not None and command:
-        t0 = b.ts_start
+        t0, mono, boot = b.ts_start, b.mono_start, b.boot
     else:
         t0 = ts.time_at(u.start) or (b.ts_start if b is not None else 0)
+        mono, boot = ts.mono_at(u.start)
     t1 = ts.time_at(end) if end is not None else None
     if b is not None and b.ts_end is not None and end is not None and b.end_off == end:
         t1 = b.ts_end
@@ -159,6 +160,7 @@ def _unit_row(ts: TermStream, u: UnitPlan, state: str, counts: Sequence[int]) ->
         "context": json.dumps(u.span.context(), ensure_ascii=False, sort_keys=True),
         "ts_utc_ns": t0, "ts_end_ns": t1, "state": state, "flags": json.dumps(sorted(u.flags)),
         "sig": u.sig(), "line_count": counts[0], "vis_count": counts[1], "event_seq": seq,
+        "mono_ns": mono, "boot_id": boot,
     }
 
 
@@ -308,5 +310,5 @@ def load_unit(conn: Any, unit_id: str, *, data: bytes | None = None,
         path=r["path"], mime=r["mime"], sniff=r["sniff"], terminal_id=r["terminal_id"], cmd_id=r["cmd_id"],
         span_id=r["span_id"], start_off=r["start_off"], end_off=r["end_off"], ts_end_ns=r["ts_end_ns"],
         blob_id=r["blob_id"], sha256=r["sha256"], size=r["size"], flags=tuple(json.loads(r["flags"] or "[]")),
-        state=r["state"], data=data,
+        state=r["state"], data=data, mono_ns=r["mono_ns"], boot_id=r["boot_id"],
     )

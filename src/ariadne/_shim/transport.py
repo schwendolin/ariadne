@@ -3,7 +3,11 @@
 Nur Standardbibliothek. Der Transport blockiert nie: Verbindungsaufbau,
 Senden und Empfangen laufen nicht blockierend in der Schleife des Shims.
 
-* OUT und EVENT teilen eine fortlaufende ``seq`` (ab 1).
+* OUTX, INPUT und EVENT teilen eine fortlaufende ``seq`` (ab 1), Protokoll v2.
+* Ausgabe wird bis 64 KiB, 50 ms oder :data:`ariadne._shim.protocol.MAX_TIX`
+  Zeitindex-Einträge gebündelt. Jedes ``read()`` bringt Wanduhr und monotone Uhr
+  mit; ein neuer Eintrag im Zeitindex entsteht, wenn seit dem letzten mindestens
+  1 ms vergangen ist (E96). Vor jedem EVENT und INPUT geht die gebündelte Ausgabe hinaus.
 * Jeder Rahmen bleibt bis zum ACK im :class:`~ariadne._shim.ringbuf.FrameRing`.
   Nach einem Reconnect geht alles Unbestätigte ab ``resume_from_seq`` erneut
   hinaus, der Daemon verwirft Duplikate.
@@ -25,13 +29,49 @@ from typing import Any
 from ariadne._shim import protocol as P
 from ariadne._shim.ringbuf import Entry, FrameRing
 
-__all__ = ["Transport", "BATCH_BYTES", "BATCH_S", "RECONNECT_S"]
+__all__ = ["Transport", "BATCH_BYTES", "BATCH_S", "RECONNECT_S", "TIX_MIN_NS", "chunk_times"]
 
 BATCH_BYTES = 64 * 1024
 BATCH_S = 0.05
+TIX_MIN_NS = 1_000_000  # neuer Zeitindex-Eintrag frühestens 1 ms nach dem letzten
 RECONNECT_S = 1.0
 WBUF_HIGH = 256 * 1024
 _UCRED = struct.Struct("3i")
+
+
+def chunk_times(marks: list[tuple[int, int, int]], start: int,
+                end: int) -> tuple[int, int, tuple[tuple[int, int], ...]]:
+    """Zeit des Bytes ``start`` und Zeitindex für ``[start, end)`` aus den Lese-Marken.
+
+    ``marks`` sind ``(rel, wall, mono)`` aufsteigend, die erste bei ``rel`` 0. Die Basis
+    ist die Marke, in deren ``read()`` das Byte ``start`` lag; spätere Marken im Bereich
+    werden zu ``(rel - start, dt_us)`` (``dt_us`` nie fallend).
+    """
+    base = marks[0]
+    for m in marks:
+        if m[0] > start:
+            break
+        base = m
+    tix: list[tuple[int, int]] = []
+    last = 0
+    for rel, _wall, mono in marks:
+        if start < rel < end:
+            dt = max(last, (mono - base[2]) // 1000)
+            tix.append((rel - start, min(dt, 0xFFFFFFFF)))
+            last = dt
+    return base[1], base[2], tuple(tix[: P.MAX_TIX])
+
+
+def _rebase(marks: list[tuple[int, int, int]], cut: int) -> list[tuple[int, int, int]]:
+    """Marken nach dem Abschneiden der ersten ``cut`` Bytes (Basis wird die Marke bei ``cut``)."""
+    base = marks[0]
+    rest: list[tuple[int, int, int]] = []
+    for m in marks:
+        if m[0] <= cut:
+            base = m
+        else:
+            rest.append((m[0] - cut, m[1], m[2]))
+    return [(0, base[1], base[2]), *rest]
 
 
 class Transport:
@@ -65,8 +105,7 @@ class Transport:
         self._rewind = False
         self._out = bytearray()
         self._out_off = 0
-        self._out_wall = 0
-        self._out_mono = 0
+        self._out_marks: list[tuple[int, int, int]] = []  # (rel, wall, mono) pro read()
         self._out_t0 = 0.0
         self.gap_start: int | None = None
         self.gap_bytes = 0
@@ -140,24 +179,41 @@ class Transport:
     # --------------------------------------------------------------- Inhalt
 
     def add_out(self, data: bytes, stream_off: int, wall_ns: int, mono_ns: int, now: float) -> None:
+        """Ausgabe eines ``read()`` mit dessen Zeit (Wanduhr, monotone Uhr in ns)."""
         if not data:
             return
         if self._out and self._out_off + len(self._out) != stream_off:
             self.flush_out()
         if not self._out:
-            self._out_off, self._out_wall, self._out_mono, self._out_t0 = stream_off, wall_ns, mono_ns, now
+            self._out_off, self._out_t0 = stream_off, now
+            self._out_marks = [(0, wall_ns, mono_ns)]
+        elif mono_ns - self._out_marks[-1][2] >= TIX_MIN_NS:
+            self._out_marks.append((len(self._out), wall_ns, mono_ns))
         self._out += data
-        if len(self._out) >= BATCH_BYTES:
+        if len(self._out) >= BATCH_BYTES or len(self._out_marks) > P.MAX_TIX:
             self.flush_out()
 
     def flush_out(self) -> None:
         while self._out:
-            chunk = bytes(self._out[:BATCH_BYTES])
-            del self._out[:BATCH_BYTES]
+            n = min(len(self._out), BATCH_BYTES)
+            wall, mono, tix = chunk_times(self._out_marks, 0, n)
+            chunk = bytes(self._out[:n])
+            del self._out[:n]
             seq = self._take_seq()
-            frame = P.encode_out(seq, self._out_off, self._out_wall, self._out_mono, chunk)
+            frame = P.encode_outx(seq, self._out_off, wall, mono, chunk, tix)
             self._append(seq, frame, len(chunk), self._out_off)
-            self._out_off += len(chunk)
+            self._out_off += n
+            self._out_marks = _rebase(self._out_marks, n)
+
+    def add_input(self, data: bytes, stream_off: int, out_end: int, wall_ns: int, mono_ns: int,
+                  tix: tuple[tuple[int, int], ...] = (), *, paste: bool = False) -> int:
+        """INPUT-Rahmen (E26). Vorher geht die gebündelte Ausgabe hinaus."""
+        self.flush_out()
+        seq = self._take_seq()
+        frame = P.encode_input(seq, stream_off, max(out_end, stream_off), wall_ns, mono_ns, data, tix,
+                               paste=paste)
+        self._append(seq, frame)
+        return seq
 
     def add_event(self, kind: str, fields: dict[str, Any]) -> int:
         self.flush_out()
@@ -172,6 +228,7 @@ class Transport:
         if self._out:
             first = self._out_off
             self._out = bytearray()
+            self._out_marks = []
         for e in self.ring.clear():
             if e.stream_off is not None and (first is None or e.stream_off < first):
                 first = e.stream_off

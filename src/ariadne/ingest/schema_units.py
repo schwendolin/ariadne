@@ -20,17 +20,26 @@ Alles hier ist Schicht 2 und jederzeit neu berechenbar. Natürliche Schlüssel
     indexieren.
 ``activity``
     Eine Zeile pro lokalem Befehl (Herkunftsstufe ``local``).
+``boot``
+    Reihenfolge der Systemstarts (``boot_id`` nach erstem Vorkommen im Journal).
+
+Zeiten (E96, v2): ``ts_utc_ns`` in ``unit``, ``cmd_block``, ``activity``,
+``seg_event`` und ``seg_chunk`` ist die Wanduhr des Shims beim Lesen
+(``events.shim_time``, Rückfall Empfangszeit); ``mono_ns`` die monotone Uhr
+desselben Lesevorgangs und ``boot_id`` der Systemstart, in dem sie gilt.
+Sortiert wird nach ``(Rang des boot_id, mono_ns)``, ohne ``mono_ns`` nach der
+Wanduhr. ``seg_chunk.tix`` hält den Zeitindex eines ``term.out``.
 """
 
 from __future__ import annotations
 
 __all__ = ["SCHEMA_VERSION", "UNITS_SQL", "UNIT_TABLES"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 UNIT_TABLES = (
     "meta", "watermark", "unit", "unit_line", "unit_fts", "cmd_block", "ctx_span", "activity",
-    "net_route", "parse_failure", "seg_term", "seg_event", "seg_chunk",
+    "net_route", "parse_failure", "seg_term", "seg_event", "seg_chunk", "boot",
 )
 
 UNITS_SQL = """
@@ -71,7 +80,9 @@ CREATE TABLE IF NOT EXISTS unit (
   parsed_sig  TEXT,
   line_count  INTEGER NOT NULL DEFAULT 0,
   vis_count   INTEGER NOT NULL DEFAULT 0,
-  event_seq   INTEGER
+  event_seq   INTEGER,
+  mono_ns     INTEGER,
+  boot_id     TEXT
 );
 CREATE INDEX IF NOT EXISTS unit_term_idx ON unit(terminal_id, start_off);
 CREATE INDEX IF NOT EXISTS unit_cmd_idx ON unit(cmd_id);
@@ -114,7 +125,9 @@ CREATE TABLE IF NOT EXISTS cmd_block (
   ts_end_ns   INTEGER,
   flags       TEXT NOT NULL DEFAULT '[]',
   ctx         TEXT,              -- JSON: Stapel vor dem C-Marker
-  companions  TEXT NOT NULL DEFAULT '[]'  -- JSON: Dateien laut Parser.companions (nur lokale Befehle)
+  companions  TEXT NOT NULL DEFAULT '[]',  -- JSON: Dateien laut Parser.companions (nur lokale Befehle)
+  mono_ns     INTEGER,
+  boot_id     TEXT
 );
 CREATE INDEX IF NOT EXISTS cmd_block_term_idx ON cmd_block(terminal_id, c_off);
 
@@ -154,7 +167,9 @@ CREATE TABLE IF NOT EXISTS activity (
   evidence     TEXT,             -- JSON Provenienz {"t": "stream", ...}
   unit_id      TEXT,
   origin       TEXT NOT NULL DEFAULT 'local' CHECK (origin IN ('local', 'remote_confirmed',
-                                                             'remote_reconstructed'))
+                                                             'remote_reconstructed')),
+  mono_ns      INTEGER,
+  boot_id      TEXT
 );
 CREATE INDEX IF NOT EXISTS activity_ts_idx ON activity(ts_utc_ns);
 
@@ -201,6 +216,8 @@ CREATE TABLE IF NOT EXISTS seg_event (
   ts_utc_ns   INTEGER NOT NULL,
   operator_id TEXT,
   header      TEXT NOT NULL,
+  mono_ns     INTEGER,
+  boot_id     TEXT,
   PRIMARY KEY (terminal_id, seq)
 );
 
@@ -210,6 +227,14 @@ CREATE TABLE IF NOT EXISTS seg_chunk (
   len         INTEGER NOT NULL,
   seq         INTEGER NOT NULL,
   ts_utc_ns   INTEGER NOT NULL,
+  mono_ns     INTEGER,
+  boot_id     TEXT,
+  tix         TEXT,
   PRIMARY KEY (terminal_id, off)
+);
+
+CREATE TABLE IF NOT EXISTS boot (
+  boot_id    TEXT PRIMARY KEY,
+  first_seq  INTEGER NOT NULL
 );
 """

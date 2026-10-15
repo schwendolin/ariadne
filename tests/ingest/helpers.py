@@ -150,7 +150,8 @@ class StubHighParser(StubParser):
 class StubProjector:
     """Merkt sich alle Aufrufe. Gleiche Signatur wie ``ariadne.ingest.projection.Projector``."""
 
-    def __init__(self, conn: Any = None, *, project_key: bytes = b"", scope: Any = None) -> None:
+    def __init__(self, conn: Any = None, *, project_key: bytes = b"", scope: Any = None,
+                 profile: str = "lab") -> None:
         self.conn = conn
         self.calls: list[tuple[str, Any]] = []
         self.applied: dict[tuple[str, str], Any] = {}

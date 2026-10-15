@@ -10,8 +10,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, get_args
 
-from ariadne._shim.protocol import PROTO_VERSION, ProtocolError
-from ariadne.ctxrules import ContextStack
+from ariadne._shim.protocol import ACCEPTED_PROTOS, ProtocolError
+from ariadne.ctxrules import ContextStack, context_argv
 from ariadne.events import GapReason, StageKind
 
 __all__ = [
@@ -23,7 +23,10 @@ __all__ = [
     "parse_stack",
     "normalize_host",
     "normalize_user",
+    "apply_stack_event",
+    "merge_auto_hosts",
     "STAGE_KINDS",
+    "MAX_FRAME_TIMES",
 ]
 
 STAGE_KINDS = frozenset(get_args(StageKind))
@@ -32,6 +35,7 @@ _TID_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z-]{7,63}$")
 _NAME_RE = re.compile(r"^[a-z0-9_][a-z0-9_.-]{0,252}$")
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _STAGE_SOURCES = frozenset({"auto", "hotkey", "webui", "cli", "suggestion"})
+MAX_FRAME_TIMES = 4096  # Zeitindex der Rahmen für eigene Events des Daemons
 
 
 @dataclass
@@ -80,6 +84,7 @@ class Terminal:
     window_id: str | None = None
     shim_version: str = "unknown"
     pid: int | None = None
+    proto: int = 1
     display: dict[str, str] = field(default_factory=dict)
     conn: Any = None  # asyncio.StreamWriter der aktuellen Verbindung
     stack: ContextStack = field(default_factory=ContextStack)
@@ -87,38 +92,41 @@ class Terminal:
     bound_slug: str | None = None
     opened_in: set[str] = field(default_factory=set)
     recording: bool = False
+    pending_open: bool = False  # Aufnahme an, term.open folgt beim ersten Offset (E95)
     recv_end: int = 0  # bis hier angenommen (Strom-Offset)
     stored_end: int = 0  # bis hier im Journal
+    shim_off: int = 0  # höchster bekannter Offset des Shims (Rahmen, Anfragen)
     max_seq: int = 0
     acked_seq: int = 0
     ack_queue: deque[AckEntry] = field(default_factory=deque)
-    buffer: deque[tuple[int, bytes, AckEntry]] = field(default_factory=deque)
-    buffer_bytes: int = 0
-    # Puffer im Zustand waiting voll: ab dieser seq nichts mehr annehmen und nichts
-    # bestätigen; der Shim hält die Rahmen und sendet sie nach dem Entsperren erneut.
-    resend_from: int | None = None
-    req_done: set[int] = field(default_factory=set)  # Anfragen aus diesem Bereich, schon ausgeführt
     seen_seq: int = 0
     gap_hint: str | None = None
-    pause: Pause | None = None
+    pause: Pause | None = None  # Schlüsselmaterial (sensitive_output), bis zum nächsten Prompt
+    pause_until_ns: int | None = None  # Pause des Nutzers (E22), Wanduhr
+    pause_source: str = "hotkey"
+    mux: bool = False  # Multiplexer-Client im Vordergrund (nur Anzeige)
+    last_mono: int | None = None  # monotone Shim-Zeit des letzten Rahmens (time_suspect)
     frame_offs: list[int] = field(default_factory=list)
     frame_times: list[tuple[int, int | None, int]] = field(default_factory=list)  # Shim-Wand, Mono, Empfang
-    last_out: float = 0.0
     title_extra: str | None = None
     last_state: dict[str, Any] | None = None
     closed: bool = False
-    idle_flushed: bool = False  # Leerlauf-Flush seit der letzten Ausgabe schon eingereiht
     ctx_version: int = 0  # zählt Kontext-Entscheide; der Shim übernimmt STATE.stack nur dann
 
     def note_frame(self, off: int, wall: int, mono: int | None, recv: int = 0) -> None:
+        if self.frame_offs and off < self.frame_offs[-1]:
+            return
         self.frame_offs.append(off)
         self.frame_times.append((wall, mono, recv or time.time_ns()))
+        if len(self.frame_offs) > MAX_FRAME_TIMES:
+            del self.frame_offs[: MAX_FRAME_TIMES // 2]
+            del self.frame_times[: MAX_FRAME_TIMES // 2]
 
-    def time_at(self, off: int) -> tuple[int, int | None, int]:
-        """Shim-Wanduhr, Shim-Monotonic und Empfangszeit im Daemon des Rahmens mit ``off``."""
+    def time_at(self, off: int) -> tuple[int, int | None, int] | None:
+        """Shim-Wanduhr, Shim-Monotonic und Empfangszeit des Rahmens mit ``off`` (oder ``None``)."""
         i = bisect.bisect_right(self.frame_offs, off) - 1
         if i < 0:
-            return (self.frame_times[0] if self.frame_times else (0, None, 0))
+            return self.frame_times[0] if self.frame_times else None
         return self.frame_times[i]
 
     def prune_frames(self) -> None:
@@ -127,6 +135,39 @@ class Terminal:
         if i > 0:
             del self.frame_offs[:i]
             del self.frame_times[:i]
+
+    def note_off(self, off: int | None) -> None:
+        if isinstance(off, int) and not isinstance(off, bool) and off > self.shim_off:
+            self.shim_off = off
+
+
+def apply_stack_event(stack: ContextStack, kind: str, header: dict[str, Any]) -> ContextStack:
+    """Wirkung eines gespeicherten oder gehaltenen Events auf den Stapel (wie im Shim)."""
+    off = header.get("stream_off")
+    off = off if isinstance(off, int) else 0
+    if kind == "term.mark":
+        mark = header.get("mark")
+        if mark == "C":
+            cmd = header.get("cmd_expanded") or header.get("cmd_typed") or ""
+            if isinstance(cmd, str) and cmd:
+                stack.on_command_start(context_argv(cmd), off)
+        elif mark == "D" and header.get("fg_shell"):
+            stack.on_command_end(header.get("exit"), off)
+    elif kind == "term.ctx_snapshot" and isinstance(header.get("stack"), list | tuple):
+        return merge_auto_hosts(stack, ContextStack.from_snapshot(header["stack"]))
+    return stack
+
+
+def merge_auto_hosts(old: ContextStack, new: ContextStack) -> ContextStack:
+    """Automatische Hosts (``host_source="auto"``, E23) aus ``old`` in ``new`` übernehmen.
+
+    Schnappschüsse im Journal und vom Shim tragen den Auto-Host nicht; ohne diese
+    Übernahme verschwände er bei jedem Schnappschuss bis zum nächsten Durchgang.
+    """
+    for st in old.stages:
+        if st.host_source == "auto" and st.host:
+            new.set_auto_host(st.opened_at, st.host)
+    return new
 
 
 def _opt_str(obj: dict[str, Any], key: str, max_len: int) -> str | None:
@@ -164,6 +205,8 @@ def parse_stack(data: Any) -> list[dict[str, Any]] | None:
         st["opened_at"] = off if isinstance(off, int) and not isinstance(off, bool) and off >= 0 else 0
         st["state"] = "suspended" if d.get("state") == "suspended" else "active"
         st["source"] = d["source"] if d.get("source") in _STAGE_SOURCES else "auto"
+        if d.get("host_source") == "auto" and "host" in st:
+            st["host_source"] = "auto"
         out.append(st)
     if out[0]["kind"] != "local":
         return None
@@ -172,7 +215,8 @@ def parse_stack(data: Any) -> list[dict[str, Any]] | None:
 
 def parse_hello(obj: dict[str, Any]) -> dict[str, Any]:
     """Prüft ein HELLO und gibt die übernommenen Felder zurück."""
-    if obj.get("proto") != PROTO_VERSION:
+    proto = obj.get("proto")
+    if type(proto) is not int or proto not in ACCEPTED_PROTOS:
         raise ProtocolError("falsche Protokollversion")
     tid = obj.get("terminal_id")
     if not isinstance(tid, str) or not _TID_RE.match(tid):
@@ -194,7 +238,11 @@ def parse_hello(obj: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(slug, str) or not _SLUG_RE.match(slug):
         slug = None
     hint = obj.get("gap_hint")
+    pause = obj.get("pause_until_ns") if proto >= 2 else None
+    if pause is not None and (type(pause) is not int or not 0 < pause < 1 << 63):
+        pause = None
     return {
+        "proto": proto,
         "gap_hint": hint if isinstance(hint, str) and hint in GAP_REASONS else None,
         "stack": parse_stack(obj.get("stack")),
         "bound_project_id": bound,
@@ -211,6 +259,8 @@ def parse_hello(obj: dict[str, Any]) -> dict[str, Any]:
         "pid": _int(obj, "pid", 0, 1 << 30) or None,
         "display": display,
         "resume_from_seq": resume,
+        "pause_until_ns": pause,
+        "mux": obj.get("mux") is True,
     }
 
 

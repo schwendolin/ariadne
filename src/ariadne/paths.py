@@ -58,6 +58,13 @@ class Paths:
         return self.config_dir / "config.toml"
 
     @property
+    def active_file(self) -> Path:
+        """Zuletzt aktives Projekt für ``ariadne start`` ohne Slug (E22): JSON
+        ``{"slug", "project_id", "stopped", "since_utc"}``, 0600, ohne Secrets.
+        Schreibt nur der Daemon."""
+        return self.state_dir / "active.json"
+
+    @property
     def daemon_log(self) -> Path:
         """Log des abgekoppelt gestarteten Daemons (nur Metadaten, nie Inhalte)."""
         return self.state_dir / "ariadned.log"

@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import fcntl
+import math
 import os
 import re
 import selectors
@@ -28,7 +29,9 @@ from typing import Any
 
 from ariadne import __version__
 from ariadne._shim import procutil
+from ariadne._shim import protocol as P
 from ariadne._shim.hotkey import Armed, Cancelled, Forward, InputFilter, Key, describe_prefix, parse_hotkey
+from ariadne._shim.inputrec import InputRecorder
 from ariadne._shim.launch import Spawned, exit_code, make_raw, set_winsize, winsize
 from ariadne._shim.markers import MarkerValidator, mark_event
 from ariadne._shim.miniprompt import LinePrompt, parse_user_host
@@ -54,9 +57,9 @@ TITLE_FIRST_S = 0.3
 CPR_SWALLOW_S = 0.5
 DISPLAY_KEYS = ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
 _CPR = re.compile(rb"\x1b\[\d{1,4};\d{1,4}R")
-_REC_STATES = ("on", "off", "waiting", "offline")
+TITLE_PAUSE_S = 30.0  # Titel während einer Pause mindestens einmal pro Minute neu setzen
 _STAGE_KINDS = {"local", "su", "ssh", "winrm", "remote", "revshell", "msf", "meterpreter", "db", "unknown"}
-_HELP = ("r REC, h Host, b Stufe zurück, k Schlüsselschritt, s Screenshot, "
+_HELP = ("r Pause, h Host, b Stufe zurück, k Schlüsselschritt, s Screenshot, "
          "2x Präfix sendet ihn durch. Taste schliesst.")
 _KEYSTEPS = {"f": "foothold", "p": "privesc", "v": "pivot", "l": "loot"}
 _MUX_COMM = ("tmux", "screen", "zellij", "dtach")  # Client im Vordergrund (comm "tmux: client")
@@ -90,6 +93,8 @@ def _clean_stack(data: Any) -> list[dict] | None:
         st["state"] = "suspended" if d.get("state") == "suspended" else "active"
         src = d.get("source")
         st["source"] = src if src in ("auto", "hotkey", "webui", "cli", "suggestion") else "auto"
+        if d.get("host_source") == "auto" and "host" in st:
+            st["host_source"] = "auto"  # Host aus der Auswertung (E23), Titel zeigt "(auto)"
         out.append(st)
     return out
 
@@ -136,6 +141,13 @@ class Shim:
         self._mux_pgrp = -1  # Vordergrund-Prozessgruppe beim letzten Blick
         self._mux_fg = False
         self._mux_from: int | None = None  # Beginn der Pause (Multiplexer im Vordergrund)
+        self._mux_sent: bool | None = None  # zuletzt per req.status gemeldet
+        self._mux_on = False  # Multiplexer-Client im Vordergrund (zuletzt geprüft)
+        self._pause_until: int | None = None  # Pause des Nutzers bis (Wanduhr, ns), vom Daemon
+        self._title_pause_t = 0.0
+        self._at_prompt = False  # letzter gültiger Marker A oder D mit fg_shell, danach kein C
+        self._read_t: tuple[int, int] | None = None  # Zeit des laufenden read() (Wanduhr, mono)
+        self.inputs = InputRecorder(self._send_input)
         self._daemon_id: str | None = None
         self._bound_id: str | None = None
         self._bound_slug: str | None = None
@@ -210,7 +222,7 @@ class Shim:
 
     def _hello(self) -> dict[str, Any]:
         return {
-            "proto": 1,
+            "proto": P.PROTO_VERSION,
             "terminal_id": self.terminal_id,
             "tty": self.tty_name,
             "shell": self.argv[0],
@@ -226,6 +238,9 @@ class Shim:
             "stack": self.stack.snapshot(),
             "bound_project_id": self._bound_id,
             "bound_slug": self._bound_slug,
+            # Eine laufende Pause übersteht so einen Neustart des Daemons.
+            "pause_until_ns": self._pause_until if self._paused_locally() else None,
+            "mux": self._mux_on,
         }
 
     # --------------------------------------------------------- Schleife
@@ -323,6 +338,8 @@ class Shim:
             self._notice_until if self._notice else None,
             None if self._title_live else self._title_due,
             (self._prompt_t + PROMPT_IDLE_S) if self.prompt is not None else None,
+            self.inputs.deadline(),
+            self._pause_deadline(now),
         ]
         if self.scanner is not None:
             cands.append(self.scanner.deadline())
@@ -390,9 +407,11 @@ class Shim:
         except OSError:
             self._hup = True
             return
+        wall, mono = time.time_ns(), time.monotonic_ns()  # E96: direkt nach dem read()
         if not data:
             self._hup = True
             return
+        self._read_t = (wall, mono)
         if self.prompt is not None:
             self._prompt_input(data, now)
             return
@@ -406,6 +425,7 @@ class Shim:
             raise
         for act in acts:
             self._on_action(act, now)
+        self._read_t = None
 
     def _on_stdout(self, now: float) -> None:
         if not self._disp:
@@ -440,12 +460,17 @@ class Shim:
             if exc.errno != errno.EIO:
                 raise
             data = b""
+        wall, mono = time.time_ns(), time.monotonic_ns()  # E96: direkt nach dem read()
         if not data:
             self._master_eof = True
             self._master_eof_t = now
             return
         self._last_master = now
-        self._on_output(data, now)
+        self._read_t = (wall, mono)
+        try:
+            self._on_output(data, now)
+        finally:
+            self._read_t = None
 
     def _on_sock(self, mask: int, now: float) -> None:
         t = self.transport
@@ -479,6 +504,17 @@ class Shim:
                 self._broken()
         for act in self.input.expire(now):
             self._on_action(act, now)
+        if self.inputs:
+            try:
+                self.inputs.expire(now)
+            except Exception:
+                self._broken()
+        if self._pause_until is not None and not self._paused_locally():
+            self._pause_until = None  # lokal abgelaufen, auch ohne neuen STATE
+            self._update_capture(now)
+            self._refresh_title(now)
+        elif self._pause_until is not None and now >= self._title_pause_t + TITLE_PAUSE_S:
+            self._refresh_title(now)
         if self.prompt is not None and now >= self._prompt_t + PROMPT_IDLE_S:
             self.prompt.cancelled = self.prompt.done = True
             self._prompt_done(now)
@@ -519,8 +555,8 @@ class Shim:
         self._apply_scan(res, off0, now)
 
     def _multiplexer_fg(self) -> bool:
-        """Läuft ein tmux/screen-Client im Vordergrund? (Architektur 3.9: die Panes haben
-        eigene Shims, der äussere Shim nimmt die gerenderte Ausgabe nicht auf.)"""
+        """Läuft ein tmux/screen-Client im Vordergrund? (Architektur 3.9, E8: die Panes haben
+        eigene Shims, der äussere Shim nimmt weder Ausgabe noch Eingaben auf.)"""
         try:
             pgrp = os.tcgetpgrp(self.master)
         except OSError:
@@ -531,19 +567,39 @@ class Shim:
             self._mux_fg = comm.startswith(_MUX_COMM)
         return self._mux_fg
 
+    def _check_mux(self, now: float) -> bool:
+        """Multiplexer prüfen; ein Wechsel geht als ``req.status`` an den Daemon und in den Titel."""
+        mux = self._multiplexer_fg()
+        changed = mux != self._mux_on
+        self._mux_on = mux
+        if mux != self._mux_sent:
+            t = self.transport
+            if t is not None and t.ready and not self._rec_broken:
+                self._mux_sent = mux
+                t.add_event("req.status", {"terminal_id": self.terminal_id, "mux": mux})
+        if changed:
+            self._refresh_title(now)
+        return mux
+
+    def _now_times(self) -> tuple[int, int]:
+        return self._read_t if self._read_t is not None else (time.time_ns(), time.monotonic_ns())
+
     def _apply_scan(self, res: ScanResult, off0: int, now: float) -> None:
         self._show(res.display)
         if self._rec_broken:
             return
         try:
+            mux = self._check_mux(now)
             if (res.record or self._mux_from is not None) and self.capture and self.transport is not None:
-                if self._multiplexer_fg():
+                if mux:
                     if self._mux_from is None:
+                        self.inputs.flush()
                         self._mux_from = off0
                 else:
                     self._end_mux(off0)  # Lücke vor allem, was danach kommt (auch Marker)
                     if res.record:
-                        self.transport.add_out(res.record, off0, time.time_ns(), time.monotonic_ns(), now)
+                        wall, mono = self._now_times()
+                        self.transport.add_out(res.record, off0, wall, mono, now)
             for item in res.items:
                 self._on_item(item, now)
         except Exception:
@@ -573,6 +629,10 @@ class Shim:
         ev = mark_event(v.marker, terminal_id=self.terminal_id, stream_off=item.stream_off,
                         fg_shell=v.fg_shell)
         self._emit("term.mark", ev)
+        if v.marker.mark == "C":
+            self._at_prompt = False
+        elif v.marker.mark in ("A", "D") and v.fg_shell:
+            self._at_prompt = True
         before = self.stack.snapshot()
         label = self.stack.label()
         cmd = ev.get("cmd_expanded") or ev.get("cmd_typed")  # wie Daemon und Segmenter (Aliase)
@@ -584,6 +644,16 @@ class Shim:
             self._sync_stack()
         if self.stack.label() != label:
             self._refresh_title(now)
+        if v.marker.mark == "A" and v.fg_shell:
+            self._maybe_rebind(now)
+
+    def _stack_local(self) -> bool:
+        return all(st.kind in ("local", "su") for st in self.stack.stages)
+
+    def _maybe_rebind(self, now: float) -> None:
+        """Zustand ``held`` (E28): an der lokalen Kali-Shell die Bindung ans alte Projekt lösen."""
+        if self._rec == "held" and self._at_prompt and self._stack_local():
+            self._request("req.rebind", {}, now)
 
     def _sync_stack(self) -> None:
         """Ohne Aufnahme sieht der Daemon keine Marker: Stapel nachführen (``req.ctx.sync``)."""
@@ -605,14 +675,40 @@ class Shim:
         t = self.transport
         if not self.capture or t is None or self._rec_broken:
             return
+        if self._mux_from is not None and kind not in ("term.gap", "term.close"):
+            return  # Multiplexer im Vordergrund: die Panes nehmen auf
         fields = dict(fields)
         fields.setdefault("terminal_id", self.terminal_id)
+        wall, mono = self._now_times()
+        fields.setdefault("t_shim_ns", wall)
+        fields.setdefault("mono_ns", mono)
         t.add_event(kind, fields)
+
+    def _send_input(self, data: bytes, off: int, out_end: int, wall: int, mono: int,
+                    tix: tuple[tuple[int, int], ...], paste: bool) -> None:
+        t = self.transport
+        if t is None or self._rec_broken or not data:
+            return
+        t.add_input(data, off, out_end, wall, mono, tix, paste=paste)
+
+    def _record_input(self, data: bytes, now: float) -> None:
+        """Eingabe ans Kind aufzeichnen (E26), nur wenn auch die Ausgabe aufgenommen wird."""
+        if not self.capture or self.transport is None or self._rec_broken:
+            return
+        try:
+            if self._check_mux(now):
+                return
+            wall, mono = self._now_times()
+            self.inputs.feed(data, self._offset(), wall, mono, now)
+        except Exception:
+            self._broken()
 
     def _broken(self) -> None:
         """Fehler im Aufnahmecode: Aufnahme aus, Relay läuft weiter."""
         self._rec_broken = True
         self.capture = False
+        with contextlib.suppress(Exception):
+            self.inputs.drop()
         t, self.transport = self.transport, None
         if t is not None:
             with contextlib.suppress(Exception):
@@ -621,15 +717,42 @@ class Shim:
 
     # ------------------------------------------------------- REC-Zustand
 
+    def _paused_locally(self) -> bool:
+        return self._pause_until is not None and time.time_ns() < self._pause_until
+
+    def _pause_deadline(self, now: float) -> float | None:
+        if self._pause_until is None:
+            return None
+        left = (self._pause_until - time.time_ns()) / 1e9
+        return min(now + max(left, 0.0), self._title_pause_t + TITLE_PAUSE_S)
+
     def _want_capture(self) -> bool:
         t = self.transport
-        if t is None or self._rec_broken:
+        if t is None or self._rec_broken or self._paused_locally():
             return False
         if t.ready:
-            return self._rec in ("on", "waiting")
+            return self._effective_rec() in P.CAPTURE_STATES
         if t.connected:  # vorläufig, bis der erste STATE kommt
-            return self._last_rec in (None, "on", "waiting")
-        return self._last_rec in ("on", "waiting")
+            return self._last_rec is None or self._last_rec in P.CAPTURE_STATES
+        return self._last_rec in P.CAPTURE_STATES
+
+    def _effective_rec(self) -> str | None:
+        """``paused`` gilt nur bis ``pause_until_ns`` (Wanduhr), auch ohne neuen STATE."""
+        rec = self._rec
+        if rec == "paused" and not self._paused_locally():
+            st = self.transport.state if self.transport is not None else {}
+            if isinstance(st.get("project"), str):
+                return "on"
+            return "preroll" if st.get("preroll_minutes") else "off"
+        return rec
+
+    def _stop_reason(self) -> str:
+        t = self.transport
+        if self._paused_locally() or self._rec == "paused":
+            return "pause"
+        if t is None or not t.ready:
+            return "daemon_down"
+        return {"held": "project_switch", "off": "no_project"}.get(str(self._rec), "daemon_down")
 
     def _update_capture(self, now: float, reason: str | None = None) -> None:
         want = self._want_capture()
@@ -639,14 +762,17 @@ class Shim:
         t = self.transport
         if want:
             self.capture = True
-            if self._lost_since is not None and off > self._lost_since:
+            pause = self._lost_reason == "pause"
+            if self._lost_since is not None and (off > self._lost_since or pause):
                 self._emit("term.gap", {"stream_off": self._lost_since, "reason": self._lost_reason,
-                                        "bytes_lost": off - self._lost_since})
+                                        "bytes_lost": max(0, off - self._lost_since)})
             self._lost_since = None
             self._emit("term.resize", {"stream_off": off, "rows": min(self.rows, 1000),
                                        "cols": min(self.cols, 1000)})
-            self._emit("term.ctx_snapshot", {"stream_off": off, "stack": self.stack.snapshot()})
+            self._emit("term.ctx_snapshot", {"stream_off": off, "stack": self.stack.journal_snapshot()})
         else:
+            with contextlib.suppress(Exception):
+                self.inputs.flush()  # Getipptes vor dem Ende der Aufnahme
             if t is not None:
                 t.flush_out()
             self.capture = False
@@ -656,14 +782,13 @@ class Shim:
                 self._mux_from = None
             self._drop_from = None
             self._lost_since = lost
-            ready_off = t is not None and t.ready and self._rec == "off"
-            self._lost_reason = reason or ("rec_off" if ready_off else "daemon_down")
+            self._lost_reason = reason or self._stop_reason()
 
     def _on_state_cb(self, st: dict[str, Any], first: bool) -> None:
         now = time.monotonic()
         t = self.transport
         rec = st.get("rec")
-        if rec not in _REC_STATES:
+        if rec not in P.REC_STATES:
             rec = "off"
         prev = self._rec
         if rec == "offline":
@@ -674,14 +799,19 @@ class Shim:
         if first:
             did = st.get("daemon_id") if isinstance(st.get("daemon_id"), str) else None
             if self._daemon_id is not None and did != self._daemon_id and self.capture:
-                reason = "daemon_down"  # Daemon neu gestartet (gesperrt, REC aus): Puffer verloren
+                reason = "daemon_down"  # Daemon neu gestartet: Puffer verloren
             self._daemon_id = did
-        if first and rec not in ("on", "waiting") and t is not None:
+            self._mux_sent = self._mux_on  # HELLO trug den Wert schon
+        until = st.get("pause_until_ns")
+        self._pause_until = until if type(until) is int and until > 0 else None
+        if self._pause_until is not None and rec == "paused":
+            reason = "pause"
+        if first and rec not in P.CAPTURE_STATES and t is not None:
             self._drop_from = t.drop_unacked()
         if prev == "waiting" and rec == "on" and t is not None:
-            t.rewind()
-        # Den Stapel führt der Shim selbst (er sieht alle Marker, auch bei REC aus). Vom
-        # Daemon kommt er nur nach einem Kontext-Entscheid (neue ctx_version).
+            t.rewind()  # nur Daemon v1: Gepuffertes noch einmal senden
+        # Den Stapel führt der Shim selbst (er sieht alle Marker, auch ohne Aufnahme). Vom
+        # Daemon kommt er nur nach einem Kontext-Entscheid oder einem Auto-Host (ctx_version).
         ver = st.get("ctx_version")
         ver = ver if type(ver) is int else None
         if first:
@@ -696,15 +826,21 @@ class Shim:
         bound = st.get("bound_project_id")
         if isinstance(bound, str) and 0 < len(bound) <= 64:
             self._bound_id = bound
-            slug = st.get("project")
-            if st.get("project_id") == bound and isinstance(slug, str) and len(slug) <= 64:
+            slug = st.get("bound_slug")
+            if not isinstance(slug, str):
+                slug = st.get("project") if st.get("project_id") == bound else None
+            if isinstance(slug, str) and len(slug) <= 64:
                 self._bound_slug = slug
+        elif bound is None and "bound_project_id" in st:
+            self._bound_id = self._bound_slug = None
         hosts = st.get("hosts")
         if isinstance(hosts, list):
             self.hosts = [h for h in hosts[:500] if isinstance(h, str) and len(h) <= 255]
         self._update_capture(now, reason)
         if first and not self.capture:
             self._sync_stack()
+        if rec == "held" and prev != "held":
+            self._maybe_rebind(now)
         self._refresh_title(now)
 
     def _on_disconnect_cb(self) -> None:
@@ -735,14 +871,26 @@ class Shim:
         else:
             link = Link.READY
         st = t.state if (t is not None and ready) else {}
-        bound, proj_id = st.get("bound_project_id"), st.get("project_id")
         project = st.get("project")
         extra = st.get("title_extra")
+        rec = self._rec
+        pause_min = None
+        if self._paused_locally():
+            rec = "paused"
+            assert self._pause_until is not None
+            pause_min = max(1, math.ceil((self._pause_until - time.time_ns()) / 60e9))
+            self._title_pause_t = now
+        else:
+            rec = self._effective_rec()  # abgelaufene Pause: der neue STATE folgt
+        preroll = st.get("preroll_minutes")
         text = compose_title(
             link=link,
-            rec=self._rec,
+            rec=rec,
             project=project if isinstance(project, str) else None,
-            paused=bool(bound and proj_id and bound != proj_id),
+            mux=self._mux_on,
+            pause_min=pause_min,
+            preroll_min=preroll if type(preroll) is int else None,
+            bound_slug=self._bound_slug,
             label=self.stack.label(),
             suggestion=bool(st.get("suggestion")),
             extra=extra if isinstance(extra, str) else None,
@@ -758,6 +906,7 @@ class Shim:
     def _on_action(self, act: object, now: float) -> None:
         if isinstance(act, Forward):
             self._to_child += act.data
+            self._record_input(act.data, now)
         elif isinstance(act, Armed):
             self._note(f"{describe_prefix(self.hotkey_name)}: Taste r h b k s ?", now, 5.0)
         elif isinstance(act, Key):
@@ -775,6 +924,7 @@ class Shim:
             self._note("Daemon nicht erreichbar", now)
             return False
         try:
+            self.inputs.flush()  # Getipptes vor der Anfrage (z. B. vor einer Pause) senden
             t.add_event(kind, {"terminal_id": self.terminal_id, "stream_off": self._offset(), **fields})
         except Exception:
             self._broken()
@@ -786,8 +936,8 @@ class Shim:
 
     def _hotkey(self, key: str, now: float) -> None:
         if key == "r":
-            if self._request("req.rec", {"on": None}, now):
-                self._note("REC umschalten", now)
+            if self._request("req.pause", {"minutes": None}, now):
+                self._note("Pause umschalten", now)
         elif key == "b":
             self.stack.pop()
             self._request("req.ctx.pop", {}, now)
@@ -959,6 +1109,7 @@ class Shim:
         t = self.transport
         if t is not None and not self._rec_broken:
             with contextlib.suppress(Exception):
+                self.inputs.flush()
                 self._emit("term.close", {"stream_off": self._offset(), "exit_code": self.exit_code})
                 t.bye(self.exit_code)
             with contextlib.suppress(Exception):

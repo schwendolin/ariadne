@@ -1,18 +1,32 @@
 """Vollständige Neuberechnung der Projektion aus Beobachtungen und Entscheiden.
 
 Reine Funktion :func:`build` ohne Datenbankzugriff: Eingaben sind die Zeilen
-aus ``obs_unit``, ``observation``, ``mention`` und ``decision``, Ausgabe sind
-die Zeilen der abgeleiteten Tabellen. So bleibt die Logik deterministisch und
-einzeln testbar; :mod:`ariadne.ingest.projection` schreibt das Ergebnis.
+aus ``obs_unit``, ``observation``, ``mention``, ``decision`` und ``own_addr``,
+Ausgabe sind die Zeilen der abgeleiteten Tabellen. So bleibt die Logik
+deterministisch und einzeln testbar; :mod:`ariadne.ingest.projection` schreibt
+das Ergebnis.
 
-Reihenfolge: Entscheide (mit ``d.revoke``) -> Kontext je Einheit -> Quellen
-(Beobachtungen, IP-Mentions im Scope) -> Claims mit Konfidenz -> Zustände
-(Entscheide, Automodus) -> Identitäten -> Konflikte -> Entitäten und Status ->
-Faden -> Inbox.
+Reihenfolge: Entscheide (mit ``d.revoke``) -> Kontext je Einheit (mit Auto-Kontext
+aus dem ersten Callback, E23) -> Quellen (Beobachtungen, IP-Mentions im Scope,
+nie eigene Adressen) -> Evidenzgruppen und Nebenbelege -> Claims -> Entscheide
+(``d.claim.*``, ``d.unit.distrust``) -> Konfidenz (Maximum pro Gruppe, noisy-OR
+zwischen Gruppen) -> Identitäten (ohne eigene Adressen) -> Konflikte (Arten aus
+E45) -> Massenfunde -> Spuren -> Entitäten und Status -> Faden -> Inbox.
+
+**Drei-Spuren-Regel (E42, Profil lab).** Jeder Claim bekommt eine Spur:
+``user`` (Entscheid des Nutzers, geht immer vor), ``auto`` (Zustand ``auto``:
+anerkannter Parser, Subjekt im Scope, Wert macht nichts ausserhalb zum Ziel,
+kein Widerspruch, keine verdächtige Quelle, kein Massenfund), ``decide``
+(Inbox: KI, OCR, Widerspruch, unklarer Kontext, angebotene Credentials,
+heuristische Werte bei wichtigen Prädikaten, verdächtige Quellen, Massenfund)
+und ``quiet`` (Nebel und Zähler, nie Inbox). ``auto`` ist ein Ergebnis der
+Projektion, kein Entscheid. Im Profil customer gilt das alte Verhalten
+(Vorschlag in die Inbox nach ``Predicate.inbox``, ``d.automode.set``).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
@@ -35,25 +49,33 @@ from ariadne.ingest.identity import (
     STRONG_TYPES,
     WEAK_TYPES,
     IdentityGraph,
+    canon_ip,
     host_identifier,
     host_part,
     id_type,
     normalize_identifier,
     strength,
 )
+from ariadne.ingest.natures import split_heads
 from ariadne.ingest.schema_claims import MASK
 from ariadne.ontology import PREDICATES
 from ariadne.parsers.api import BASE_CONFIDENCE
 from ariadne.scope.api import ScopeChecker
 
 __all__ = ["UnitRow", "ObsRow", "MentionRow", "DecisionRow", "BuildResult", "build", "display",
-           "MASS_THRESHOLD", "LOCAL_HOST"]
+           "MASS_THRESHOLD", "LOCAL_HOST", "LISTENER_KINDS", "PROFILES", "DECIDE_VALUE_REASONS",
+           "group_of_unit"]
 
 MASS_THRESHOLD = 256
 LOCAL_HOST = "local:kali"
+PROFILES = ("lab", "customer")
+LISTENER_KINDS = ("revshell", "msf", "meterpreter")
+# Gründe der Spur «entscheiden», die einen Inbox-Eintrag pro Wert ergeben (Art decide_value).
+DECIDE_VALUE_REASONS = ("ai", "ocr", "important_heuristic", "offered", "suspect")
 _LOCAL_KINDS = ("local", "su")
 _ACCESS_RANK = {"none": 0, "user": 1, "admin": 2}
 _STATUS_DECISIONS = ("d.status.work", "d.status.access", "d.note.set", "d.tag.add", "d.tag.remove")
+_ELIGIBLE_TRUST = ("structured", "tool_text")
 
 
 # --------------------------------------------------------------------------- Eingaben
@@ -75,6 +97,8 @@ class UnitRow:
     ctx_candidate: str | None
     from_target: bool
     journal_seq: int
+    flags: tuple[str, ...] = ()
+    mono_ns: int | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +146,8 @@ class DecisionRow:
     kind: str
     payload: Mapping[str, Any]
     ts: int
+    mono: int | None = None
+    boot: str | None = None
 
 
 # --------------------------------------------------------------------------- intern
@@ -147,6 +173,9 @@ class _Src:
     from_target: bool = False
     suspect: bool = False
     stage: tuple[str, int] | None = None
+    attrs: Mapping[str, str] = field(default_factory=dict)
+    group: str = ""
+    side: bool = False
 
     def order(self) -> tuple:
         return (self.journal_seq, TRUST_ORDER.get(self.trust, 9), self.ts, self.obs_id or 0,
@@ -168,16 +197,31 @@ class _Claim:
     entity_id: str | None = None
     conflict_key: str | None = None
     scope: str | None = None
+    lane: str = "quiet"
+    lane_reason: str | None = None
+    history: bool = False
+    own: bool = False
+    host_scope: str | None = None
+    eff: list[_Src] = field(default_factory=list)  # Quellen ohne misstraute Gruppen
 
     @property
     def first(self) -> _Src:
         return min(self.sources, key=lambda s: s.order())
 
     @property
+    def first_eff(self) -> _Src:
+        return min(self.eff or self.sources, key=lambda s: s.order())
+
+    @property
     def first_observation(self) -> _Src:
         """Erste echte Beobachtung (Mentions sind keine Beobachtungen); sonst die erste Quelle."""
         obs = [s for s in self.sources if s.obs_id is not None]
         return min(obs, key=lambda s: s.order()) if obs else self.first
+
+    @property
+    def group_key(self) -> str | None:
+        src = self.first_eff
+        return src.group or None
 
     def strongest(self) -> _Src:
         return min(self.sources, key=lambda s: (TRUST_ORDER.get(s.trust, 9), s.order()))
@@ -194,6 +238,8 @@ class BuildResult:
     keysteps: list[tuple] = field(default_factory=list)
     mention_verdicts: dict[int, str | None] = field(default_factory=dict)
     secrets: dict[str, tuple[str, str]] = field(default_factory=dict)
+    ctx_auto: list[tuple] = field(default_factory=list)  # terminal_id, opened_at, host, claim_key
+    distrust: list[tuple] = field(default_factory=list)  # cmd_id, decision_id, rejected, weakened
 
 
 def display(key: str) -> str:
@@ -213,6 +259,16 @@ def display(key: str) -> str:
     return key.split(":", 1)[1] if ":" in key else key
 
 
+def group_of_unit(unit_id: str, kind: str, cmd_id: str | None) -> str:
+    """Evidenzgruppe einer Einheit (A3): ``cmd_id`` des Befehls (Dateien über
+    ``produced_by_cmd``), sonst die Einheit selbst (``unit:<id>``, Importe ``file:<event-id>``)."""
+    if cmd_id:
+        return cmd_id
+    if kind == "file" and unit_id.startswith("f:"):
+        return "file:" + unit_id[2:]
+    return "unit:" + unit_id
+
+
 def _dumps(obj: Any) -> str:
     """Stabiles JSON (sortiert, kompakt); anders als ``canonical_json`` mit Floats (Konfidenz)."""
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -222,22 +278,39 @@ def _max_access(a: str, b: str) -> str:
     return a if _ACCESS_RANK.get(a, 0) >= _ACCESS_RANK.get(b, 0) else b
 
 
+def _callback_ip(remote: str) -> str | None:
+    """IP aus ``host:port``, ``[v6]:port`` oder einer nackten Adresse."""
+    ip = canon_ip(remote)
+    if ip is not None:
+        return ip
+    if remote.startswith("[") and "]" in remote:
+        return canon_ip(remote[1 : remote.index("]")])
+    host, sep, port = remote.rpartition(":")
+    return canon_ip(host) if sep and port.isdigit() else None
+
+
 # --------------------------------------------------------------------------- Hauptfunktion
 SpanRow = tuple[str, int, int | None, str | None, int | None]  # terminal, start, end, kind, opened_at
 
 
 def build(units: Mapping[str, UnitRow], observations: Iterable[ObsRow], mentions: Iterable[MentionRow],
           decisions: Iterable[DecisionRow], scope: ScopeChecker, project_key: bytes,
-          spans: Iterable[SpanRow] | None = None) -> BuildResult:
+          spans: Iterable[SpanRow] | None = None, *, profile: str = "lab",
+          own_addrs: Iterable[str] = ()) -> BuildResult:
     """``spans`` sind die Kontextspannen des Segmenters (``ctx_span``). Ohne sie ordnet
-    ``d.ctx.set`` nur über die schon geparsten Einheiten zu (Tests, alte Aufrufer)."""
-    return _Builder(units, observations, mentions, decisions, scope, project_key, spans).run()
+    ``d.ctx.set`` nur über die schon geparsten Einheiten zu (Tests, alte Aufrufer).
+    ``own_addrs`` sind die eigenen Adressen von Kali (``own_addr``, A5)."""
+    return _Builder(units, observations, mentions, decisions, scope, project_key, spans, profile,
+                    own_addrs).run()
 
 
 class _Builder:
     def __init__(self, units: Mapping[str, UnitRow], observations: Iterable[ObsRow],
                  mentions: Iterable[MentionRow], decisions: Iterable[DecisionRow], scope: ScopeChecker,
-                 project_key: bytes, spans: Iterable[SpanRow] | None = None) -> None:
+                 project_key: bytes, spans: Iterable[SpanRow] | None = None, profile: str = "lab",
+                 own_addrs: Iterable[str] = ()) -> None:
+        if profile not in PROFILES:
+            raise ValueError(f"unbekanntes Profil {profile!r}")
         self.spans: dict[str, list[SpanRow]] | None = None
         if spans is not None:
             self.spans = defaultdict(list)
@@ -251,9 +324,14 @@ class _Builder:
         self.decisions = sorted(decisions, key=lambda d: d.seq)
         self.scope = scope
         self.pk = project_key
+        self.profile = profile
+        self.lab = profile == "lab"
+        self.own = {ip for a in own_addrs if isinstance(a, str) and (ip := canon_ip(a)) is not None}
         self.res = BuildResult()
         self._verdicts: dict[str, tuple[str | None, str | None, int | None]] = {}
         self.orphans: list[tuple[DecisionRow, str, str | None]] = []
+        self.distrusted: dict[str, DecisionRow] = {}
+        self.mass_units: dict[str, int] = {}
 
     # ------------------------------------------------------------------ Hilfen
     def secret_sink(self) -> Callable[[str, str, str], None]:
@@ -282,21 +360,44 @@ class _Builder:
         self._verdicts[key] = out
         return out
 
+    def is_own(self, key: str | None) -> bool:
+        """Ist die Kennung (oder der Host eines Service) eine eigene Adresse von Kali?"""
+        if not key or not self.own:
+            return False
+        if id_type(key) == "svc":
+            key = host_part(key) or ""
+        return id_type(key) == "ip" and key.split("/", 1)[1] in self.own
+
+    def _group(self, unit_id: str | None) -> str:
+        u = self.units.get(unit_id) if unit_id else None
+        return group_of_unit(u.unit_id, u.kind, u.cmd_id) if u is not None else ""
+
     # ------------------------------------------------------------------ Ablauf
     def run(self) -> BuildResult:
         self._decisions()
         self._contexts()
         sources = self._sources()
+        self._groups(sources)
         claims = self._aggregate(sources)
+        for c in claims.values():
+            c.own = self._claim_own(c)
         self._claim_decisions(claims)
+        self._confidence(claims)
+        self._scopes(claims)
         self._automode(claims)
         keysteps = self._keystep_hosts()
         graph, entity_of = self._identity(claims, keysteps)
+        for c in claims.values():
+            c.entity_id = self._entity_for(c.subject, entity_of)
         self._conflicts(claims)
+        self._mass(claims)
+        self._lanes(claims)
         self._entities(claims, keysteps, entity_of, graph)
         self._write_keysteps(keysteps, entity_of)
         self._inbox(claims, graph)
         self._write_claims(claims)
+        self._write_ctx_auto(claims)
+        self._write_distrust(claims)
         return self.res
 
     # ------------------------------------------------------------------ Entscheide
@@ -310,7 +411,10 @@ class _Builder:
         self.active = [d for d in self.decisions if d.id not in revoked and d.kind != "d.revoke"]
 
     def _contexts(self) -> None:
-        """Kontext-Host je Einheit; ``d.ctx.set`` setzt den Host der Stufe, die den Offset enthält."""
+        """Kontext-Host je Einheit; ``d.ctx.set`` setzt den Host der Stufe, die den Offset enthält.
+
+        Ohne Entscheid und ohne Host aus dem Stapel setzt der erste Callback einer
+        Listener-Stufe den Host automatisch (E23, :meth:`_auto_contexts`)."""
         overrides: dict[tuple[str, int], str] = {}
         stages: dict[str, list[int]] = defaultdict(list)
         for u in self.units.values():
@@ -338,9 +442,59 @@ class _Builder:
             cands = [o for o in stages.get(term, []) if o <= off]
             if cands:
                 overrides[(term, max(cands))] = host
+        self.auto_ctx = self._auto_contexts(overrides)
         self.ctx_host: dict[str, str] = {}
         for u in self.units.values():
             self.ctx_host[u.unit_id] = self._resolve_ctx(u, overrides)
+
+    def _auto_contexts(self, overrides: Mapping[tuple[str, int], str]
+                       ) -> dict[tuple[str, int], tuple[str, int]]:
+        """Auto-Host je Listener-Stufe (E23, Profil lab): genau ein erster Callback, IP im
+        Scope, nicht Loopback, keine eigene Adresse, kein Entscheid und kein Host aus dem Stapel.
+
+        Weitere vertrauenswürdige Callbacks (``not_first``, etwa eine zweite Sitzung im
+        msf-Handler) mit anderer IP machen die Stufe mehrdeutig. Ergebnis: Stufe ->
+        (Host-Kennung, obs_id des Callbacks)."""
+        if not self.lab:
+            return {}  # Profil customer: Kontext nur per Vorschlag (wie bisher)
+        stage_units: dict[tuple[str, int], list[UnitRow]] = defaultdict(list)
+        for u in self.units.values():
+            if u.terminal_id and u.ctx_opened_at is not None and u.ctx_kind in LISTENER_KINDS:
+                stage_units[(u.terminal_id, u.ctx_opened_at)].append(u)
+        if not stage_units:
+            return {}
+        stage_of = {u.unit_id: key for key, us in stage_units.items() for u in us}
+        callbacks: dict[tuple[str, int], list[ObsRow]] = defaultdict(list)
+        for o in self.obs:
+            key = stage_of.get(o.unit_id)
+            if key is not None and o.predicate == "access.callback" and id_type(o.subject) == "ip":
+                callbacks[key].append(o)
+        extra: dict[tuple[str, int], set[str]] = defaultdict(set)
+        for m in self.mentions:
+            key = stage_of.get(m.unit_id)
+            if key is None or m.value_type != "callback" or not m.value:
+                continue
+            if m.attrs.get("reason") != "not_first":
+                continue
+            ip = _callback_ip(m.value)
+            extra[key].add(f"ip:default/{ip}" if ip else f"invalid:{m.mention_id}")
+        out: dict[tuple[str, int], tuple[str, int]] = {}
+        for key in sorted(stage_units):
+            cbs = callbacks.get(key)
+            if not cbs or key in overrides:
+                continue
+            if any(u.ctx_host and (h := host_identifier(u.ctx_host)) and h != "ctx:host"
+                   for u in stage_units[key]):
+                continue  # Host steht schon im Stapel (Hotkey vor dem Callback)
+            first = min(cbs, key=lambda o: (o.journal_seq, o.ts, o.obs_id))
+            host = normalize_identifier(first.subject)
+            if host is None or len({o.subject for o in cbs} | extra[key] | {first.subject}) != 1:
+                continue  # mehrdeutig
+            addr = ipaddress.ip_address(host.split("/", 1)[1])
+            if addr.is_loopback or addr.is_unspecified or self.is_own(host) or self.verdict(host) != "in":
+                continue
+            out[key] = (host, first.obs_id)
+        return out
 
     def _resolve_ctx(self, u: UnitRow, overrides: Mapping[tuple[str, int], str]) -> str:
         if u.ctx_kind in _LOCAL_KINDS or u.ctx_host == "local":
@@ -354,6 +508,9 @@ class _Builder:
             if ident and ident != "ctx:host":
                 return ident
         if u.terminal_id and u.ctx_opened_at is not None:
+            auto = self.auto_ctx.get((u.terminal_id, u.ctx_opened_at))
+            if auto is not None:
+                return auto[0]
             return f"ctx:{u.terminal_id}@{u.ctx_opened_at}"
         return f"ctx:unit:{u.unit_id}"
 
@@ -391,13 +548,13 @@ class _Builder:
                        is_secret=o.is_secret, trust=o.trust, auto_eligible=o.auto_eligible,
                        confidence=o.confidence, ts=o.ts, journal_seq=o.journal_seq, unit_id=o.unit_id,
                        parser_id=o.parser_id, parser_version=o.parser_version, span_json=o.span_json,
-                       obs_id=o.obs_id, from_target=o.from_target, suspect=o.suspect,
-                       stage=stage)  # type: ignore[arg-type]
+                       obs_id=o.obs_id, from_target=o.from_target,
+                       suspect=o.suspect or "marker_forged" in u.flags, stage=stage, attrs=o.attrs)
             if o.predicate == "access.callback" and stage is not None:
                 # nur der erste Callback einer Listener-Stufe zählt (ein Ziel kann Zeilen fälschen)
-                prev = callbacks.get(stage)  # type: ignore[arg-type]
+                prev = callbacks.get(stage)
                 if prev is None or src.order() < prev.order():
-                    callbacks[stage] = src  # type: ignore[index]
+                    callbacks[stage] = src
                 continue
             out.append(src)
         out.extend(callbacks.values())
@@ -409,6 +566,8 @@ class _Builder:
                 ident = f"ip:default/{m.value}"
                 v = self.verdict(ident)
                 self.res.mention_verdicts[m.mention_id] = v
+                if self.is_own(ident):
+                    continue  # eigene Adresse von Kali: nie eine host.address-Quelle (A5)
                 if v != "in" or m.attrs.get("state") == "down":
                     continue
                 out.append(_Src(subject=ident, predicate="host.address", value=m.value, value_text=m.value,
@@ -416,10 +575,20 @@ class _Builder:
                                 confidence=BASE_CONFIDENCE["heuristic"], ts=m.ts, journal_seq=m.journal_seq,
                                 unit_id=m.unit_id, parser_id=m.parser_id, parser_version=m.parser_version,
                                 span_json=m.span_json, mention_id=m.mention_id,
-                                from_target=m.from_target, suspect=m.suspect))
+                                from_target=m.from_target, suspect=m.suspect or "marker_forged" in u.flags))
             elif m.value_type == "url":
                 self.res.mention_verdicts[m.mention_id] = self.verdict(f"url:{m.value}")
         return out
+
+    def _groups(self, sources: list[_Src]) -> None:
+        """Evidenzgruppe je Quelle; ``tool_text`` neben ``structured`` derselben Gruppe ist Nebenbeleg."""
+        for s in sources:
+            s.group = self._group(s.unit_id)
+        structured = {(s.group, s.subject, s.predicate) for s in sources
+                      if s.trust == "structured" and s.obs_id is not None}
+        for s in sources:
+            if s.trust == "tool_text" and (s.group, s.subject, s.predicate) in structured:
+                s.side = True
 
     # ------------------------------------------------------------------ Claims
     def _aggregate(self, sources: list[_Src]) -> dict[str, _Claim]:
@@ -433,6 +602,19 @@ class _Builder:
             c.sources.append(s)
         return claims
 
+    def _claim_own(self, c: _Claim) -> bool:
+        if self.is_own(host_part(c.subject)):
+            return True
+        vi = value_identifier(c.predicate, c.subject, c.value)
+        return self.is_own(vi)
+
+    def _own_mention_key(self, key: str) -> bool:
+        """Claim-Schlüssel, den eine Mention einer eigenen Adresse früher ergab (vor A5)."""
+        for a in self.own:
+            if key == claim_key(f"ip:default/{a}", "host.address", a, secret=False, project_key=self.pk):
+                return True
+        return False
+
     def _add_user_claim(self, claims: dict[str, _Claim], base: _Claim, value: Any, text: str, secret: bool,
                         d: DecisionRow) -> str:
         key = claim_key(base.subject, base.predicate, value, secret=secret or base.is_secret,
@@ -440,24 +622,43 @@ class _Builder:
         c = claims.get(key)
         if c is None:
             c = claims[key] = _Claim(key, base.subject, base.predicate, value, text, secret or base.is_secret)
+            c.own = self._claim_own(c)
         c.sources.append(_Src(subject=base.subject, predicate=base.predicate, value=value, value_text=text,
                               is_secret=c.is_secret, trust="user", auto_eligible=False, confidence=1.0,
-                              ts=d.ts, journal_seq=d.seq, decision_id=d.id))
+                              ts=d.ts, journal_seq=d.seq, decision_id=d.id, group=f"decision:{d.id}"))
         return key
 
     def _claim_decisions(self, claims: dict[str, _Claim]) -> None:
+        """``d.claim.*`` und ``d.unit.distrust`` in Reihenfolge; der spätere Entscheid gilt."""
+        known_groups = {group_of_unit(u.unit_id, u.kind, u.cmd_id) for u in self.units.values()}
         for d in self.active:
+            if d.kind == "d.unit.distrust":
+                g = d.payload.get("cmd_id")
+                if not isinstance(g, str) or g not in known_groups:
+                    self.orphans.append((d, "Befehl unbekannt", g if isinstance(g, str) else None))
+                    continue
+                self.distrusted[g] = d
+                for c in claims.values():
+                    if any(s.group == g for s in c.sources) and all(
+                            s.group in self.distrusted for s in c.sources):
+                        c.state, c.decision_id, c.lane_reason = "rejected", d.id, "distrust"
+                continue
             if d.kind not in ("d.claim.confirm", "d.claim.reject", "d.claim.edit"):
                 continue
             key = d.payload.get("claim_key")
             if not isinstance(key, str) or key not in claims:
-                self.orphans.append((d, "Claim existiert nicht mehr", key if isinstance(key, str) else None))
+                reason = ("eigene Adresse" if isinstance(key, str) and self._own_mention_key(key)
+                          else "Claim existiert nicht mehr")
+                self.orphans.append((d, reason, key if isinstance(key, str) else None))
                 continue
             c = claims[key]
+            if d.kind != "d.claim.reject" and c.own:
+                self.orphans.append((d, "eigene Adresse", key))
+                continue
             if d.kind == "d.claim.confirm":
-                c.state, c.decision_id = "confirmed", d.id
+                c.state, c.decision_id, c.lane_reason = "confirmed", d.id, "confirmed"
             elif d.kind == "d.claim.reject":
-                c.state, c.decision_id = "rejected", d.id
+                c.state, c.decision_id, c.lane_reason = "rejected", d.id, "rejected"
             else:
                 pred = PREDICATES.get(c.predicate)
                 try:
@@ -469,26 +670,79 @@ class _Builder:
                     self.orphans.append((d, "ungültiger Wert", key))
                     continue
                 new_key = self._add_user_claim(claims, c, value, text, secret, d)
+                if claims[new_key].own:
+                    self.orphans.append((d, "eigene Adresse", key))
+                    continue
                 if new_key != key:
-                    c.state, c.decision_id = "rejected", d.id
+                    c.state, c.decision_id, c.lane_reason = "rejected", d.id, "edited"
                 claims[new_key].state = "confirmed"
                 claims[new_key].decision_id = d.id
+                claims[new_key].lane_reason = "edited"
+
+    def _confidence(self, claims: dict[str, _Claim]) -> None:
+        """Innerhalb einer Evidenzgruppe zählt das Maximum, noisy-OR nur zwischen Gruppen (A3)."""
         for c in claims.values():
+            c.eff = [s for s in c.sources if s.group not in self.distrusted]
             if c.state == "confirmed":
                 c.confidence = 1.0
                 continue
-            per_unit: dict[str, float] = {}
-            for s in c.sources:
-                uk = s.unit_id or f"decision:{s.decision_id}"
-                per_unit[uk] = max(per_unit.get(uk, 0.0), s.confidence)
-            c.confidence = combine(per_unit.values())
+            per_group: dict[str, float] = {}
+            for s in c.eff or c.sources:
+                g = s.group or f"decision:{s.decision_id}"
+                per_group[g] = max(per_group.get(g, 0.0), s.confidence)
+            c.confidence = combine(per_group.values())
+
+    def _claim_host(self, c: _Claim) -> str | None:
+        """Host-Kennung, nach der sich das Scope-Urteil richtet (Konto, Secret, Hinweis:
+        der Host, auf dem beobachtet wurde; Einschluss wird nie vererbt)."""
+        t = id_type(c.subject)
+        if t == "svc":
+            return host_part(c.subject)
+        if t in HOST_TYPES or t == "url":
+            return c.subject
+        if t == "id":
+            realm = c.subject[3:].partition("|")[0]
+            if realm.startswith("local:"):
+                h = normalize_identifier(realm[6:])
+                if h is not None and id_type(h) in HOST_TYPES:
+                    return h
+            if realm.startswith("app:"):
+                return host_part(realm[4:])
+        src = next((s for s in sorted(c.eff or c.sources, key=lambda s: s.order()) if s.unit_id), None)
+        return self.ctx_host.get(src.unit_id) if src is not None and src.unit_id else None
+
+    def _scopes(self, claims: dict[str, _Claim]) -> None:
+        for c in claims.values():
+            c.scope = self.verdict(c.subject)
+            host = self._claim_host(c)
+            if host is None:
+                c.host_scope = "unknown"
+            elif id_type(host) == "ctx":
+                c.host_scope = "context"
+            elif host == LOCAL_HOST:
+                c.host_scope = "local"
+            elif id_type(c.subject) in ("svc", "url") or id_type(c.subject) in HOST_TYPES:
+                c.host_scope = c.scope or "unknown"
+            else:
+                c.host_scope = self.verdict(host) or "unknown"
+
+    def _value_ok(self, c: _Claim) -> bool:
+        """Bedingung 3: Der Wert macht keine Kennung ausserhalb des Scopes zum Ziel."""
+        vi = value_identifier(c.predicate, c.subject, c.value)
+        if vi is None:
+            return True
+        if self.is_own(vi):
+            return False
+        return id_type(vi) not in SCOPED_TYPES or self.verdict(vi) == "in"
 
     def _automode(self, claims: dict[str, _Claim]) -> None:
+        """Nur Profil customer: ``d.automode.set`` wie bisher (erste Beobachtung in einer Phase)."""
+        if self.lab:
+            return
         phases = [(d.seq, bool(d.payload.get("enabled")), tuple(d.payload.get("parsers") or ()))
                   for d in self.active if d.kind == "d.automode.set"]
         for c in claims.values():
-            c.scope = self.verdict(c.subject)
-            if c.decision_id is not None:
+            if c.decision_id is not None or c.own:
                 continue
             first = c.first_observation
             enabled, parsers = False, ()
@@ -543,19 +797,20 @@ class _Builder:
     # ------------------------------------------------------------------ Identitäten
     def _identity(self, claims: dict[str, _Claim], keysteps: list[tuple[DecisionRow, str | None]]
                   ) -> tuple[IdentityGraph, dict[str, str | None]]:
+        """Union-Find über Kennungen; eigene Adressen von Kali sind nie Teil davon (A5)."""
         live = [c for c in claims.values() if c.state != "rejected"]
         nodes: set[str] = set()
         anchors: set[str] = set()
         for c in live:
             hp = host_part(c.subject)
-            if hp is not None and id_type(hp) in HOST_TYPES:
+            if hp is not None and id_type(hp) in HOST_TYPES and not self.is_own(hp):
                 nodes.add(hp)
                 anchors.add(hp)
             vi = value_identifier(c.predicate, c.subject, c.value)
-            if vi is not None and id_type(vi) in HOST_TYPES:
+            if vi is not None and id_type(vi) in HOST_TYPES and not self.is_own(vi) and not c.own:
                 nodes.add(vi)
         for _, host in keysteps:
-            if host:
+            if host and not self.is_own(host):
                 nodes.add(host)
                 anchors.add(host)
         verdicts = {k: self.verdict(k) for k in nodes}
@@ -588,8 +843,8 @@ class _Builder:
         for c in live:
             vi = value_identifier(c.predicate, c.subject, c.value)
             hp = host_part(c.subject)
-            if vi is None or hp is None or id_type(hp) not in HOST_TYPES:
-                continue
+            if vi is None or hp is None or vi not in nodes or hp not in nodes:
+                continue  # eigene Adressen sind keine Knoten
             if id_type(vi) in STRONG_TYPES:
                 strong.append((min(s.ts for s in c.sources), c.key, hp, vi))
             elif id_type(vi) in WEAK_TYPES:
@@ -620,11 +875,18 @@ class _Builder:
 
     # ------------------------------------------------------------------ Konflikte
     def _conflicts(self, claims: dict[str, _Claim]) -> None:
+        """Widersprüche nach der Art des Prädikats (E45): ``state`` und ``version`` kennen Verlauf.
+
+        Eigene Adressen und reine Nebenbelege (Text neben der strukturierten Datei
+        desselben Laufs) erzeugen keine Widersprüche."""
         groups: dict[tuple[str, str], list[_Claim]] = defaultdict(list)
         for c in claims.values():
             p = PREDICATES.get(c.predicate)
-            if p is not None and p.cardinality == "one" and c.state != "rejected":
-                groups[(c.subject, c.predicate)].append(c)
+            if p is None or p.cardinality != "one" or c.state == "rejected" or c.own:
+                continue
+            if c.eff and all(s.side for s in c.eff):
+                continue
+            groups[(c.subject, c.predicate)].append(c)
         resolution: dict[str, DecisionRow] = {}
         for d in self.active:
             if d.kind == "d.conflict.resolve" and isinstance(d.payload.get("conflict_key"), str):
@@ -632,6 +894,13 @@ class _Builder:
         self.conflicts: dict[str, tuple[str, str, list[_Claim], str, str | None, str | None]] = {}
         for (subject, pred), cs in sorted(groups.items()):
             if len(cs) < 2:
+                continue
+            cs.sort(key=lambda c: c.key)
+            heads, history = split_heads(cs, PREDICATES[pred].nature, value=lambda c: c.value_text,
+                                         newest=lambda c: (max(s.ts for s in (c.eff or c.sources)),))
+            for c in history:
+                c.history = True
+            if len(heads) < 2:
                 continue
             ck = conflict_key(subject, pred)
             state, choice, did = "open", None, None
@@ -642,16 +911,95 @@ class _Builder:
                     state = "kept_open"
                 elif d.payload.get("choice") is not None:
                     state, choice = "resolved", str(d.payload.get("choice"))
-            cs.sort(key=lambda c: c.key)
-            for c in cs:
+            for c in heads:
                 c.conflict_key = ck
-            self.conflicts[ck] = (subject, pred, cs, state, choice, did)
+            self.conflicts[ck] = (subject, pred, heads, state, choice, did)
+
+    # ------------------------------------------------------------------ Massenfund
+    def _mass(self, claims: dict[str, _Claim]) -> None:
+        """Einheiten, die mindestens :data:`MASS_THRESHOLD` neue Hosts bringen (Honeypot, Tarpit)."""
+        first: dict[str, tuple[int, int, str]] = {}
+        for c in claims.values():
+            if c.state == "rejected" or c.entity_id is None or id_type(c.subject) not in HOST_TYPES:
+                continue
+            for s in c.sources:
+                if s.unit_id:
+                    cand = (s.ts, s.journal_seq, s.unit_id)
+                    if c.entity_id not in first or cand < first[c.entity_id]:
+                        first[c.entity_id] = cand
+        counts: dict[str, int] = defaultdict(int)
+        for _, _, unit_id in first.values():
+            counts[unit_id] += 1
+        self.mass_units = {u: n for u, n in counts.items() if n >= MASS_THRESHOLD}
+
+    # ------------------------------------------------------------------ Spuren
+    def _lanes(self, claims: dict[str, _Claim]) -> None:
+        for c in claims.values():
+            if c.decision_id is not None:
+                c.lane = "user"
+                continue
+            if not self.lab:
+                c.lane, c.lane_reason = self._customer_lane(c)
+                continue
+            c.lane, c.lane_reason = self._lab_lane(c)
+            c.state = "auto" if c.lane == "auto" else "candidate"
+
+    def _customer_lane(self, c: _Claim) -> tuple[str, str]:
+        p = PREDICATES.get(c.predicate)
+        if c.state == "auto":
+            return "auto", "automode"
+        if c.own:
+            return "quiet", "own_address"
+        if p is not None and p.inbox and c.state == "candidate":
+            return "decide", "inbox"
+        return "quiet", "not_inbox"
+
+    def _lab_lane(self, c: _Claim) -> tuple[str, str]:
+        """Spur im Profil lab (Reihenfolge der Prüfungen ist Teil der Regel)."""
+        eff = c.eff or c.sources
+        p = PREDICATES.get(c.predicate)
+        if c.own:
+            return "quiet", "own_address"
+        if c.history:
+            return "quiet", "history"
+        if c.host_scope == "context":
+            return "decide", "context"
+        if c.host_scope == "local":
+            return "quiet", "local"
+        if c.host_scope != "in":
+            return "quiet", "out_of_scope"
+        if all(s.side for s in eff):
+            return "quiet", "side"
+        if any(_system_account(s.attrs) for s in eff) and id_type(c.subject) == "id":
+            return "quiet", "system_account"
+        if c.conflict_key is not None and self.conflicts[c.conflict_key][3] == "open":
+            return "decide", "conflict"
+        if any(s.unit_id in self.mass_units for s in eff):
+            return "decide", "mass"
+        if any(s.suspect for s in eff):
+            return "decide", "suspect"
+        if (c.predicate.startswith(("identity.", "secret.")) and any(s.from_target for s in eff)):
+            return "decide", "offered"
+        eligible = any(s.obs_id is not None and s.auto_eligible and s.trust in _ELIGIBLE_TRUST for s in eff)
+        value_ok = self._value_ok(c)
+        if eligible and value_ok:
+            return "auto", "parser"
+        if not value_ok:
+            return "quiet", "out_of_scope"
+        best = min(eff, key=lambda s: TRUST_ORDER.get(s.trust, 9)).trust
+        if best in ("ai", "ocr"):
+            return "decide", best
+        if best == "heuristic" and p is not None and p.important:
+            return "decide", "important_heuristic"
+        if all(s.mention_id is not None for s in eff):
+            return "quiet", "mention"
+        if best == "heuristic":
+            return "quiet", "heuristic"
+        return "quiet", "parser"
 
     # ------------------------------------------------------------------ Entitäten
     def _entities(self, claims: dict[str, _Claim], keysteps: list[tuple[DecisionRow, str | None]],
                   entity_of: dict[str, str | None], g: IdentityGraph) -> None:
-        for c in claims.values():
-            c.entity_id = self._entity_for(c.subject, entity_of)
         live = [c for c in claims.values() if c.state != "rejected"]
         ents: dict[str, dict[str, Any]] = {}
 
@@ -820,12 +1168,13 @@ class _Builder:
         cands = [c for c in cs if c.predicate == pred]
         if not cands:
             return None
-        return min(cands, key=lambda c: (STATE_RANK[c.state], -c.confidence, c.value_text))
+        return min(cands, key=lambda c: (STATE_RANK[c.state], c.history, -c.confidence, c.value_text))
 
     def _host_attrs(self, eid: str, cs: list[_Claim], members: list[str], services: int, conflicts: int
                     ) -> dict[str, Any]:
         addrs = {m.split("/", 1)[1] for m in members if id_type(m) == "ip"}
-        addrs |= {c.value for c in cs if c.predicate == "host.address" and isinstance(c.value, str)}
+        addrs |= {c.value for c in cs if c.predicate == "host.address" and isinstance(c.value, str)
+                  and not c.own}
         names = sorted({c.value for c in cs if c.predicate == "host.name" and isinstance(c.value, str)})
         macs = sorted({c.value for c in cs if c.predicate == "host.mac" and isinstance(c.value, str)})
         os_claim = self._best(cs, "host.os")
@@ -857,7 +1206,7 @@ class _Builder:
             so = d.payload.get("stream_off")
             self.res.keysteps.append((d.seq, d.id, str(d.payload.get("step")), host, eid,
                                       d.payload.get("terminal_id"), so if isinstance(so, int) else None,
-                                      d.payload.get("note"), d.ts))
+                                      d.payload.get("note"), d.ts, d.mono, d.boot))
 
     # ------------------------------------------------------------------ Inbox
     def _payload_value(self, c: _Claim) -> Any:
@@ -865,50 +1214,60 @@ class _Builder:
             return MASK
         return c.value if not isinstance(c.value, Mapping) else c.value_text
 
+    def _unit_info(self, unit_id: str) -> tuple[dict[str, Any], str, int]:
+        u = self.units[unit_id]
+        title = u.title or u.path or ("Segment" if u.kind == "segment" else u.kind)
+        info = {"unit_id": unit_id, "cmd_id": u.cmd_id, "terminal_id": u.terminal_id, "kind": u.kind,
+                "title": title, "group": group_of_unit(u.unit_id, u.kind, u.cmd_id)}
+        return info, title, u.ts
+
+    def _value_payload(self, c: _Claim, unit_info: dict[str, Any]) -> dict[str, Any]:
+        first = c.first_eff
+        return {
+            "claim_key": c.key, "subject": c.subject, "subject_label": display(c.subject),
+            "entity_id": c.entity_id, "predicate": c.predicate, "value": self._payload_value(c),
+            "confidence": c.confidence, "confidence_level": confidence_level(c.confidence),
+            "scope": c.scope or "unknown", "host_scope": c.host_scope, "trust": c.strongest().trust,
+            "parser": first.parser_id, "ai": any(s.trust in ("ai", "ocr") for s in c.sources),
+            "from_target": any(s.from_target for s in c.sources),
+            "suspect": any(s.suspect for s in c.sources), "state": c.state, "unit": unit_info,
+            "lane": c.lane, "reason": c.lane_reason, "own_address": c.own,
+        }
+
     def _inbox(self, claims: dict[str, _Claim], g: IdentityGraph) -> None:
         items = self.res.inbox
-        # Kandidaten pro Einheit
         by_unit: dict[str, list[_Claim]] = defaultdict(list)
         for c in claims.values():
-            p = PREDICATES.get(c.predicate)
-            if c.state != "candidate" or p is None or not p.inbox:
+            if c.lane != "decide":
                 continue
-            first = c.first
-            if first.unit_id is None:
+            if self.lab and c.lane_reason not in DECIDE_VALUE_REASONS:
+                continue  # Konflikte, Kontexte und Massenfunde: ein Eintrag pro Konflikt/Kontext/Einheit
+            first = c.first_eff
+            if first.unit_id is None or first.unit_id in self.mass_units:
                 continue
             by_unit[first.unit_id].append(c)
-        new_hosts: dict[str, int] = defaultdict(int)
-        for eid, fu in self.entity_first_unit.items():
-            if fu is not None and self.entity_meta[eid]["type"] == "host":
-                new_hosts[fu] += 1
+        kind = "decide_value" if self.lab else "candidate_group"
         for unit_id in sorted(by_unit):
-            u = self.units[unit_id]
+            info, title, ts = self._unit_info(unit_id)
             cs = sorted(by_unit[unit_id], key=lambda c: (c.subject, c.predicate, c.value_text))
-            title = u.title or u.path or ("Segment" if u.kind == "segment" else u.kind)
-            unit_info = {"unit_id": unit_id, "cmd_id": u.cmd_id, "terminal_id": u.terminal_id,
-                         "kind": u.kind, "title": title}
-            if new_hosts.get(unit_id, 0) >= MASS_THRESHOLD:
-                items.append((f"mass:{unit_id}", "mass_find", f"mass:{unit_id}", title, _dumps({
-                    "unit": unit_info, "hosts": new_hosts[unit_id], "candidates": len(cs),
-                    "hint": "möglicher Honeypot oder Tarpit",
-                }), "open", u.ts))
-                continue
             summary = _summary(cs)
             for c in cs:
-                first = c.first
-                items.append((f"claim:{c.key}", "candidate_group", f"unit:{unit_id}", title, _dumps({
-                    "claim_key": c.key, "subject": c.subject, "subject_label": display(c.subject),
-                    "entity_id": c.entity_id, "predicate": c.predicate, "value": self._payload_value(c),
-                    "confidence": c.confidence, "confidence_level": confidence_level(c.confidence),
-                    "scope": c.scope or "unknown", "trust": c.strongest().trust, "parser": first.parser_id,
-                    "ai": any(s.trust == "ai" for s in c.sources),
-                    "from_target": any(s.from_target for s in c.sources),
-                    "suspect": any(s.suspect for s in c.sources), "state": c.state, "unit": unit_info,
-                    "summary": summary,
-                }), "open", u.ts))
-        # Konflikte
+                payload = self._value_payload(c, info)
+                payload["summary"] = summary
+                items.append((f"claim:{c.key}", kind, f"unit:{unit_id}", title, _dumps(payload), "open", ts))
+        # Massenfunde: ein Eintrag pro Einheit
+        for unit_id in sorted(self.mass_units):
+            info, title, ts = self._unit_info(unit_id)
+            n = sum(1 for c in claims.values() if c.lane == "decide" and c.first_eff.unit_id == unit_id)
+            items.append((f"mass:{unit_id}", "mass_find", f"mass:{unit_id}", title, _dumps({
+                "unit": info, "hosts": self.mass_units[unit_id], "candidates": n,
+                "hint": "möglicher Honeypot oder Tarpit",
+            }), "open", ts))
+        # Konflikte (lab: nur solche, die zum Entscheiden gehören)
         for ck, (subject, pred, cs, state, _choice, _did) in sorted(self.conflicts.items()):
             if state != "open":
+                continue
+            if self.lab and not any(c.lane == "decide" and c.lane_reason == "conflict" for c in cs):
                 continue
             values = [{"claim_key": c.key, "value": self._payload_value(c), "sources": len(c.sources),
                        "trust": c.strongest().trust, "state": c.state} for c in cs]
@@ -963,8 +1322,27 @@ class _Builder:
                 payload["claim_key"] = cb.key
             self.res.inbox.append((f"ctx:{term}@{off}", kind, f"ctx:{term}@{off}", "Kontext klären",
                                    _dumps(payload), "open", us[0].ts))
+        if not self.lab:
+            return
+        # Einheiten ohne Terminal (Dateien in loot/, Importe ohne Host): ein Eintrag pro Einheit
+        per_unit: dict[str, int] = defaultdict(int)
+        for c in claims.values():
+            hp = host_part(c.subject) or ""
+            if c.state != "rejected" and hp.startswith("ctx:unit:"):
+                per_unit[hp[len("ctx:unit:"):]] += 1
+        for unit_id in sorted(per_unit):
+            u = self.units.get(unit_id)
+            if u is None:
+                continue
+            info, title, ts = self._unit_info(unit_id)
+            placeholder = f"ctx:unit:{unit_id}"
+            self.res.inbox.append((placeholder, "ctx_unknown", placeholder, "Kontext klären", _dumps({
+                "unit": info, "path": u.path, "kind": u.ctx_kind, "values": per_unit[unit_id],
+                "placeholder": placeholder,
+                "placeholder_entity": placeholder if placeholder in self.entity_ids else None,
+            }), "open", ts))
 
-    # ------------------------------------------------------------------ Claims schreiben
+    # ------------------------------------------------------------------ Schreiben
     def _write_claims(self, claims: dict[str, _Claim]) -> None:
         for key in sorted(claims):
             c = claims[key]
@@ -981,14 +1359,35 @@ class _Builder:
                 int(any(s.from_target for s in srcs)), strongest.trust,
                 strongest.parser_id or ("user" if strongest.trust == "user" else None), len(srcs),
                 int(c.is_secret), int(any(s.suspect for s in srcs)), c.scope, c.decision_id,
+                c.lane, c.lane_reason, c.group_key, int(c.history),
             ))
             for s in srcs:
                 self.res.claim_sources.append((c.key, s.obs_id, s.mention_id, s.decision_id, s.unit_id,
                                                s.parser_id, s.parser_version, s.trust, s.confidence,
-                                               s.span_json, s.journal_seq, s.ts))
+                                               s.span_json, s.journal_seq, s.ts, s.group or None,
+                                               int(s.side), int(s.group in self.distrusted)))
         for ck, (subject, pred, cs, state, choice, did) in sorted(self.conflicts.items()):
             self.res.conflicts.append((ck, subject, cs[0].entity_id, pred, _dumps([c.key for c in cs]), state,
                                        choice, did))
+
+    def _write_ctx_auto(self, claims: dict[str, _Claim]) -> None:
+        by_obs = {s.obs_id: c.key for c in claims.values() for s in c.sources
+                  if s.obs_id is not None and c.predicate == "access.callback"}
+        for (term, opened_at), (host, obs_id) in sorted(self.auto_ctx.items()):
+            self.res.ctx_auto.append((term, opened_at, host, by_obs.get(obs_id)))
+
+    def _write_distrust(self, claims: dict[str, _Claim]) -> None:
+        for cmd, d in sorted(self.distrusted.items()):
+            rejected = sum(1 for c in claims.values() if c.decision_id == d.id and c.state == "rejected")
+            weakened = sum(1 for c in claims.values() if c.state != "rejected"
+                           and any(s.group == cmd for s in c.sources))
+            self.res.distrust.append((cmd, d.id, rejected, weakened))
+
+
+def _system_account(attrs: Mapping[str, str]) -> bool:
+    """Systemkonto: uid 1 bis 999 (Parser liefern ``uid`` als Attribut, z. B. aus passwd)."""
+    uid = attrs.get("uid") if attrs else None
+    return isinstance(uid, str) and uid.isdigit() and 0 < int(uid) < 1000
 
 
 def _progress(knowledge: str | None, access: str | None) -> int:

@@ -105,6 +105,8 @@ class Unit:
     flags: tuple[str, ...] = ()  # partial, truncated, gap, altscreen, binary, too_large
     state: str = "final"  # open | provisional | final
     data: bytes | None = field(default=None, repr=False, compare=False)
+    mono_ns: int | None = None  # monotone Uhr des Shims am Anfang (E96), nicht für Parser
+    boot_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in _KINDS:

@@ -1,6 +1,11 @@
 """Redaktor für eigene Secrets (Architektur 8.5). Es gibt genau diesen einen.
 
-Läuft im Writer des Daemons, vor Hash und Persistenz. Der Shim bekommt keine
+**Seit E72 (2026-10-15)** speichert das Journal alles ungeschwärzt (nur
+verschlüsselt). Eigene Secrets ersetzt der Redaktor an den Ausgängen: vor der
+KI, beim Export, im Bericht und in den Ansichten (CLI, Web-UI, E99). Jeder
+Ausgang ruft :meth:`Redactor.redact_for_exit` bzw. :meth:`Redactor.redact_json`
+auf der Instanz des Daemons auf. Die Strom-API (``feed``/``flush``/``pending``)
+stammt aus der Zeit des Schwärzens vor dem Speichern. Der Shim bekommt keine
 Secret-Liste.
 
 * Gesucht wird nach jedem eigenen Secret wörtlich, URL-kodiert und
@@ -30,12 +35,14 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import quote, quote_plus
 
 from ariadne.events import Redaction
 
 __all__ = [
     "Redactor",
+    "EXIT_LABELS",
     "Chunk",
     "Hit",
     "OutgoingWarning",
@@ -45,6 +52,7 @@ __all__ = [
 ]
 
 FILL = 0x2A  # '*'
+EXIT_LABELS = 64  # höchstens so viele verschiedene Labels pro Aufruf melden
 MAX_ESC = 8192  # längere Sequenzen gelten als Text (wie im Shim, Architektur 3.8)
 
 # Vollständige Sequenzen: CSI, OSC (BEL oder ST), DCS/SOS/PM/APC (ST), sonstige ESC-Folgen.
@@ -356,6 +364,57 @@ class Redactor:
     def scan_outgoing(self, text: str) -> tuple[list[Hit], list[OutgoingWarning]]:
         """Eigene Treffer und generische Warnungen vor Export oder KI-Aufruf (siehe :func:`scan_outgoing`)."""
         return scan_outgoing(text, self)
+
+    # ------------------------------------------------------------------ #
+    # Ausgangs-API (E72)
+    # ------------------------------------------------------------------ #
+    def redact_for_exit(self, data: str | bytes) -> tuple[str | bytes, list[str]]:
+        """Ersetzt eigene Secrets vor einem Ausgang (KI, Export, Bericht, Ansicht).
+
+        Nur exakte Treffer der eigenen Liste (wörtlich, URL- und JSON-kodiert, auch
+        zerstückelt durch Escape-Sequenzen), längenerhaltend in Bytes durch ``*``;
+        bei ``str`` wird über die UTF-8-Bytes gesucht und ersetzt. Gibt den
+        ersetzten Wert (gleicher Typ) und die sortierten Labels der Treffer zurück.
+        Ohne eigene Secrets kommt der Wert unverändert zurück.
+        """
+        if isinstance(data, str):
+            if not self._patterns or not data:
+                return data, []
+            raw = data.encode("utf-8", "surrogateescape")
+            out, labels = self._fill_hits(raw)
+            return out.decode("utf-8", "surrogateescape"), labels
+        if not self._patterns or not data:
+            return bytes(data), []
+        return self._fill_hits(bytes(data))
+
+    def redact_json(self, obj: Any) -> tuple[Any, list[str]]:
+        """:meth:`redact_for_exit` auf alle Strings in Listen, Tupeln und Dicts (nur Werte,
+        keine Schlüssel). Gibt eine Kopie und die Labels zurück; andere Typen bleiben."""
+        labels: set[str] = set()
+
+        def walk(v: Any) -> Any:
+            if isinstance(v, str | bytes):
+                out, hit = self.redact_for_exit(v)
+                labels.update(hit)
+                return out
+            if isinstance(v, dict):
+                return {k: walk(x) for k, x in v.items()}
+            if isinstance(v, list | tuple):
+                return type(v)(walk(x) for x in v)
+            return v
+
+        if not self._patterns:
+            return obj, []
+        return walk(obj), sorted(labels)[:EXIT_LABELS]
+
+    def _fill_hits(self, raw: bytes) -> tuple[bytes, list[str]]:
+        hits = self.scan(raw)
+        if not hits:
+            return raw, []
+        out = bytearray(raw)
+        for h in hits:
+            out[h.start:h.end] = bytes([FILL]) * (h.end - h.start)
+        return bytes(out), sorted({h.label for h in hits})[:EXIT_LABELS]
 
     # ------------------------------------------------------------------ #
     def redact_text(self, text: str, *, truncated: bool = False) -> tuple[str, list[str]]:

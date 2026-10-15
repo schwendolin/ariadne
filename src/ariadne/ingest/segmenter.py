@@ -16,7 +16,10 @@ Regeln:
   ``partial`` (REC begann mitten im Befehl, D ohne C), ``truncated`` (ohne D
   beendet), ``gap`` (Lücke im Strom). Eine Lücke mit verlorenen Bytes (ausser
   ``sensitive_output`` und ``multiplexer``) beendet den laufenden Befehl als
-  ``truncated``: In ihr können Marker fehlen.
+  ``truncated``: In ihr können Marker fehlen. Pausen des Nutzers (``pause``) und
+  Zeit ohne Projekt (``no_project``) beenden ihn immer, auch ohne verlorene Bytes.
+* Zeiten (E96): ``SegEvent.ts`` ist die Wanduhr des Shims (``events.shim_time``),
+  ``SegEvent.mono`` seine monotone Uhr und ``SegEvent.boot`` der Systemstart.
 * Der Kontext wird mit ``ariadne.ctxrules.ContextStack`` nachgespielt, sortiert
   nach (Offset, seq): Schnappschuss ersetzt den Stapel, C ->
   ``on_command_start``, D -> ``on_command_end``, ``d.ctx.push``/``pop``.
@@ -53,6 +56,7 @@ __all__ = [
     "SEG_KINDS",
     "LOCAL_KINDS",
     "KEEPS_MARKERS",
+    "ENDS_COMMAND",
     "compute_layout",
     "event_offset",
     "unit_id_for",
@@ -66,6 +70,8 @@ LOCAL_KINDS = frozenset({"local", "su"})
 # Lücken, in denen keine Marker der Shell fehlen (die Shell lief weiter im Hintergrund bzw.
 # die Pause endet am nächsten Marker): der laufende Befehl gilt weiter.
 KEEPS_MARKERS = frozenset({"sensitive_output", "multiplexer"})
+# Lücken, die einen laufenden Befehl immer beenden (auch mit bytes_lost = 0).
+ENDS_COMMAND = frozenset({"pause", "no_project"})
 _INF = 1 << 62
 
 
@@ -77,6 +83,8 @@ class SegEvent:
     ts: int
     header: Mapping[str, Any]
     operator_id: str | None = None
+    mono: int | None = None  # monotone Uhr des Shims beim Lesen (E96)
+    boot: str | None = None  # boot_id, in dem ``mono`` gilt
 
 
 def event_offset(kind: str, header: Mapping[str, Any]) -> int | None:
@@ -113,6 +121,9 @@ class CmdBlock:
     d_seq: int | None = None
     ctx: tuple[dict[str, Any], ...] = ()  # Stapel vor dem C-Marker
     companions: tuple[str, ...] = ()  # Dateien, die der Befehl laut Parsern schreibt (nur lokal)
+    mono_start: int | None = None
+    mono_end: int | None = None
+    boot: str | None = None
 
     @property
     def local(self) -> bool:
@@ -134,6 +145,7 @@ class CmdBlock:
             "ts_start_ns": self.ts_start, "ts_end_ns": self.ts_end,
             "flags": json.dumps(sorted(self.flags)), "ctx": json.dumps(list(self.ctx), ensure_ascii=False),
             "companions": json.dumps(list(self.companions), ensure_ascii=False),
+            "mono_ns": self.mono_start, "boot_id": self.boot,
         }
 
 
@@ -228,9 +240,10 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
     seg_start: int | None = None
     rec_start: int | None = None
 
-    def close(b: CmdBlock, off: int, flag: str | None, ts: int) -> None:
+    def close(b: CmdBlock, off: int, flag: str | None, ev: SegEvent) -> None:
         b.end_off = max(off, b.c_off)
-        b.ts_end = ts
+        b.ts_end = ev.ts
+        b.mono_end = ev.mono if ev.boot == b.boot else None
         if flag:
             b.flags.add(flag)
 
@@ -245,13 +258,14 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
             continue
         if ev.kind == "term.gap":
             lost = _int(h.get("bytes_lost")) or 0
-            if lost > 0 and h.get("reason") not in KEEPS_MARKERS and ev.off is not None:
+            ends = lost > 0 or h.get("reason") in ENDS_COMMAND
+            if ends and h.get("reason") not in KEEPS_MARKERS and ev.off is not None:
                 # In der Lücke können Marker fehlen (REC aus, Überlauf, Daemon weg): Der
                 # laufende Befehl endet hier. Ein späterer D ohne C wird ``partial``,
                 # statt Exit-Code und Ende eines anderen Befehls zu übernehmen.
                 if cur is not None:
                     cur.flags.add("gap")
-                    close(cur, ev.off, "truncated", ev.ts)
+                    close(cur, ev.off, "truncated", ev)
                     cur = None
                 seg_start = ev.off + lost
                 since_start = False
@@ -261,7 +275,7 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
             continue
         if ev.kind == "term.close":
             if cur is not None and ev.off is not None:
-                close(cur, ev.off, "truncated", ev.ts)
+                close(cur, ev.off, "truncated", ev)
                 cur = None
             continue
         if ev.kind != "term.mark" or ev.off is None:
@@ -270,12 +284,12 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
         fg = h.get("fg_shell") is True
         if mark == "C":
             if cur is not None:
-                close(cur, ev.off, "truncated", ev.ts)
+                close(cur, ev.off, "truncated", ev)
             text = _str(h.get("cmd_expanded")) or _str(h.get("cmd_typed"))
             cur = CmdBlock(
                 cmd_id=make_cmd_id(tid, ev.off), terminal_id=tid, c_off=ev.off, prompt_off=first_a,
                 text=text, typed=_str(h.get("cmd_typed")), cwd=_str(h.get("cwd")), user=_str(h.get("user")),
-                ts_start=ev.ts, operator_id=ev.operator_id, c_seq=ev.seq,
+                ts_start=ev.ts, operator_id=ev.operator_id, c_seq=ev.seq, mono_start=ev.mono, boot=ev.boot,
             )
             blocks.append(cur)
             first_a = None
@@ -284,7 +298,8 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
             b = cur
             if b is None and not since_start and seg_start is not None and ev.off > seg_start:
                 b = CmdBlock(cmd_id=make_cmd_id(tid, seg_start), terminal_id=tid, c_off=seg_start,
-                             ts_start=ev.ts, operator_id=ev.operator_id, c_seq=ev.seq, flags={"partial"})
+                             ts_start=ev.ts, operator_id=ev.operator_id, c_seq=ev.seq, flags={"partial"},
+                             mono_start=ev.mono, boot=ev.boot)
                 blocks.append(b)
             if b is not None:
                 b.d_off = ev.off
@@ -297,13 +312,13 @@ def _blocks(tid: str, events: Sequence[SegEvent]) -> tuple[list[CmdBlock], int |
                     b.text = _str(h.get("cmd_expanded")) or _str(h.get("cmd_typed"))
                     b.typed = b.typed or _str(h.get("cmd_typed"))
                 b.cwd = b.cwd or _str(h.get("cwd"))
-                close(b, ev.off, None, ev.ts)
+                close(b, ev.off, None, ev)
             cur = None
             first_a = None
             since_start = True
         elif mark == "A" and fg:
             if cur is not None:
-                close(cur, ev.off, "truncated", ev.ts)
+                close(cur, ev.off, "truncated", ev)
                 cur = None
             if first_a is None:
                 first_a = ev.off

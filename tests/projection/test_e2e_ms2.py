@@ -22,7 +22,7 @@ def _ms2(p):
 
 
 def test_text_and_xml_merge_without_conflicts():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")
     _ms2(p)
     p.rebuild()
     assert rows(conn, "SELECT COUNT(*) FROM conflict") == [(0,)]
@@ -47,7 +47,7 @@ def test_text_and_xml_merge_without_conflicts():
 
 
 def test_automode_adopts_nmap_xml_only():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")
     p.apply_decision(dec(5, "d.automode.set", enabled=True, parsers=["nmap.xml"]))
     _ms2(p)
     p.rebuild()
@@ -58,7 +58,7 @@ def test_automode_adopts_nmap_xml_only():
 
 
 def test_listener_to_foothold_flow():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")  # lab setzt den Kontext selbst (test_ausw_*)
     _ms2(p)
     seg = make_unit(
         "listening on [any] 4444 ...\n"

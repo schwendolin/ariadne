@@ -12,7 +12,16 @@
 * Scope aus dem jüngsten ``d.scope.update`` (``OpenProject.settings``); nach
   einer Änderung neuer ``ScopeMatcher`` und vollständige Neuberechnung.
 * ``system.redaction`` (FTS enthält Klartext) und ``ariadne reparse`` bauen eine
-  neue ``derived.db`` und tauschen sie atomar.
+  neue ``derived.db`` und tauschen sie atomar. Ebenso eine ``derived.db`` mit
+  älterem Schema (``ingest.db.schema_stale``), bevor die erste Abfrage läuft.
+* Profil des Projekts (``project.info.profile``) geht an die Projektion
+  (Drei-Spuren-Regel im Profil lab, E42).
+
+* Listener (:meth:`IngestService.add_listener`): Nach jedem erfolgreichen Durchgang
+  meldet die Auswertung im Loop-Thread ein :class:`IngestUpdate`, unter anderem die
+  automatischen Kontexte aus dem ersten Callback (E23). Der Daemon setzt damit den
+  Host der Stufe im Live-Stapel (``ContextStack.set_auto_host``); ins Journal kommt
+  davon nichts.
 
 Fehler werden nur mit ihrer Klasse geloggt und stoppen nie den Daemon.
 """
@@ -30,8 +39,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from ariadne.ingest import queries
-from ariadne.ingest.db import set_meta
-from ariadne.ingest.pipeline import Interrupted, Pipeline, Stats
+from ariadne.ingest.db import get_meta, schema_stale, set_meta
+from ariadne.ingest.pipeline import REPARSE_PENDING, Interrupted, Pipeline, Stats
 from ariadne.ingest.runner import Runner, SubprocessRunner
 from ariadne.scope.matcher import ScopeMatcher
 from ariadne.store.api import EventRecord
@@ -40,13 +49,35 @@ from ariadne.store.journal import JournalReader
 if TYPE_CHECKING:
     from ariadne.project.service import OpenProject
 
-__all__ = ["IngestService", "REPARSE_NAME"]
+__all__ = ["IngestService", "REPARSE_NAME", "AutoContext", "IngestUpdate", "Listener"]
 
 log = logging.getLogger("ariadne.ingest")
 
 REPARSE_NAME = "derived.reparse.db"
 OLD_NAME = "derived.old.db"
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class AutoContext:
+    """Automatischer Kontext einer Stufe (E23): erster Callback auf eine Listener-Stufe,
+    IP im Scope, nicht Loopback, kein Entscheid des Nutzers für diese Stufe."""
+
+    terminal_id: str
+    opened_at: int  # Offset, an dem die Stufe begann (wie Stage.opened_at)
+    host: str  # Kennung "ip:default/<ip>"
+
+
+@dataclass(frozen=True)
+class IngestUpdate:
+    """Ergebnis eines Durchgangs für Listener. ``auto_contexts`` ist jeweils die
+    vollständige aktuelle Liste (nicht nur neue Einträge)."""
+
+    generation: int | None
+    auto_contexts: tuple[AutoContext, ...] = ()
+
+
+Listener = Callable[[IngestUpdate], None]
 
 
 @dataclass
@@ -118,6 +149,7 @@ class IngestService:
         self._stopping = threading.Event()
         self.runs = 0
         self.last_error: str | None = None
+        self._listeners: list[Listener] = []
 
     # ------------------------------------------------------------------ Lebenszyklus (Loop-Thread)
     def attach(self, project: OpenProject) -> None:
@@ -151,6 +183,28 @@ class IngestService:
             ex.shutdown(wait=True, cancel_futures=False)
         self.project = None
         self._queued = False
+
+    def add_listener(self, fn: Listener) -> None:
+        """``fn(update)`` nach jedem erfolgreichen Durchgang, im Loop-Thread aufgerufen."""
+        self._listeners.append(fn)
+
+    def _publish(self, update: IngestUpdate) -> None:
+        """Aus dem Thread der Auswertung: Listener im Loop-Thread aufrufen."""
+        loop = self._loop
+        if loop is None or not self._listeners:
+            return
+
+        def call() -> None:
+            for fn in list(self._listeners):
+                try:
+                    fn(update)
+                except Exception as exc:  # ein Listener stoppt die Auswertung nie
+                    log.error("Listener der Auswertung fehlgeschlagen (%s)", type(exc).__name__)
+
+        try:
+            loop.call_soon_threadsafe(call)
+        except RuntimeError:
+            pass  # Loop beendet
 
     @property
     def active(self) -> bool:
@@ -232,13 +286,17 @@ class IngestService:
             try:
                 journal = JournalReader(jconn)
                 blobs = p.blobs.with_connection(jconn)
+                scope = ScopeMatcher.from_settings(settings, version)
                 conn = p.connect_derived()
                 try:
-                    scope = ScopeMatcher.from_settings(settings, version)
+                    if schema_stale(conn):
+                        conn.close()
+                        self._rebuild_stale(p, journal, blobs, scope)
+                        conn = p.connect_derived()
                     assert self._runner is not None
                     pipe = Pipeline(journal, blobs, conn, project_key=p.project_key, scope=scope,
                                     runner=self._runner, registry=self._registry,
-                                    should_stop=self._stopping.is_set)
+                                    should_stop=self._stopping.is_set, profile=self._profile(p))
                 except BaseException:
                     conn.close()
                     raise
@@ -255,6 +313,50 @@ class IngestService:
             st.conn.commit()
             st.scope_version = version
         return st
+
+    @staticmethod
+    def _profile(p: OpenProject) -> str:
+        profile = getattr(p.info, "profile", "lab")
+        return profile if profile in ("lab", "customer") else "lab"
+
+    def _rebuild_stale(self, p: OpenProject, journal: Any, blobs: Any, scope: Any) -> None:
+        """``derived.db`` mit älterem Schema: aus dem Journal neu bauen und atomar tauschen."""
+        vault = p.info.vault
+        _remove_db_files(vault, REPARSE_NAME)
+        new_conn = p.connect_derived(name=REPARSE_NAME)
+        try:
+            assert self._runner is not None
+            pipe = Pipeline(journal, blobs, new_conn, project_key=p.project_key, scope=scope,
+                            runner=self._runner, registry=self._registry, should_stop=self._stopping.is_set,
+                            profile=self._profile(p))
+            pipe.process_new()
+            set_meta(new_conn, REPARSE_PENDING, "0")
+            new_conn.commit()
+            new_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                new_conn.close()
+            _remove_db_files(vault, REPARSE_NAME)
+            raise
+        new_conn.close()
+        _shred_db_files(vault, "derived.db", OLD_NAME)
+        os.replace(vault / REPARSE_NAME, vault / "derived.db")
+        _remove_db_files(vault, REPARSE_NAME, main=False)
+        _shred_db_files(vault, OLD_NAME)
+        log.info("derived.db mit neuem Schema neu aufgebaut")
+
+    def _publish_state(self, st: _ThreadState) -> None:
+        """Meldet Generation und Auto-Kontexte an die Listener (aus dem Thread der Auswertung)."""
+        if not self._listeners:
+            return
+        try:
+            gen_raw = get_meta(st.conn, "generation")
+            rows = queries.auto_contexts(st.conn)
+        except Exception as exc:
+            log.error("Auto-Kontexte nicht lesbar (%s)", type(exc).__name__)
+            return
+        gen = int(gen_raw) if gen_raw is not None and gen_raw.isdigit() else None
+        self._publish(IngestUpdate(gen, tuple(AutoContext(t, o, h) for t, o, h in rows)))
 
     def _drop_state(self) -> None:
         st, self._state = self._state, None
@@ -276,6 +378,8 @@ class IngestService:
                 log.info("Redaktion: derived.db wird neu aufgebaut")
                 self._reparse_job(snap)
             self.last_error = None
+            if self._state is not None:
+                self._publish_state(self._state)
             return stats
         except Interrupted:
             log.info("Auswertung abgebrochen (Projekt wird geschlossen)")
@@ -320,6 +424,7 @@ class IngestService:
         os.replace(vault / REPARSE_NAME, vault / "derived.db")
         _remove_db_files(vault, REPARSE_NAME, main=False)
         _shred_db_files(vault, OLD_NAME)
-        self._ensure(snap)
+        st = self._ensure(snap)
         log.info("derived.db neu aufgebaut")
+        self._publish_state(st)
         return diff

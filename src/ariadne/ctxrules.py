@@ -12,6 +12,10 @@ Grundsätze:
 * Nur gültige D-Marker (Nonce und Vordergrund geprüft) schliessen Stufen.
   Exit-Code 148 (Ctrl-Z) hält aktive Stufen nur an, ``fg`` holt sie zurück.
 * Hosts sind eingegebene Kennungen, nie aufgelöste IDs.
+* Ein Host, den die Auswertung aus dem ersten Callback setzt (E23), trägt
+  ``host_source="auto"``. Er ist ein Ergebnis der Projektion, kein Entscheid:
+  :meth:`ContextStack.journal_snapshot` lässt ihn weg, damit er nie ins Journal
+  kommt; die Anzeige hängt ``(auto)`` an.
 """
 
 from __future__ import annotations
@@ -50,6 +54,7 @@ class Stage:
     state: str = "active"  # active | suspended
     source: str = "auto"  # auto | hotkey | webui | cli | suggestion
     candidate: str | None = None
+    host_source: str | None = None  # "auto": Host aus der Auswertung (nie im Journal)
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -455,6 +460,19 @@ class ContextStack:
     def snapshot(self) -> list[dict]:
         return [s.to_dict() for s in self.stages]
 
+    def journal_snapshot(self) -> list[dict]:
+        """Wie :meth:`snapshot`, aber ohne automatisch gesetzte Hosts (``host_source="auto"``).
+
+        Alles, was einen Stapel ins Journal schreibt (``term.ctx_snapshot``), nimmt
+        diese Form: Der Auto-Host ist abgeleitet und wird beim Reparse neu berechnet.
+        """
+        out = []
+        for st in self.stages:
+            if st.host_source == "auto":
+                st = replace(st, host=None, host_source=None)
+            out.append(st.to_dict())
+        return out
+
     @classmethod
     def from_snapshot(cls, data: Iterable[dict]) -> ContextStack:
         stages = [Stage.from_dict(d) for d in data]
@@ -540,7 +558,27 @@ class ContextStack:
             user=user if user is not None else st.user,
             kind=kind or st.kind,
             source=source,
+            host_source=None if host is not None else st.host_source,
         )
+
+    def set_auto_host(self, opened_at: int, host: str) -> bool:
+        """Host aus der Auswertung für die Stufe mit ``opened_at`` setzen (E23).
+
+        Wirkt nur auf eine Stufe über Kali ohne Host oder mit einem früheren Auto-Host;
+        ein Host des Nutzers (Hotkey, CLI, Web-UI) geht immer vor. Gibt zurück, ob
+        sich etwas geändert hat.
+        """
+        for i in range(1, len(self.stages)):
+            st = self.stages[i]
+            if st.opened_at != opened_at or st.kind in ("local", "su"):
+                continue
+            if st.host is not None and st.host_source != "auto":
+                return False
+            if st.host == host and st.host_source == "auto":
+                return False
+            self.stages[i] = replace(st, host=host, host_source="auto")
+            return True
+        return False
 
     def push(self, *, kind: str = "unknown", host: str | None = None, user: str | None = None,
              offset: int = 0, source: str = "hotkey") -> None:
@@ -574,4 +612,5 @@ class ContextStack:
         host = st.host or "?"
         if host.startswith(("ip:", "name:")):
             host = host.split("/", 1)[-1] if host.startswith("ip:") else host[5:]
-        return f"{host} {st.user}" if st.user else f"{host} {st.kind}"
+        text = f"{host} {st.user}" if st.user else f"{host} {st.kind}"
+        return text + " (auto)" if st.host and st.host_source == "auto" else text

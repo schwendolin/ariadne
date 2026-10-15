@@ -60,7 +60,7 @@ def test_unknown_stage_without_observations_still_asks():
 
 
 def test_callback_suggests_context_host():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")  # im Profil lab setzt der Callback den Host selbst
     text = "listening on [any] 4444 ...\nconnect to [192.168.56.102] from (UNKNOWN) [192.168.56.101] 4711\n"
     feed(p, _segment(text), journal_seq=10, parsers=[ListenerCallbackParser()])
     p.rebuild()
@@ -103,7 +103,7 @@ def test_set_unit_context_and_local_context():
 
 
 def test_candidate_groups_per_unit_with_data_titles():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")
     evil = "nmap 192.168.56.101 # <script>alert(1)</script>"
     apply_items(
         p,
@@ -170,7 +170,7 @@ def test_ip_mentions_in_scope_become_heuristic_candidates():
 
 
 def test_mass_find_single_group():
-    conn, p = new_projector(FakeScope(nets=["10.20.0.0/16"]))
+    conn, p = new_projector(FakeScope(nets=["10.20.0.0/16"]), profile="customer")
     n = MASS_THRESHOLD + 10
     ments = [Mention("ip", f"10.20.{i // 250}.{i % 250 + 1}", Span(i, i)) for i in range(n)]
     apply_items(

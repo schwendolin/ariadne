@@ -9,13 +9,14 @@ import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from ariadne.cli.setup import MARK_BEGIN, SHELL_FILES
 from ariadne.paths import Paths
 
-__all__ = ["Check", "run_checks"]
+__all__ = ["Check", "run_checks", "swap_check"]
 
 OK, WARN, FAIL = "ok", "warn", "fail"
 
@@ -152,6 +153,40 @@ def _ptrace() -> Check:
     return Check(OK, f"kernel.yama.ptrace_scope = {val}")
 
 
+def swap_check(swaps: str, dm_uuid: Callable[[str], str | None]) -> Check:
+    """Vorlauf und Puffer liegen nur im RAM (E95); unverschlüsselter Swap kann sie auf die Platte bringen.
+
+    ``swaps`` ist der Inhalt von ``/proc/swaps``; zram und dm-crypt gelten als sicher.
+    """
+    unsafe = []
+    for line in swaps.splitlines()[1:]:
+        dev = line.split()[0] if line.split() else ""
+        name = os.path.basename(dev)
+        if not dev or name.startswith("zram"):
+            continue
+        if name.startswith("dm-") and (dm_uuid(name) or "").startswith("CRYPT-"):
+            continue
+        unsafe.append(dev)
+    if unsafe:
+        return Check(WARN, "Swap unverschlüsselt", "Vorlauf und Puffer können ausgelagert werden: "
+                     + ", ".join(unsafe[:3]) + " (zram oder verschlüsselten Swap verwenden)")
+    return Check(OK, "Swap: keiner, zram oder verschlüsselt")
+
+
+def _swap() -> Check:
+    def dm_uuid(name: str) -> str | None:
+        try:
+            return Path(f"/sys/block/{name}/dm/uuid").read_text().strip()
+        except OSError:
+            return None
+
+    try:
+        swaps = Path("/proc/swaps").read_text()
+    except OSError:
+        return Check(WARN, "Swap unbekannt", "/proc/swaps nicht lesbar")
+    return swap_check(swaps, dm_uuid)
+
+
 def run_checks(paths: Paths) -> list[Check]:
     return [
         _python(),
@@ -161,4 +196,5 @@ def run_checks(paths: Paths) -> list[Check]:
         _socket_dir(paths),
         *_bracketed_paste(paths),
         _ptrace(),
+        _swap(),
     ]

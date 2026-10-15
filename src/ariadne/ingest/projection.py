@@ -7,9 +7,13 @@ Architektur 5.7 bis 5.10. Schnittstelle für die Pipeline:
   Eingaben sind ``Obs``/``Mention`` oder deren ``to_dict()`` (aus dem Worker).
   Alles wird geprüft und normalisiert; Ungültiges wird verworfen, nie geraten.
 * :meth:`Projector.apply_decision` speichert Entscheide (alle ``d.*``-Arten).
+* :func:`record_own_addrs` merkt eigene Adressen von Kali (``own_addr``, A5);
+  die Pipeline ruft sie für ``net.local_addrs`` und ``net.route.src_ip``.
 * :meth:`Projector.rebuild` berechnet alles Abgeleitete vollständig neu
   (:func:`ariadne.ingest.proj_build.build`), erhöht die Generation und schreibt
   ``projection_delta``. v0.1 rechnet immer komplett; bis etwa 50 Hosts genügt das.
+
+Das Profil (``lab`` oder ``customer``) bestimmt die Spuren (Drei-Spuren-Regel, E42).
 
 Die Projektion parst keine Zieldaten selbst und sendet nichts. Secrets stehen
 im Klartext nur in ``secret_value``; Kennungen und Schlüssel sind HMACs.
@@ -28,7 +32,7 @@ from typing import Any
 from ariadne.events import canonical_json
 from ariadne.ingest.claims import effective_confidence, normalize_value
 from ariadne.ingest.identity import canon_ip, id_type, normalize_identifier
-from ariadne.ingest.proj_build import DecisionRow, MentionRow, ObsRow, UnitRow, build
+from ariadne.ingest.proj_build import PROFILES, DecisionRow, MentionRow, ObsRow, UnitRow, build
 from ariadne.ingest.schema_claims import MASK, SCHEMA_SQL, VIEWS_SQL, statements
 from ariadne.ontology import PREDICATES
 from ariadne.parsers.api import BASE_CONFIDENCE, Mention, Obs, UnitView
@@ -37,7 +41,7 @@ from ariadne.scope.api import ScopeChecker, Verdict
 from ariadne.store.api import EventRecord
 from ariadne.store.chain import secret_key
 
-__all__ = ["Projector", "ensure_schema", "DELTA_KEEP"]
+__all__ = ["Projector", "ensure_schema", "record_own_addrs", "DELTA_KEEP"]
 
 DELTA_KEEP = 1000  # so viele Generationen bleiben in projection_delta
 MAX_ATTRS = 32
@@ -60,6 +64,22 @@ def ensure_schema(conn: Any) -> None:
     """Legt Tabellen und Sichten an (idempotent, ohne ``executescript``)."""
     for stmt in statements(SCHEMA_SQL) + statements(VIEWS_SQL):
         conn.execute(stmt)
+
+
+def record_own_addrs(conn: Any, addrs: Iterable[Any], source: str, seq: int) -> bool:
+    """Eigene Adressen von Kali speichern (nie verfallend). ``True``, wenn eine neu war.
+
+    Nur gültige IP-Adressen (kanonisch über ``ipaddress``), alles andere wird verworfen.
+    """
+    new = False
+    for a in addrs:
+        ip = canon_ip(a) if isinstance(a, str) else None
+        if ip is None:
+            continue
+        cur = conn.execute("INSERT OR IGNORE INTO own_addr(addr, source, first_seq) VALUES (?,?,?)",
+                           (ip, source, int(seq)))
+        new = new or cur.rowcount > 0
+    return new
 
 
 @contextmanager
@@ -113,9 +133,13 @@ def _attrs(raw: Any) -> dict[str, str] | None:
 class Projector:
     """Projektion auf einer ``derived.db``-Verbindung (sqlite3 oder sqlcipher3)."""
 
-    def __init__(self, conn: Any, *, project_key: bytes, scope: ScopeChecker | None) -> None:
+    def __init__(self, conn: Any, *, project_key: bytes, scope: ScopeChecker | None,
+                 profile: str = "lab") -> None:
         if not isinstance(project_key, bytes | bytearray) or len(project_key) < 16:
             raise ValueError("Projektschlüssel fehlt oder ist zu kurz")
+        if profile not in PROFILES:
+            raise ValueError(f"unbekanntes Profil {profile!r}")
+        self.profile = profile
         self.conn = conn
         self.project_key = bytes(project_key)
         self.scope: ScopeChecker = scope if scope is not None else _NoScope()
@@ -189,21 +213,23 @@ class Projector:
         if end_off is None and lines:
             end_off = lines[-1].raw_end
         title = unit.cmd_text or unit.path
+        flags = sorted({f for f in getattr(unit, "flags", ()) or () if isinstance(f, str) and len(f) <= 32})
         row = (unit.unit_id, unit.kind, _s(terminal_id), _s(getattr(unit, "cmd_id", None)),
                title[:512] if isinstance(title, str) else None, _s(unit.path), int(unit.ts_utc_ns),
                _i(start_off), _i(end_off), _s(ctx.get("kind")), _s(ctx.get("host")), _s(ctx.get("user")),
                _i(ctx.get("opened_at")), _s(ctx.get("candidate")), int(self._unit_from_target(unit)),
-               int(journal_seq))
+               int(journal_seq), json.dumps(flags[:16]), _i(getattr(unit, "mono_ns", None)))
         self.conn.execute(
             "INSERT INTO obs_unit (unit_id, kind, terminal_id, cmd_id, title, path, ts_utc_ns, start_off, "
-            "end_off, ctx_kind, ctx_host, ctx_user, ctx_opened_at, ctx_candidate, from_target, journal_seq) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(unit_id) DO UPDATE SET "
+            "end_off, ctx_kind, ctx_host, ctx_user, ctx_opened_at, ctx_candidate, from_target, journal_seq, "
+            "flags, mono_ns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(unit_id) DO UPDATE SET "
             "kind=excluded.kind, terminal_id=excluded.terminal_id, cmd_id=excluded.cmd_id, "
             "title=excluded.title, path=excluded.path, ts_utc_ns=excluded.ts_utc_ns, "
             "start_off=excluded.start_off, end_off=excluded.end_off, ctx_kind=excluded.ctx_kind, "
             "ctx_host=excluded.ctx_host, ctx_user=excluded.ctx_user, ctx_opened_at=excluded.ctx_opened_at, "
             "ctx_candidate=excluded.ctx_candidate, from_target=excluded.from_target, "
-            "journal_seq=MAX(obs_unit.journal_seq, excluded.journal_seq)", row)
+            "journal_seq=MAX(obs_unit.journal_seq, excluded.journal_seq), flags=excluded.flags, "
+            "mono_ns=excluded.mono_ns", row)
 
     def _sink(self, ident: str, kind: str, value: str) -> None:
         self.conn.execute("INSERT OR IGNORE INTO secret_value (secret_ident, kind, value) VALUES (?,?,?)",
@@ -280,9 +306,10 @@ class Projector:
             return False
         with _savepoint(self.conn):
             self.conn.execute(
-                "INSERT OR IGNORE INTO decision (seq, id, kind, payload_json, ts) VALUES (?,?,?,?,?)",
+                "INSERT OR IGNORE INTO decision (seq, id, kind, payload_json, ts, mono_ns, boot_id) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (int(rec.seq), rec.id, rec.kind, canonical_json(dict(rec.header)).decode(),
-                 int(rec.ts_utc_ns)))
+                 int(rec.ts_utc_ns), _i(rec.mono_ns), _s(rec.boot_id)))
         return True
 
     # ------------------------------------------------------------------ Neuberechnung
@@ -296,18 +323,21 @@ class Projector:
         with _savepoint(self.conn):
             before = self._snapshot()
             res = build(self._units(), self._observations(), self._mentions(), self._decisions(),
-                        self.scope, self.project_key, spans=self._spans())
+                        self.scope, self.project_key, spans=self._spans(), profile=self.profile,
+                        own_addrs=self._own_addrs())
             for table in ("identifier", "entity", "claim", "claim_source", "conflict", "inbox_item",
-                          "keystep"):
+                          "keystep", "ctx_auto", "unit_distrust"):
                 self.conn.execute(f"DELETE FROM {table}")  # noqa: S608
             ex = self.conn.executemany
             ex("INSERT INTO identifier VALUES (?,?,?,?,?,?,?)", res.identifiers)
             ex("INSERT INTO entity VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", res.entities)
-            ex("INSERT INTO claim VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", res.claims)
-            ex("INSERT INTO claim_source VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", res.claim_sources)
+            ex("INSERT INTO claim VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", res.claims)
+            ex("INSERT INTO claim_source VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", res.claim_sources)
             ex("INSERT INTO conflict VALUES (?,?,?,?,?,?,?,?)", res.conflicts)
             ex("INSERT INTO inbox_item VALUES (?,?,?,?,?,?,?)", res.inbox)
-            ex("INSERT INTO keystep VALUES (?,?,?,?,?,?,?,?,?)", res.keysteps)
+            ex("INSERT INTO keystep VALUES (?,?,?,?,?,?,?,?,?,?,?)", res.keysteps)
+            ex("INSERT INTO ctx_auto VALUES (?,?,?,?)", res.ctx_auto)
+            ex("INSERT INTO unit_distrust VALUES (?,?,?,?)", res.distrust)
             ex("UPDATE mention SET scope_verdict = ? WHERE mention_id = ?",
                [(v, k) for k, v in sorted(res.mention_verdicts.items())])
             ex("INSERT OR IGNORE INTO secret_value VALUES (?,?,?)",
@@ -339,11 +369,16 @@ class Projector:
         out: dict[str, UnitRow] = {}
         for r in self.conn.execute(
                 "SELECT unit_id, kind, terminal_id, cmd_id, title, path, ts_utc_ns, start_off, end_off, "
-                "ctx_kind, ctx_host, ctx_user, ctx_opened_at, ctx_candidate, from_target, journal_seq "
-                "FROM obs_unit"):
+                "ctx_kind, ctx_host, ctx_user, ctx_opened_at, ctx_candidate, from_target, journal_seq, "
+                "flags, mono_ns FROM obs_unit"):
+            flags = json.loads(r[16] or "[]")
             out[r[0]] = UnitRow(r[0], r[1], r[2], r[3], r[4], r[5], int(r[6]), r[7], r[8], r[9], r[10], r[11],
-                                r[12], r[13], bool(r[14]), int(r[15]))
+                                r[12], r[13], bool(r[14]), int(r[15]),
+                                tuple(f for f in flags if isinstance(f, str)), r[17])
         return out
+
+    def _own_addrs(self) -> list[str]:
+        return [str(r[0]) for r in self.conn.execute("SELECT addr FROM own_addr ORDER BY addr")]
 
     def _observations(self) -> list[ObsRow]:
         return [
@@ -362,20 +397,21 @@ class Projector:
             for r in self.conn.execute(
                 "SELECT mention_id, unit_id, parser_id, parser_version, journal_seq, value_type, value, "
                 "span_json, attrs_json, ts_utc_ns, from_target, suspect FROM mention "
-                "WHERE value_type IN ('ip', 'url') ORDER BY mention_id")
+                "WHERE value_type IN ('ip', 'url', 'callback') ORDER BY mention_id")
         ]
 
     def _decisions(self) -> list[DecisionRow]:
-        rows = self.conn.execute("SELECT seq, id, kind, payload_json, ts FROM decision ORDER BY seq")
-        return [DecisionRow(int(r[0]), r[1], r[2], json.loads(r[3]), int(r[4])) for r in rows]
+        rows = self.conn.execute("SELECT seq, id, kind, payload_json, ts, mono_ns, boot_id FROM decision "
+                                 "ORDER BY seq")
+        return [DecisionRow(int(r[0]), r[1], r[2], json.loads(r[3]), int(r[4]), r[5], r[6]) for r in rows]
 
     def _snapshot(self) -> dict[tuple[str, str], tuple]:
         snap: dict[tuple[str, str], tuple] = {}
         for r in self.conn.execute("SELECT * FROM entity"):
             snap[(_ENTITY_FEED.get(r[1], "other"), r[0])] = tuple(r)
         for r in self.conn.execute(
-                "SELECT claim_key, state, confidence, value_text, conflict_key, entity_id, sources, scope "
-                "FROM claim"):
+                "SELECT claim_key, state, confidence, value_text, conflict_key, entity_id, sources, scope, "
+                "lane, history FROM claim"):
             snap[("claim", r[0])] = tuple(r)
         for r in self.conn.execute("SELECT item_key, kind, payload_json, state FROM inbox_item"):
             snap[("inbox", r[0])] = tuple(r)

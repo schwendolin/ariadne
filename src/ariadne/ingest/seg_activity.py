@@ -22,7 +22,7 @@ __all__ = ["activity_row", "write_activity", "add_route"]
 _COLS = (
     "cmd_id", "terminal_id", "ts_utc_ns", "ts_end_ns", "operator_id", "ctx_kind", "ctx_host", "ctx_user",
     "tool", "cmd_text", "targets", "target_files", "target_scope", "scope_version", "exit_code", "evidence",
-    "unit_id", "origin",
+    "unit_id", "origin", "mono_ns", "boot_id",
 )
 
 
@@ -70,6 +70,8 @@ def activity_row(block: CmdBlock, layout: Layout, scope: ScopeChecker | None) ->
         "evidence": json.dumps(evidence, ensure_ascii=False),
         "unit_id": unit.unit_id if unit is not None else None,
         "origin": "local",
+        "mono_ns": block.mono_start,
+        "boot_id": block.boot,
     }
 
 

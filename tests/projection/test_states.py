@@ -1,4 +1,4 @@
-"""Zustände: Entscheide (confirm/reject/edit/revoke) und Automodus-Phasen."""
+"""Zustände: Entscheide (confirm/reject/edit/revoke) und Automodus-Phasen (Profil customer)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ SP = Span(0, 0)
 
 
 def _setup(items, **kw):
-    conn, p = new_projector()
+    conn, p = new_projector(profile=kw.pop("profile", "customer"))
     apply_items(p, make_unit("x", unit_id=kw.pop("unit_id", "u1")), items, **kw)
     p.rebuild()
     return conn, p
@@ -74,7 +74,7 @@ def test_edit_with_invalid_value_is_orphan():
 def _auto_case(
     *decisions, journal_seq=10, parser_id="nmap.xml", trust="structured", auto_eligible=True, items=None
 ):
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")
     for d in decisions:
         p.apply_decision(d)
     apply_items(
@@ -100,7 +100,7 @@ def test_automode_phase_after_decision():
 
 
 def test_automode_off_again_and_first_observation_counts():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")
     p.apply_decision(dec(5, "d.automode.set", enabled=True, parsers=[]))
     p.apply_decision(dec(20, "d.automode.set", enabled=False))
     apply_items(p, make_unit("x", unit_id="u1"), [Obs(H, "host.os", "Linux", SP)], journal_seq=10)
@@ -167,7 +167,7 @@ def test_reparse_turns_decision_into_orphan():
 def test_automode_ignores_earlier_mentions():
     from ariadne.parsers.api import Mention
 
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")
     p.apply_decision(dec(5, "d.automode.set", enabled=True, parsers=["nmap.xml"]))
     apply_items(
         p,

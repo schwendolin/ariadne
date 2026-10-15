@@ -1,0 +1,5 @@
+tool = "nmap"
+version = "7.94SVN"
+command = "nmap -sV -sC 10.10.10.3"
+source = "nachgestellt"
+note = "HTB Lame, nur Terminalausgabe (ohne -oA). Kali ist 10.10.14.5 (tun0), Scope nur 10.10.10.3"

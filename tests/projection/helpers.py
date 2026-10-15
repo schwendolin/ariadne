@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ariadne.events import validate_header
-from ariadne.ingest.projection import Projector
+from ariadne.ingest.projection import Projector, record_own_addrs
 from ariadne.parsers.api import Mention, Obs
 from ariadne.parsers.registry import default_registry
 from ariadne.scope.api import Verdict
@@ -56,10 +56,15 @@ class FakeScope:
 OPEN: list[sqlite3.Connection] = []  # schliesst tests/projection/conftest.py nach jedem Test
 
 
-def new_projector(scope: FakeScope | None = None) -> tuple[sqlite3.Connection, Projector]:
+def new_projector(scope: FakeScope | None = None, *, profile: str = "lab",
+                  own: Iterable[str] = ()) -> tuple[sqlite3.Connection, Projector]:
+    """Projektion auf einer frischen In-Memory-Datenbank; ``own`` sind eigene Adressen (A5)."""
     conn = sqlite3.connect(":memory:")
     OPEN.append(conn)
-    return conn, Projector(conn, project_key=PROJECT_KEY, scope=scope or FakeScope())
+    p = Projector(conn, project_key=PROJECT_KEY, scope=scope or FakeScope(), profile=profile)
+    if own:
+        record_own_addrs(conn, own, "proc", 1)
+    return conn, p
 
 
 def dec(seq: int, kind: str, ts: int | None = None, did: str | None = None, **header: Any) -> EventRecord:

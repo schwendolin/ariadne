@@ -6,13 +6,21 @@ Durchgang, grosse Rückstände in Abschnitten):
 
 1. ``term.*`` und ``d.ctx.*`` gehen an den Segmenter des Terminals
    (:mod:`ariadne.ingest.seg_stream`), ``file.observed`` wird eine Datei-Einheit,
-   ``net.route`` trägt die Quell-IP im Aktivitätsprotokoll nach.
+   ``net.route`` trägt die Quell-IP im Aktivitätsprotokoll nach. Quell-IPs aus
+   ``net.route`` und die Adressen aus ``net.local_addrs`` sind eigene Adressen
+   von Kali (``own_addr``, A5); eine neue löst eine Neuberechnung aus. Andere
+   Arten (``term.input``, ``term.pause``, ``term.preroll``,
+   ``system.project_end``) stören nicht. Zeiten sind Shim-Zeiten (E96), dazu die
+   Reihenfolge der Systemstarts in ``boot``.
 2. Pro geändertem Terminal: Layout neu rechnen und abgleichen
    (``cmd_block``, ``ctx_span``, ``unit``, ``unit_line``, ``activity``).
 3. Fertige Einheiten parsen (alle passenden Parser, höchste Priorität zuerst)
    und an ``Projector.apply_unit`` geben; hat sich eine schon geparste Einheit
    geändert, vorher ``clear_unit``. Offene Einheiten nach 10 Minuten Stille
-   vorläufig parsen.
+   vorläufig parsen. Offene Einheiten einer Listener-Stufe ohne Host (Reverse
+   Shell, msf) werden schon vorher vorläufig geparst, bis der erste Callback
+   gefunden ist (höchstens :data:`EARLY_CALLBACK_LINES` Zeilen): Der Kontext aus
+   dem Callback (E23) soll während der Sitzung gelten, nicht erst danach.
 4. Entscheide (``d.*``) an ``Projector.apply_decision``, am Ende
    ``Projector.rebuild()``.
 
@@ -44,18 +52,21 @@ from typing import Any
 from ariadne.ingest.db import apply_schema, get_meta, get_watermark, set_meta, set_watermark
 from ariadne.ingest.runner import Runner, RunResult
 from ariadne.ingest.seg_activity import activity_row, add_route
-from ariadne.ingest.seg_stream import TermStream, seg_event_from_record
+from ariadne.ingest.seg_stream import TermStream, chunk_time, seg_event_from_record
 from ariadne.ingest.segmenter import SEG_KINDS, CmdBlock, compute_layout
 from ariadne.ingest.unit_store import load_unit, save_unit, store_file_lines, sync_layout
 from ariadne.ingest.units import MAX_FILE_LINES_BYTES, Unit, file_lines, is_binary
 from ariadne.scope.api import ScopeChecker
 from ariadne.store.api import EventRecord
 
-__all__ = ["Pipeline", "Stats", "Interrupted", "SILENCE_NS", "WATERMARK", "REPARSE_PENDING"]
+__all__ = ["Pipeline", "Stats", "Interrupted", "SILENCE_NS", "WATERMARK", "REPARSE_PENDING",
+           "EARLY_CALLBACK_LINES"]
 
 log = logging.getLogger("ariadne.ingest")
 
 SILENCE_NS = 10 * 60 * 1_000_000_000
+EARLY_CALLBACK_LINES = 200  # so lange sucht die Pipeline in einer offenen Listener-Stufe nach dem Callback
+_LISTENER_KINDS = ("revshell", "msf", "meterpreter")
 WATERMARK = "ingest"
 REPARSE_PENDING = "reparse_pending"  # meta: derived.db muss neu gebaut werden (Redaktion)
 BATCH_VOLUME = 50_000  # Events plus Ausgabe/64 Bytes pro Transaktion (begrenzt gepufferte Zeilen)
@@ -89,7 +100,7 @@ def _auto_registry() -> list[Any]:
         return []
 
 
-def _auto_projector(conn: Any, project_key: bytes, scope: ScopeChecker | None) -> Any:
+def _auto_projector(conn: Any, project_key: bytes, scope: ScopeChecker | None, profile: str) -> Any:
     try:
         mod = importlib.import_module("ariadne.ingest.projection")
     except ImportError:
@@ -97,7 +108,17 @@ def _auto_projector(conn: Any, project_key: bytes, scope: ScopeChecker | None) -
     cls = getattr(mod, "Projector", None)
     if cls is None:
         return None
-    return cls(conn, project_key=project_key, scope=scope)
+    return cls(conn, project_key=project_key, scope=scope, profile=profile)
+
+
+def _record_own(conn: Any, addrs: Any, source: str, seq: int) -> bool:
+    try:
+        mod = importlib.import_module("ariadne.ingest.projection")
+    except ImportError:
+        return False
+    if not isinstance(addrs, list | tuple):
+        return False
+    return bool(mod.record_own_addrs(conn, list(addrs)[:256], source, seq))
 
 
 class Pipeline:
@@ -106,11 +127,12 @@ class Pipeline:
                  registry: Sequence[Any] | None = None,
                  projector_factory: Callable[[Any], Any] | None = None,
                  clock: Callable[[], int] = time.time_ns, silence_ns: int = SILENCE_NS,
-                 should_stop: Callable[[], bool] | None = None) -> None:
+                 should_stop: Callable[[], bool] | None = None, profile: str = "lab") -> None:
         """``runner`` ist im Daemon ein :class:`~ariadne.ingest.runner.SubprocessRunner`
         (wer Schlüssel hält, parst nicht); ``InProcessRunner`` nur für Tests.
         ``projector=None`` sucht ``ariadne.ingest.projection.Projector``, ``False`` schaltet ab.
-        ``registry=None`` lädt ``ariadne.parsers.registry.default_registry()``."""
+        ``registry=None`` lädt ``ariadne.parsers.registry.default_registry()``.
+        ``profile`` (``lab`` oder ``customer``) geht an die Projektion (Drei-Spuren-Regel)."""
         self.journal = journal
         self.blobs = blobs
         self.conn = conn
@@ -120,6 +142,7 @@ class Pipeline:
         self.clock = clock
         self.silence_ns = silence_ns
         self.should_stop = should_stop
+        self.profile = profile
         self.projector_factory = projector_factory
         apply_schema(conn)
         self.registry: list[Any] = list(_auto_registry() if registry is None else registry)
@@ -128,7 +151,7 @@ class Pipeline:
             self.projector = None
         elif projector is None:
             self.projector = (projector_factory(conn) if projector_factory is not None
-                              else _auto_projector(conn, project_key, scope))
+                              else _auto_projector(conn, project_key, scope, profile))
         else:
             self.projector = projector
         set_meta(conn, "parsers", json.dumps({str(p.id): str(p.version) for p in self.registry},
@@ -136,6 +159,7 @@ class Pipeline:
         conn.commit()
         self.terms: dict[str, TermStream] = {}
         self._loaded = False
+        self._boots: set[str] = {str(r[0]) for r in conn.execute("SELECT boot_id FROM boot")}
         # Bedarf nach system.redaction steht in derived.db (gleiche Transaktion wie der
         # Wasserstand): Bricht der Neuaufbau ab, holt ihn die nächste Pipeline nach.
         self.needs_reparse = get_meta(conn, REPARSE_PENDING) == "1"
@@ -176,6 +200,7 @@ class Pipeline:
             conn.rollback()
             self.terms.clear()
             self._loaded = False
+            self._boots = {str(r[0]) for r in conn.execute("SELECT boot_id FROM boot")}
             raise
         return stats
 
@@ -225,11 +250,12 @@ class Pipeline:
         if self.projector_factory is not None:
             projector = self.projector_factory(new_conn)
         elif self.projector is not None:
-            projector = type(self.projector)(new_conn, project_key=self.project_key, scope=self.scope)
+            projector = type(self.projector)(new_conn, project_key=self.project_key, scope=self.scope,
+                                             profile=self.profile)
         new = Pipeline(self.journal, self.blobs, new_conn, project_key=self.project_key, scope=self.scope,
                        runner=self.runner, projector=projector, registry=self.registry,
                        projector_factory=self.projector_factory, clock=self.clock, silence_ns=self.silence_ns,
-                       should_stop=self.should_stop)
+                       should_stop=self.should_stop, profile=self.profile)
         new.process_new()
         # Die neue Datei enthält die Redaktion schon; ihr eigener Bedarf ist erledigt.
         set_meta(new_conn, REPARSE_PENDING, "0")
@@ -248,13 +274,17 @@ class Pipeline:
     def _route(self, rec: EventRecord, wm: int, decisions: list[EventRecord], files: list[EventRecord],
                stats: Stats) -> None:
         kind = rec.kind
+        boot = rec.boot_id
+        if isinstance(boot, str) and boot and boot not in self._boots:
+            self.conn.execute("INSERT OR IGNORE INTO boot(boot_id, first_seq) VALUES (?, ?)", (boot, rec.seq))
+            self._boots.add(boot)
         if kind == "term.out":
             if rec.terminal_id is None or rec.stream_off is None:
                 return
             ts = self._term(rec.terminal_id, wm)
             length = rec.header.get("length")
             length = length if isinstance(length, int) else len(rec.body or b"")
-            ts.add_chunk(rec.seq, int(rec.stream_off), rec.body, length, rec.ts_utc_ns)
+            ts.add_chunk(rec.seq, int(rec.stream_off), rec.body, length, *chunk_time(rec))
             stats.terminals.add(rec.terminal_id)
             return
         if kind in SEG_KINDS:
@@ -268,6 +298,13 @@ class Pipeline:
             files.append(rec)
         elif kind == "net.route":
             add_route(self.conn, rec.seq, rec.header)
+            src = rec.header.get("src_ip")
+            if src and _record_own(self.conn, [src], "route", rec.seq):
+                set_meta(self.conn, "rebuild_pending", "1")
+        elif kind == "net.local_addrs":
+            source = str(rec.header.get("source") or "proc")
+            if _record_own(self.conn, rec.header.get("addrs"), source, rec.seq):
+                set_meta(self.conn, "rebuild_pending", "1")
         elif kind == "system.redaction":
             # FTS enthält den Klartext noch: derived.db neu bauen. Der Vermerk wird mit dem
             # Wasserstand committed und erst nach dem Dateitausch gelöscht.
@@ -282,20 +319,15 @@ class Pipeline:
                       and now - ts.last_out_ns >= self.silence_ns)
             if silent:
                 ts.force_feed()
-            if ts.dirty:
-                layout = compute_layout(tid, ts.events, ts.stream_end, closed=ts.closed,
-                                        alt_offsets=ts.alt_offsets)
-                for b in layout.blocks:
-                    b.companions = self._companions(ts, b)
-                res = sync_layout(self.conn, ts, layout,
-                                  activity=lambda b, lay: activity_row(b, lay, self.scope))
-                ts.dirty = False
-                for uid in res.removed:
-                    stats.units_removed += 1
-                    if self.projector is not None:
-                        self.projector.clear_unit(uid)
+            self._sync_term(tid, ts, stats)
             if not self.can_parse:
                 continue
+            early = not silent and not ts.closed and self._early_units(tid)
+            if early:
+                # Callback so früh wie möglich finden: Empfangenes jetzt normalisieren (wie bei
+                # Stille). In einer Listener-Stufe kommen keine Marker der lokalen Shell dazwischen.
+                ts.force_feed()
+                self._sync_term(tid, ts, stats)
             for uid, sig, parsed in self.conn.execute(
                     "SELECT unit_id, sig, parsed_sig FROM unit WHERE terminal_id = ? AND state = 'final' "
                     "AND (parsed_sig IS NULL OR parsed_sig != sig) ORDER BY start_off", (tid,)).fetchall():
@@ -304,6 +336,26 @@ class Pipeline:
                     self._parse(unit, sig, parsed, stats)
             if silent:
                 self._provisional(ts, stats)
+            elif early:
+                self._provisional(ts, stats, early=True)
+
+    def _sync_term(self, tid: str, ts: TermStream, stats: Stats) -> None:
+        if not ts.dirty:
+            return
+        layout = compute_layout(tid, ts.events, ts.stream_end, closed=ts.closed, alt_offsets=ts.alt_offsets)
+        for b in layout.blocks:
+            b.companions = self._companions(ts, b)
+        res = sync_layout(self.conn, ts, layout, activity=lambda b, lay: activity_row(b, lay, self.scope))
+        ts.dirty = False
+        for uid in res.removed:
+            stats.units_removed += 1
+            if self.projector is not None:
+                self.projector.clear_unit(uid)
+
+    def _early_units(self, tid: str) -> bool:
+        rows = self.conn.execute("SELECT unit_id, context, line_count FROM unit WHERE terminal_id = ? "
+                                 "AND state != 'final'", (tid,)).fetchall()
+        return any(self._early(uid, ctx, int(n or 0)) for uid, ctx, n in rows)
 
     def _companions(self, ts: TermStream, block: CmdBlock) -> tuple[str, ...]:
         """Dateien, die ein lokaler Befehl laut den Parsern schreibt (Architektur 4.2)."""
@@ -324,12 +376,25 @@ class Pipeline:
         ts.companions[key] = tuple(out[:64])
         return ts.companions[key]
 
-    def _provisional(self, ts: TermStream, stats: Stats) -> None:
+    def _early(self, uid: str, context: str | None, count: int) -> bool:
+        """Offene Einheit einer Listener-Stufe ohne Host, deren Callback noch fehlt?"""
+        try:
+            ctx = json.loads(context or "{}")
+        except ValueError:
+            return False
+        if ctx.get("kind") not in _LISTENER_KINDS or ctx.get("host") or count > EARLY_CALLBACK_LINES:
+            return False
+        return self.conn.execute("SELECT 1 FROM observation WHERE unit_id = ? "
+                                 "AND predicate = 'access.callback' LIMIT 1", (uid,)).fetchone() is None
+
+    def _provisional(self, ts: TermStream, stats: Stats, *, early: bool = False) -> None:
         pending = ts.pending_lines()
         rows = self.conn.execute(
-            "SELECT unit_id, sig, parsed_sig, start_off, end_off, line_count FROM unit WHERE terminal_id = ? "
-            "AND state != 'final' ORDER BY start_off", (ts.tid,)).fetchall()
-        for uid, sig, parsed, start, end, count in rows:
+            "SELECT unit_id, sig, parsed_sig, start_off, end_off, line_count, context FROM unit "
+            "WHERE terminal_id = ? AND state != 'final' ORDER BY start_off", (ts.tid,)).fetchall()
+        for uid, sig, parsed, start, end, count, context in rows:
+            if early and not self._early(uid, context, int(count or 0)):
+                continue
             hi = end if end is not None else 1 << 62
             extra = [ln for ln in pending if start <= ln.raw_start < hi]
             if not count and not extra:
@@ -374,7 +439,7 @@ class Pipeline:
             "path": path, "mime": h.get("mime"), "sniff": h.get("sniff"), "blob_id": blob_id,
             "sha256": h.get("sha256"), "size": h.get("size"), "ts_utc_ns": rec.ts_utc_ns, "ts_end_ns": None,
             "state": "final", "flags": json.dumps(sorted(flags)), "sig": sig, "line_count": 0, "vis_count": 0,
-            "event_seq": rec.seq,
+            "event_seq": rec.seq, "mono_ns": rec.mono_ns, "boot_id": rec.boot_id,
         }
         save_unit(self.conn, row)
         if lines:

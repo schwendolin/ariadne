@@ -3,6 +3,9 @@
 :func:`apply_schema` legt die Tabellen der Einheiten-Seite an und danach, falls
 importierbar, ``SCHEMA_SQL`` und ``VIEWS_SQL`` aus ``ariadne.ingest.schema_claims``.
 Funktioniert mit ``sqlite3``- und ``sqlcipher3``-Verbindungen.
+
+:func:`schema_stale` erkennt eine ``derived.db`` mit älterem Schema; die
+Auswertung baut sie dann neu (``CREATE ... IF NOT EXISTS`` ergänzt keine Spalten).
 """
 
 from __future__ import annotations
@@ -15,7 +18,28 @@ from ariadne import ontology
 from ariadne.ingest.normalizer import NORMALIZER_VERSION
 from ariadne.ingest.schema_units import SCHEMA_VERSION, UNITS_SQL
 
-__all__ = ["apply_schema", "get_meta", "set_meta", "get_watermark", "set_watermark", "versions"]
+__all__ = ["apply_schema", "get_meta", "set_meta", "get_watermark", "set_watermark", "versions",
+           "schema_stale"]
+
+
+def _claims_version() -> int | None:
+    try:
+        mod = importlib.import_module("ariadne.ingest.schema_claims")
+    except ImportError:
+        return None
+    v = getattr(mod, "CLAIMS_VERSION", None)
+    return v if isinstance(v, int) else None
+
+
+def schema_stale(conn: Any) -> bool:
+    """Hat ``conn`` Tabellen eines älteren Schemas? Eine frische Datei ist nicht veraltet."""
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if "meta" not in names:
+        return bool(names & {"unit", "claim", "obs_unit"})
+    if get_meta(conn, "schema_units_version") != str(SCHEMA_VERSION):
+        return True
+    cv = _claims_version()
+    return cv is not None and "claim" in names and get_meta(conn, "schema_claims_version") != str(cv)
 
 
 def _claims_sql() -> list[str]:
@@ -35,6 +59,9 @@ def apply_schema(conn: Any) -> None:
     set_meta(conn, "schema_units_version", str(SCHEMA_VERSION))
     set_meta(conn, "normalizer_version", str(NORMALIZER_VERSION))
     set_meta(conn, "ontology_version", str(ontology.VERSION))
+    cv = _claims_version()
+    if cv is not None:
+        set_meta(conn, "schema_claims_version", str(cv))
     if get_meta(conn, "generation") is None:
         set_meta(conn, "generation", "0")
     conn.commit()
@@ -63,7 +90,8 @@ def set_watermark(conn: Any, name: str, seq: int) -> None:
 def versions(conn: Any) -> dict[str, Any]:
     """Versionen aus ``meta`` (Normalizer, Ontologie, Parser, Generation)."""
     out: dict[str, Any] = {}
-    for key in ("schema_units_version", "normalizer_version", "ontology_version", "generation"):
+    for key in ("schema_units_version", "schema_claims_version", "normalizer_version", "ontology_version",
+                "generation"):
         v = get_meta(conn, key)
         out[key] = int(v) if v is not None and v.lstrip("-").isdigit() else v
     parsers = get_meta(conn, "parsers")

@@ -88,9 +88,12 @@ def test_session_markers_and_recording(shell, box_factory):
         assert re.search(rb"core file size\s+0\s+0", out)
         assert b"shell-hard=unlimited" in out
 
-        # echo hello landet im aufgezeichneten Strom
+        # echo hello landet im aufgezeichneten Strom, die Eingabe als INPUT (E26)
         run_cmd(c, "echo hello-$((40+2))")
         assert d.wait_for(lambda: b"hello-42" in d.out_bytes())
+        assert d.wait_for(lambda: b"echo hello-$((40+2))\n" in d.input_bytes())  # pexpect sendet LF
+        assert any(f.data.endswith(b"echo hello-$((40+2))\n") for f in d.inputs())  # ein Rahmen bis Enter
+        assert all(f.t_wall_ns > 0 and f.out_end >= f.stream_off for f in d.inputs())
 
         # C- und D-Marker mit Exit-Code
         run_cmd(c, "false")
@@ -98,7 +101,9 @@ def test_session_markers_and_recording(shell, box_factory):
         assert dm[-1]["fg_shell"] is True and dm[-1]["pipestatus"] == [1]
         src = dm[-1] if old_bash else d.marks("C")[-1]
         assert src.get("cmd_typed") == "false"
-        assert all(b"7701" not in r.obj[4] for r in d.frames(P.OUT))
+        assert all(b"7701" not in r.obj[4] for r in d.outs())
+        assert d.frames(P.OUT) == [] and d.hellos()[0]["proto"] == 2
+        assert all(m.get("t_shim_ns") and m.get("mono_ns") for m in d.marks())
 
         # yes | head ohne Broken pipe (SIGPIPE im Kind auf SIG_DFL)
         out = run_cmd(c, "yes | head -1")
@@ -146,15 +151,16 @@ def test_session_markers_and_recording(shell, box_factory):
         assert d.wait_for(lambda: [m for m in d.marks("D") if m.get("exit") == 148])
         run_cmd(c, "kill -9 %1")
 
-        # F12 und r: req.rec an den Daemon, r erreicht die Shell nicht
+        # F12 und r: req.pause an den Daemon, r erreicht die Shell nicht
         c.send(F12)
         time.sleep(0.3)
         c.send(b"r")
-        assert d.wait_for(lambda: d.events("req.rec"))
-        assert d.events("req.rec")[0]["on"] is None
-        c.expect_exact(b"\x1b]2;[-- lame]")
+        assert d.wait_for(lambda: d.events("req.pause"))
+        assert d.events("req.pause")[0]["minutes"] is None
+        c.expect_exact(b"\x1b]2;[PAUSE 10 min lame]")
         out = run_cmd(c, "echo after-hotkey")
         assert b"after-hotkey" in out and b"not found" not in out
+        assert b"F12" not in d.input_bytes() and b"\x1b[24~" not in d.input_bytes()
 
         finish(c, 3)
         assert d.wait_for(lambda: d.frames(P.BYE))
@@ -166,11 +172,12 @@ def test_session_markers_and_recording(shell, box_factory):
             if e["kind"].startswith("term."):
                 events.validate_header(e["kind"], {k: v for k, v in e.items() if k not in ("seq", "kind")})
                 kinds.add(e["kind"])
-        # term.close fehlt hier zu Recht: F12 r hat REC ausgeschaltet
+        # term.close fehlt hier zu Recht: F12 r hat das Terminal pausiert
         assert {"term.mark", "term.resize", "term.ctx_snapshot", "term.marker_forged"} <= kinds
         assert "term.close" not in kinds
-        seqs = [r.obj[0] if r.type == P.OUT else r.obj["seq"]
-                for r in d.frames() if r.type in (P.OUT, P.EVENT)]
+        assert b"after-hotkey" not in d.out_bytes() and b"after-hotkey" not in d.input_bytes()
+        seqs = [r.obj[0] if r.type in (P.OUT, P.OUTX) else r.obj.seq if r.type == P.INPUT else r.obj["seq"]
+                for r in d.frames() if r.type in (P.OUT, P.OUTX, P.INPUT, P.EVENT)]
         assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
 
 
@@ -244,23 +251,25 @@ def test_exit_code_and_hangup(box_factory):
         assert d.wait_for(lambda: d.frames(P.BYE), timeout=5)
 
 
-def test_rec_off_sends_no_content_then_gap_on_rec_on(box_factory):
+def test_no_project_sends_no_content_then_gap_on_start(box_factory):
     shell = SHELLS[0]
     box = box_factory(shell=shell)
-    with FakeDaemon(box.sock, rec="off") as d:
+    with FakeDaemon(box.sock, rec="off", project=None) as d:
         c = spawn(box, shell)
         d.wait_for(lambda: d.hellos())
+        expect_seen(c, b"\x1b]2;[kein Projekt]")
         run_cmd(c, "echo secret-while-off")
         time.sleep(0.3)
-        assert d.frames(P.OUT) == [] and d.events("term.mark") == []
+        assert d.outs() == [] and d.events("term.mark") == [] and d.inputs() == []
+        d.send_state(project="lame")
         d.send_state(rec="on")
         assert d.wait_for(lambda: d.events("term.ctx_snapshot"))
         run_cmd(c, "echo now-recording")
         assert d.wait_for(lambda: b"now-recording" in d.out_bytes())
         assert b"secret-while-off" not in d.out_bytes()
         gap = d.events("term.gap")[0]
-        assert gap["reason"] == "rec_off" and gap["bytes_lost"] > 0
-        first_out = min(r.obj[1] for r in d.frames(P.OUT))
+        assert gap["reason"] == "no_project" and gap["bytes_lost"] > 0
+        first_out = min(r.obj[1] for r in d.outs())
         assert gap["stream_off"] + gap["bytes_lost"] == first_out
         finish(c, 4)
         close = d.wait_for(lambda: d.events("term.close"))
@@ -509,11 +518,47 @@ def test_outer_shim_pauses_while_tmux_client_in_foreground(box_factory, tmp_path
         c.sendline("exit")  # Pane und Sitzung enden, tmux kehrt zurück
         c.expect_exact(PROMPT)
         run_cmd(c, "echo AUSSEN-$((7*6))")
-        assert d.wait_for(lambda: [r for r in d.frames(P.OUT)
+        assert d.wait_for(lambda: [r for r in d.outs()
                                    if r.conn == outer and b"AUSSEN-42" in r.obj[4]])
-        outer_bytes = b"".join(r.obj[4] for r in d.frames(P.OUT) if r.conn == outer)
+        outer_bytes = b"".join(r.obj[4] for r in d.outs() if r.conn == outer)
         assert b"PANE-42" not in outer_bytes  # nur im Strom des Pane-Shims
-        assert any(b"PANE-42" in r.obj[4] for r in d.frames(P.OUT) if r.conn != outer)
+        assert any(b"PANE-42" in r.obj[4] for r in d.outs() if r.conn != outer)
         gaps = [e for e in d.events("term.gap") if e["reason"] == "multiplexer"]
         assert gaps and gaps[0]["bytes_lost"] > 0
+        # Eingaben im Pane gehören nur dem Pane-Shim, der Wechsel geht als req.status hinaus
+        outer_in = b"".join(r.obj.data for r in d.frames(P.INPUT) if r.conn == outer)
+        assert b"echo PANE" not in outer_in and b"echo AUSSEN" in outer_in
+        assert any(r.conn != outer and b"echo PANE" in r.obj.data for r in d.frames(P.INPUT))
+        mux = [r.obj["mux"] for r in d.frames(P.EVENT) if r.conn == outer and r.obj["kind"] == "req.status"]
+        assert mux[:2] == [True, False]
+        expect_seen(c, b"[Multiplexer: Panes nehmen auf]")
+        finish(c)
+
+
+def test_pause_hotkey_title_and_resume_gap(box_factory):
+    """E22: F12 r pausiert dieses Terminal, ein zweites F12 r hebt die Pause auf."""
+    shell = SHELLS[0]
+    box = box_factory(shell=shell)
+    with FakeDaemon(box.sock) as d:
+        c = spawn(box, shell)
+        d.wait_for(lambda: d.hellos())
+        expect_seen(c, b"\x1b]2;[REC lame]")
+        run_cmd(c, "echo vor-der-pause")
+        c.send(F12)
+        time.sleep(0.25)
+        c.send(b"r")
+        c.expect_exact(b"[PAUSE 10 min lame]")
+        run_cmd(c, "echo geheim-in-der-pause")
+        time.sleep(0.2)
+        c.send(F12)
+        time.sleep(0.25)
+        c.send(b"r")
+        c.expect_exact(b"\x1b]2;[REC lame]")
+        run_cmd(c, "echo nach-der-pause")
+        assert d.wait_for(lambda: b"nach-der-pause" in d.out_bytes())
+        assert b"vor-der-pause" in d.out_bytes()
+        assert b"geheim-in-der-pause" not in d.out_bytes() + d.input_bytes()
+        gap = d.wait_for(lambda: [e for e in d.events("term.gap") if e["reason"] == "pause"])
+        assert gap[0]["bytes_lost"] > 0
+        assert [e["minutes"] for e in d.events("req.pause")] == [None, None]
         finish(c)

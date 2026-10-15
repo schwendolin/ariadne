@@ -49,7 +49,7 @@ def test_knowledge_and_progress(items, trust, knowledge, progress):
 
 
 def test_access_from_keysteps_claims_and_override():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")  # Kandidat statt auto
     apply_items(
         p,
         make_unit("x"),
@@ -119,7 +119,7 @@ def test_thread_from_keysteps_with_terminal_context():
 
 
 def test_generation_and_delta():
-    conn, p = new_projector()
+    conn, p = new_projector(profile="customer")  # Kandidat in der Inbox
     assert p.generation == 0
     apply_items(p, make_unit("x", unit_id="u1"), [Obs(H, "host.state", "up", SP)])
     g1 = p.rebuild()

@@ -1,4 +1,4 @@
-"""Transport: HELLO, Bündelung, gemeinsame seq, ACK, Resume, Gating, Überlauf."""
+"""Transport: HELLO, Bündelung, Zeitindex (OUTX), INPUT, gemeinsame seq, ACK, Resume, Gating, Überlauf."""
 
 from __future__ import annotations
 
@@ -75,11 +75,12 @@ def test_hello_state_batching_and_ack(sock_path):
         t.add_event("term.mark", {"stream_off": 6})
         t.add_out(b"x" * (100 * 1024), 6, 1, 2, now)
         t.flush_out()
-        assert pump(t, lambda: len(d.frames(P.OUT)) == 3 and not t.ring)
-        seqs = [(r.type, r.obj[0] if r.type == P.OUT else r.obj["seq"]) for r in d.frames()
-                if r.type in (P.OUT, P.EVENT)]
-        assert seqs == [(P.OUT, 1), (P.EVENT, 2), (P.OUT, 3), (P.OUT, 4)]
-        outs = [r.obj for r in d.frames(P.OUT)]
+        assert pump(t, lambda: len(d.frames(P.OUTX)) == 3 and not t.ring)
+        seqs = [(r.type, r.obj[0] if r.type == P.OUTX else r.obj["seq"]) for r in d.frames()
+                if r.type in (P.OUTX, P.EVENT)]
+        assert seqs == [(P.OUTX, 1), (P.EVENT, 2), (P.OUTX, 3), (P.OUTX, 4)]
+        assert d.frames(P.OUT) == []  # Protokoll v2: nur noch OUTX
+        outs = [r.obj for r in d.frames(P.OUTX)]
         assert outs[0][1] == 0 and outs[0][4] == b"abcdef"
         assert outs[1][1] == 6 and len(outs[1][4]) == T.BATCH_BYTES
         assert outs[2][1] == 6 + T.BATCH_BYTES
@@ -196,3 +197,67 @@ def test_no_daemon_is_cheap_and_throttled(tmp_path):
     assert t.deadline() == 100.0 + T.RECONNECT_S
     assert not t.try_connect(100.5)
     assert t.deadline() == 100.0 + T.RECONNECT_S
+
+
+def _frames(t: T.Transport) -> list[P.Frame]:
+    dec = P.FrameDecoder()
+    out: list[P.Frame] = []
+    for e in t.ring.entries():
+        out += dec.feed(t.ring.get(e.seq))
+    return out
+
+
+def test_outx_time_index_keeps_1ms_reads(tmp_path):
+    t = make(tmp_path / "none.sock")
+    w0, m0 = 1_700_000_000_000_000_000, 5_000_000_000
+    t.add_out(b"ab", 0, w0, m0, 0.0)
+    t.add_out(b"cd", 2, w0 + 400_000, m0 + 400_000, 0.0)  # unter 1 ms: kein Eintrag
+    t.add_out(b"ef", 4, w0 + 1_500_000, m0 + 1_500_000, 0.0)
+    t.add_out(b"gh", 6, w0 + 2_000_000, m0 + 2_000_000, 0.0)  # 0,5 ms nach dem letzten Eintrag
+    t.add_out(b"ij", 8, w0 + 9_000_000, m0 + 9_000_123, 0.0)
+    t.flush_out()
+    fr = P.decode_outx(_frames(t)[0].payload)
+    assert (fr.t_wall_ns, fr.t_mono_ns, fr.data) == (w0, m0, b"abcdefghij")
+    assert fr.tix == ((4, 1500), (8, 9000))
+    from ariadne import events
+    h = {"t_shim_ns": fr.t_wall_ns, "mono_ns": fr.t_mono_ns, "tix": fr.tix}
+    assert events.body_time(h, 3) == (w0, m0)
+    assert events.body_time(h, 5) == (w0 + 1_500_000, m0 + 1_500_000)
+    assert events.body_time(h, 9) == (w0 + 9_000_000, m0 + 9_000_000)
+
+
+def test_outx_split_at_batch_bytes_rebases_time(tmp_path):
+    t = make(tmp_path / "none.sock")
+    t.add_out(b"a" * 1000, 0, 100_000_000, 10_000_000, 0.0)
+    t.add_out(b"b" * (T.BATCH_BYTES + 10), 1000, 105_000_000, 15_000_000, 0.0)  # Bündel voll
+    frs = [P.decode_outx(f.payload) for f in _frames(t)]
+    assert [len(f.data) for f in frs] == [T.BATCH_BYTES, 1010]
+    assert frs[0].tix == ((1000, 5000),)
+    # Das zweite Stück beginnt mitten im zweiten read(): dessen Zeit gilt
+    assert (frs[1].stream_off, frs[1].t_wall_ns, frs[1].t_mono_ns, frs[1].tix) == (
+        T.BATCH_BYTES, 105_000_000, 15_000_000, ())
+
+
+def test_outx_flushes_before_index_overflows(tmp_path):
+    t = make(tmp_path / "none.sock")
+    for i in range(P.MAX_TIX + 5):
+        t.add_out(b"x", i, i * 2_000_000, i * 2_000_000, 0.0)
+    t.flush_out()
+    frs = [P.decode_outx(f.payload) for f in _frames(t)]
+    assert len(frs) == 2 and all(len(f.tix) <= P.MAX_TIX for f in frs)
+    assert b"".join(f.data for f in frs) == b"x" * (P.MAX_TIX + 5)
+    assert frs[1].t_mono_ns == frs[1].stream_off * 2_000_000
+
+
+def test_input_after_out_shares_seq_and_flushes_out_first(tmp_path):
+    t = make(tmp_path / "none.sock")
+    t.add_out(b"$ ", 0, 1_000, 2_000, 0.0)
+    seq = t.add_input(b"ls\r", 2, 2, 3_000, 4_000, ((2, 7),))
+    t.add_input(b"\x1b[200~paste\x1b[201~", 5, 9, 5_000, 6_000, paste=True)
+    frs = _frames(t)
+    assert [f.type for f in frs] == [P.OUTX, P.INPUT, P.INPUT] and seq == 2
+    i1, i2 = P.decode_input(frs[1].payload), P.decode_input(frs[2].payload)
+    assert (i1.seq, i1.stream_off, i1.out_end, i1.data) == (2, 2, 2, b"ls\r")
+    assert (i1.tix, i1.paste) == (((2, 7),), False)
+    assert (i2.seq, i2.out_end, i2.paste) == (3, 9, True)
+    assert all(e.stream_off is None for e in list(t.ring.entries())[1:])  # keine Ausgabe-Bytes
