@@ -3,14 +3,14 @@
 Ein Commit alle 200 ms oder ab 256 KiB. Reihenfolge pro Commit:
 
 1. ``term.out`` läuft durch den Redaktor (eigene Secrets, längenerhaltend).
-   Andere Events eines Terminals geben den Rückhalt nie frei: Hält der Redaktor
-   gerade den Anfang eines möglichen Secrets, warten sie hinter ihm und gehen
-   an ihrer Stromposition ins Journal (das ``term.out`` wird dort geteilt). Sonst
-   könnte ein Ereignis, das ein Ziel auslösen kann (``term.marker_forged``,
-   ``term.osc52_blocked``) oder ein ``term.resize``, ein Secret zerteilen und
-   den Anfang im Klartext schreiben. Nur REC aus, Projektwechsel, Pause und das
-   Ende des Terminals geben den Rückhalt hart frei; Stille nur, was kein
-   Secret beginnen kann.
+   Vor einem anderen Event eines Terminals gibt der Writer vom Rückhalt nur
+   frei, was kein eigenes Secret beginnen kann (wie bei Stille). Hält der
+   Redaktor danach noch einen echten Secret-Anfang, wartet das Event dahinter
+   und geht an seiner Stromposition ins Journal (das ``term.out`` wird dort
+   geteilt). Sonst könnte ein Ereignis, das ein Ziel auslösen kann
+   (``term.marker_forged``, ``term.osc52_blocked``), oder ein ``term.resize``
+   ein Secret zerteilen und den Anfang im Klartext schreiben. Nur REC aus,
+   Projektwechsel, Pause und das Ende des Terminals geben den Rückhalt hart frei.
 2. ``append_many`` in einer Transaktion.
 3. ACK an die Shims (nur für vollständig gespeicherte Rahmen).
 4. Commit- und Mark-Hooks, ausserhalb der Transaktion. Fehler dort stoppen
@@ -187,7 +187,10 @@ class Writer:
             elif e.t is None:
                 self._put_event(e, items, marks)
             else:
+                # Vor einem Event nur freigeben, was kein Secret beginnen kann; ein echter
+                # Secret-Anfang bleibt, das Event wartet dahinter.
                 tid = e.t.terminal_id
+                self._put_chunks(e.t, redactor.flush(tid, keep_prefix=True), items, marks)
                 pend = redactor.pending(tid)
                 if tid in self._deferred or (pend is not None and self._event_off(e) > pend[0]):
                     self._deferred.setdefault(tid, []).append(e)  # wartet hinter dem Rückhalt

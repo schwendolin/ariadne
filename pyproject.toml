@@ -49,6 +49,12 @@ markers = [
   "slow: langsame Tests",
   "e2e: End-to-End über Shim, Daemon und Auswertung",
 ]
+# Nicht geschlossene Dateien, Sockets und Verbindungen sofort als Fehler melden,
+# damit Lecks im Produktcode nicht im Rauschen der Tests verschwinden.
+filterwarnings = [
+  "error::ResourceWarning",
+  "error::pytest.PytestUnraisableExceptionWarning",
+]
 
 [tool.ruff]
 line-length = 110

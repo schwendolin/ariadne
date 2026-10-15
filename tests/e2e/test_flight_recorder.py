@@ -353,3 +353,73 @@ def test_flight_recorder(lab: Lab) -> None:
     # ---- Canary: kein Klartext unter HOME und im Runtime-Ordner -------------------
     hits = scan(lab.home, [SECRET.encode(), PASSPHRASE.encode()]) + scan(lab.run, [SECRET.encode()])
     assert hits == []
+
+
+def test_context_survives_rec_toggle_and_daemon_restart(lab: Lab) -> None:
+    """Befunde Kontext-Stapel und Daemon-Neustart, mit echter zsh, echtem Shim und Daemon:
+
+    * Reverse Shell beginnt bei REC aus: nach ``rec on`` gehört ihre Ausgabe nicht zu Kali.
+    * SIGKILL des Daemons mitten in der Sitzung: nach Neustart, ``unlock``, ``project open``
+      und ``rec on`` stimmt der Kontext weiter, die Lücke heisst ``daemon_down``.
+    """
+    (lab.home / ".zshrc").write_text(f"PS1='{PROMPT}'\nunset HISTFILE\n")
+    lab.cli("setup", "--no-systemd")
+    lab.start_daemon()
+    lab.cli("init", "--handle", "e2e", secret=PASSPHRASE)
+    lab.cli("project", "new", "lame", "--target", TARGET)
+    c = pexpect.spawn(lab.env["SHELL"], ["-i"], env=lab.env, cwd=str(lab.home), timeout=20,
+                      dimensions=(40, 160))
+    try:
+        c.expect_exact(PROMPT)
+        lab.wait_status("Terminals: 1 verbunden")
+        run_cmd(c, "cd ~/ariadne/lame")
+        c.sendline("nc -lvnp 4444")  # REC ist noch aus
+        c.expect_exact(f"from (UNKNOWN) [{TARGET}] 49152")
+        c.expect_exact("$ ")
+        assert "REC: an [lame]" in lab.cli("rec", "on")
+        lab.wait_status("1 nehmen auf")
+        c.sendline("id")
+        c.expect_exact("uid=33(www-data)")
+        c.expect_exact("$ ")
+        time.sleep(0.5)
+
+        assert lab.daemon is not None
+        lab.daemon.kill()  # Absturz mitten in der Remote-Sitzung
+        lab.daemon.wait(timeout=10)
+        lab.daemon = None
+        c.sendline("hostname")  # landet im RAM-Puffer des Shims
+        c.expect_exact("lame")
+        c.expect_exact("$ ")
+        lab.start_daemon()
+        lab.cli("unlock", secret=PASSPHRASE)
+        lab.cli("project", "open", "lame")
+        lab.cli("rec", "on")
+        lab.wait_status("1 nehmen auf")
+        c.sendline("id")
+        c.expect_exact("uid=33(www-data)")
+        c.expect_exact("$ ")
+        c.sendline("exit")
+        c.expect_exact(PROMPT)
+        hits = lab.cli("search", "uid=33")
+        lines = [ln for ln in hits.splitlines() if "uid=33" in ln]
+        assert len(lines) == 2 and all("[revshell]" in ln and "Kali" not in ln for ln in lines), hits
+        c.sendline("exit")
+        c.expect(pexpect.EOF)
+    finally:
+        c.close(force=True)
+    lab.cli("project", "close")
+    assert lab.stop_daemon() == 0
+    op = OperatorVault(lab.paths.operator_dir).unlock(PASSPHRASE)
+    try:
+        project = ProjectService(lab.paths, op).open("lame")
+        try:
+            j = project.journal
+            assert j.verify().ok
+            reasons = [r.header["reason"] for r in j.iter_events(kinds=["term.gap"])]
+            assert "daemon_down" in reasons, reasons
+            snaps = [r.header["stack"] for r in j.iter_events(kinds=["term.ctx_snapshot"])]
+            assert snaps and all(s[-1]["kind"] == "revshell" for s in snaps), snaps
+        finally:
+            project.close()
+    finally:
+        op.wipe()

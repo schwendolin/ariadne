@@ -94,15 +94,21 @@ def test_short_secrets_ignored_and_no_hold_without_secrets():
     assert r.pending("t") is None
 
 
-def test_hold_back_only_possible_secret_start_and_flush():
+def test_hold_back_and_flush():
     r = Redactor([("sudo", SECRET)])
     out = r.feed("t", 0, b"0123456789" * 3)
-    assert sum(len(c) for _, c, _ in out) == 30 and r.pending("t") is None  # nichts kann ein Secret sein
-    out = r.feed("t", 30, b"pw: " + SECRET[:7].encode())
-    emitted = 30 + sum(len(c) for _, c, _ in out)
-    assert emitted == 34 and r.pending("t") == (34, 7)  # nur "Sudo-Ge" wartet
+    emitted = sum(len(c) for _, c, _ in out)
+    assert emitted == 30 - (len(SECRET) - 1)
+    assert r.pending("t") == (emitted, len(SECRET) - 1)
     rest = r.flush("t")
     assert rest[0][0] == emitted and r.pending("t") is None
+    # Leerlauf: nur ein möglicher Secret-Anfang bleibt zurück
+    r.feed("t", 100, b"0123456789" * 3)
+    assert sum(len(c) for _, c, _ in r.flush("t", keep_prefix=True)) == len(SECRET) - 1
+    assert r.pending("t") is None
+    r.feed("t", 200, b"pw: " + SECRET[:7].encode())
+    r.flush("t", keep_prefix=True)
+    assert r.pending("t") == (204, 7)  # nur "Sudo-Ge" wartet
 
 
 def test_idle_flush_keeps_secret_prefix():
@@ -198,7 +204,10 @@ def test_property_random_chunking(prefix, middle, cuts, color):
     s = SECRET.encode()
     if color:
         s = b"".join(b"\x1b[3%dm%c" % (i % 8, c) for i, c in enumerate(s))
-    data = prefix.replace(b"\x1b", b"") + s + middle.replace(b"\x1b", b"") + s
+    # ohne ESC und Backspace: Backspace-Korrekturen haben eigene Tests (sie können in
+    # schon ausgegebene Bytes zurückgreifen, das Ergebnis hängt dann von den Grenzen ab)
+    pre, mid = (x.replace(b"\x1b", b"").replace(b"\x08", b"") for x in (prefix, middle))
+    data = pre + s + mid + s
     ref = joined(feed_all(Redactor([("sudo", SECRET)]), [data]))
     bounds = sorted({c for c in cuts if 0 < c < len(data)})
     chunks = [data[a:b] for a, b in zip([0, *bounds], [*bounds, len(data)], strict=True)]
@@ -217,3 +226,28 @@ def test_truncated_field_tail_is_redacted():
     red, labels = r.redact_text(text, truncated=True)
     assert red.endswith("*" * 20) and token[:20] not in red and labels == ["truncated"]
     assert r.redact_text("ls -la", truncated=True) == ("ls -la", [])
+
+
+def test_backspace_corrections_in_echo():
+    """Befund 8.5: Tippfehler mit Backspace zerteilte das Echo, das Secret blieb im Klartext."""
+    for erase in (b"\b\x1b[K", b"\b \b"):
+        r = Redactor([("own", "hunter2-Secret")])
+        data = b"$ mysql -phunx" + erase + b"ter2-Secret\r\n"
+        res = joined(feed_all(r, [data[:12], data[12:17], data[17:]]))
+        assert len(res) == len(data) and b"ter2-Secret" not in res and b"hun" not in res, erase
+        assert res.startswith(b"$ mysql -p*") and res.endswith(b"*\r\n")
+
+
+def test_backspace_correction_typed_key_by_key():
+    r = Redactor([("own", "hunter2-Secret")])
+    keys = [b"$ ", b"m", b"y", b" ", b"-", b"p", b"h", b"u", b"n", b"x", b"\b\x1b[K"] + [
+        bytes([c]) for c in b"ter2-Secret"] + [b"\r\n"]
+    res = joined(feed_all(r, keys))
+    assert b"hun" not in res and b"ter2" not in res and len(res) == sum(map(len, keys))
+
+
+def test_secret_followed_by_backspaces_stays_redacted():
+    r = Redactor([("own", "hunter2-Secret")])
+    data = b"pw: hunter2-Secret\b\b\b\b  \r\n"
+    res = joined(feed_all(r, [data]))
+    assert b"hunter2" not in res and len(res) == len(data)

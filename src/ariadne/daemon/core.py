@@ -1276,9 +1276,9 @@ class Daemon:
     async def _sync_ingest(self) -> IngestService:
         """Alles Eingereihte speichern und auswerten.
 
-        Der Rückhalt des Redaktors bleibt bewusst stehen (Freigabe nur an Markern
-        und nach 10 s Stille): ein erzwungener Flush könnte ein Secret trennen, das
-        gerade Zeichen für Zeichen als Echo ankommt.
+        Der Rückhalt des Redaktors bleibt bewusst stehen: Er enthält nur ein
+        Stromende, das ein eigenes Secret beginnen könnte. Ein erzwungener Flush
+        könnte ein Secret trennen, das gerade Zeichen für Zeichen als Echo ankommt.
         """
         self._require_project()
         ing = self.ingest

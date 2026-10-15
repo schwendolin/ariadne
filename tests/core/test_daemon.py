@@ -547,7 +547,8 @@ def test_term_out_keeps_receive_time(paths, operator):
         await shim.out(1, 0, b"root@lame:~# " + OWN_SECRET[:5].encode())  # Rückhalt am Ende
         await asyncio.sleep(0.5)
         await shim.out(2, 18, b"x\r\n")
-        await shim.wait_ack(2)
+        await shim.event(3, "term.mark", stream_off=21, mark="A", counter=1, fg_shell=True)
+        await shim.wait_ack(3)
         d.flush()
         outs = list(d.project.journal.iter_events(kinds=["term.out"]))
         held = [r for r in outs if r.stream_off <= 13 < r.stream_off + r.header["length"]]

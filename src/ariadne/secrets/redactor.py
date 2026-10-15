@@ -11,12 +11,12 @@ Secret-Liste.
   eingestreuten Sequenzen) durch ``*`` gleicher Länge. Offsets bleiben stabil.
 * Inhalte von OSC- und DCS-Strings (Fenstertitel mit der Befehlszeile, OSC 8
   mit Token in der URL) werden zusätzlich je für sich durchsucht.
-* Pro Terminal bleibt nur zurück, was ein Secret beginnen könnte: das längste
-  Ende der Sicht, das Anfang eines gesuchten Musters ist (höchstens
-  ``max_len - 1`` Zeichen), plus eine unvollständige Sequenz am Ende. So
-  werden Treffer über Chunk-Grenzen erkannt, und sonst wartet nichts.
-  :meth:`Redactor.flush` gibt den Rückhalt frei; ``keep_prefix=True`` (Stille)
-  behält einen echten Secret-Anfang, damit eine Pause beim Tippen nichts verrät.
+* Pro Terminal bleiben die letzten ``max_len - 1`` Zeichen der Sicht (plus eine
+  unvollständige Sequenz am Ende) zurück, damit Treffer über Chunk-Grenzen
+  erkannt werden, auch nach einer Korrektur mit Backspace (die Sicht wendet
+  Backspace an). :meth:`Redactor.flush` gibt den Rückhalt frei;
+  ``keep_prefix=True`` (Stille) behält nur ein Ende, das ein Secret beginnen
+  könnte, damit eine Pause beim Tippen nichts verrät.
 
 Generische Muster (Private Keys, ``sk-ant-``, ``AKIA``) schwärzt der Redaktor
 nie, denn Secrets vom Ziel sind Funde. :func:`scan_outgoing` meldet sie nur als
@@ -93,7 +93,7 @@ class _View:
     gehören nicht zur Sicht, werden aber einzeln durchsucht.
     """
 
-    __slots__ = ("text", "_vstarts", "_rstarts", "limit", "strings")
+    __slots__ = ("text", "_vstarts", "_rstarts", "limit", "strings", "etext", "_eraw")
 
     def __init__(self, buf: bytes, limit: int) -> None:
         self.limit = limit  # Rohbytes ab hier gehören nicht zur Sicht
@@ -122,6 +122,23 @@ class _View:
         self.text = b"".join(parts)
         self._vstarts = vstarts
         self._rstarts = rstarts
+        # Zeilenbearbeitung beim Tippen: Backspace löscht das Zeichen davor ("hunx" BS
+        # ESC[K "ter2"). Zusätzlich zur Sicht wird der bearbeitete Text durchsucht; ein
+        # Treffer dort schwärzt den ganzen Rohbereich samt gelöschter Zeichen.
+        self.etext: bytes | None = None
+        self._eraw: list[int] = []
+        if b"\x08" in self.text:
+            vb = bytearray()
+            for part, rstart in zip(parts, rstarts, strict=True):
+                for k, ch in enumerate(part):
+                    if ch == 0x08:
+                        if vb:
+                            vb.pop()
+                            self._eraw.pop()
+                    else:
+                        vb.append(ch)
+                        self._eraw.append(rstart + k)
+            self.etext = bytes(vb)
 
     def raw(self, vi: int) -> int:
         """Roh-Offset des Sichtzeichens ``vi`` (0 <= vi < len(text))."""
@@ -199,6 +216,12 @@ class Redactor:
                 while i >= 0:
                     raw_hits.append(Hit(label, i, i + len(pat)))
                     i = buf.find(pat, i + 1, b)
+            if view.etext is not None:
+                er = view._eraw
+                i = view.etext.find(pat)
+                while i >= 0:
+                    raw_hits.append(Hit(label, er[i], er[i + len(pat) - 1] + 1))
+                    i = view.etext.find(pat, i + 1)
         if not raw_hits:
             return []
         raw_hits.sort(key=lambda h: (h.start, -(h.end - h.start)))
@@ -253,9 +276,17 @@ class Redactor:
             if final:
                 emit = len(buf)
             else:
-                hold = self._prefix_hold(view.text)
+                # Normal: die letzten max_len - 1 Zeichen warten (ein Secret kann noch
+                # kommen, auch nach einer Korrektur mit Backspace). Im Leerlauf nur ein
+                # echter Secret-Anfang, sonst stünde das Stromende ewig zurück.
+                hold = self._prefix_hold(view.text) if keep_prefix else self.max_len - 1
                 n = len(view.text)
-                emit = view.raw(n - hold) if hold else limit
+                emit = limit if not n or not hold else view.raw(max(0, n - hold))
+                if view.etext is not None:  # bearbeiteter Text: gleich viele Zeichen zurückhalten
+                    ehold = self._prefix_hold(view.etext) if keep_prefix else self.max_len - 1
+                    en = len(view.etext)
+                    if en and ehold:
+                        emit = min(emit, view._eraw[max(0, en - ehold)])
                 emit = min(emit, limit)
                 if len(buf) - emit > self.max_hold_raw:
                     emit = len(buf) - self.max_hold_raw

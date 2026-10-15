@@ -12,9 +12,12 @@ Shim an Daemon
                               "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"},
                   "resume_from_seq": int | null,
                   "stack": [Stage-Dicts] (Stapel des Shims),
-                  "bound_project_id": str | null, "bound_slug": str | null}
+                  "bound_project_id": str | null, "bound_slug": str | null,
+                  "gap_hint": "buffer_overflow" | null}
            Stapel und Bindung übernimmt der Daemon nur für ein Terminal, das er
-           noch nicht kennt (erster Kontakt, Daemon-Neustart).
+           noch nicht kennt (erster Kontakt, Daemon-Neustart). ``gap_hint``: Der
+           Ring hat Rahmen verdrängt; der Daemon sieht den Sprung im Offset vor
+           dem ``term.gap`` des Shims und vermerkt ihn mit diesem Grund.
     OUT    binär ``>QQqq`` (seq, stream_off, t_wall_ns, t_mono_ns) + Bytes.
            Bytes sind der aufgezeichnete Strom: genau das, was angezeigt wurde,
            ohne entfernte Ariadne-Marker und ohne gefilterte Sequenzen.
