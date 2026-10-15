@@ -1,6 +1,6 @@
 # Entwicklung
 
-> Stand v0.1-Backend (2026-10-14, nach den Korrekturen aus drei Reviews), Erfassung und Bedienung nach den Entscheiden vom 2026-10-15 (E22, E26, E28, E72, E95, E96; Vertrag v0.1-Bedienung). Ergänzt die [Lösungsarchitektur](architektur.md) um das, was man zum Arbeiten am Code braucht: Umgebung, Tests, Landkarte der Module und die bekannten Grenzen.
+> Stand v0.1-Backend (2026-10-14, nach den Korrekturen aus drei Reviews), Erfassung, Bedienung und Auswertung nach den Entscheiden vom 2026-10-15 (E22, E23, E26, E28, E42, E45, E72, E88, E95, E96; Vertrag v0.1-Bedienung), integriert und Ende zu Ende getestet am 2026-10-15. Ergänzt die [Lösungsarchitektur](architektur.md) um das, was man zum Arbeiten am Code braucht: Umgebung, Tests, Landkarte der Module und die bekannten Grenzen.
 
 ## Umgebung
 
@@ -23,20 +23,20 @@ Alle Tests laufen ohne Netz, nur in `tmp_path` und mit isolierten `HOME`/`XDG_*`
 
 | Ordner | Inhalt | Marker |
 |---|---|---|
-| `tests/unit/` | Fundament-Verträge (`test_foundation.py`), sicheres Öffnen, Kontext-argv, CLI-Ansichten, Mark-Hook-Regeln | |
+| `tests/unit/` | Fundament-Verträge (`test_foundation.py`, `test_contract_v01.py`), sicheres Öffnen, Kontext-argv, CLI-Ansichten (`test_cli_views.py`, `test_ausw_views.py`, `test_ausw_cli.py`), Mark-Hook-Regeln, Anmeldung des Terminals vor jeder Secret-Abfrage (`test_cli_secret_order.py`) | |
 | `tests/shim/` | Scanner, Marker, Hotkeys, Ringpuffer, Transport, Titel; PTY-Tests mit echter zsh/bash gegen einen Fake-Daemon | `pty` |
 | `tests/core/` | Krypto, Journal- und Blob-Vertrag (Memory und SQLCipher), Redaktor, Projekte, Daemon mit Fake-Shim (`test_daemon.py` Grundfluss, `test_daemon_capture.py` Daueraufnahme, Pause, Wechsel, Vorlauf, Zeit, Eingaben, Canary E72), CLI per Subprozess | |
 | `tests/unit/test_erf_*.py` | Writer: Zusammenfassen der Rahmen ohne Verlust an Zeitgenauigkeit (Hypothesis) | |
 | `tests/ingest/` | Scope, Ziele aus argv, Normalizer (Goldens, Hypothesis), Segmenter, Pipeline, Worker-Grenzen | |
 | `tests/parsers/`, `tests/golden/` | Parser einzeln und als Golden-Fälle (`input.*`, `meta.toml`, `expected.jsonl`) | |
-| `tests/projection/` | Claims, Zustände, Identität, Konflikte, Inbox, Status, Metasploitable2-Durchlauf | |
+| `tests/projection/` | Claims, Zustände, Identität, Konflikte, Inbox, Status, Metasploitable2-Durchlauf; Drei-Spuren-Regel (`test_ausw_lanes.py`), Evidenzgruppen und Arten, eigene Adressen und `undo`, Kontext aus dem Callback, goldene Ziele MS2 und Lame (`test_ausw_golden.py`) | |
 | `tests/integration/` | Daemon mit eingebauter Auswertung: Fake-Shim über echte Sockets, echte Parser in Workern, Begleitdateien, `net.route`, Ansichten, Entscheide, Import, Reparse, Redaktion | |
-| `tests/e2e/` | Flugschreiber komplett: `setup`, `init`, Daemon-Prozess, zsh mit Shim per pexpect, Fake-`nmap`, Fake-`nc`, `F12 h`, CLI-Ansichten, Journal-Prüfung, Canary | `e2e`, `pty` |
+| `tests/e2e/` | Flugschreiber komplett (`helpers.py`: isoliertes Lab, Fake-`nmap`, -`nc`, -`ip`, Titel per OSC 2): `test_flight_recorder.py` (setup, init, `F12 h`, CLI-Ansichten, Journal, Canary, Vorlauf über einen Absturz, Pause und Rebind), `test_daily_use.py` (Alltag: `start --passphrase-fd`, zwei parallele Terminals, nmap auf das Fixture-Netz, Karte `auto`, Inbox leer, keine Kali-Adresse als Host, Titel `(auto)` aus dem Callback, verschränkte Zeitstempel, `F12 r` nur in einem Terminal, `ariadne undo`, `ariadne stop`; Vorlauf zweier Terminals mit der Frage und der Passphrase im aufgezeichneten Terminal) | `e2e`, `pty` |
 
 Befehle:
 
 ```sh
-python -m pytest                                   # alles (etwa 110 s)
+python -m pytest                                   # alles (etwa 3 min, 1045 Tests)
 python -m pytest -m "not pty and not e2e"          # ohne echte Shells (schnell)
 python -m pytest tests/e2e -m e2e                  # nur der Flugschreiber
 python -m pytest tests/golden --update-golden      # Golden-Erwartungen neu schreiben, zeigt vorher den Diff
@@ -103,20 +103,22 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 | `ingest/segmenter.py`, `ingest/seg_activity.py` | Befehle, Kontextspannen, Einheiten; Aktivitätsprotokoll |
 | `ingest/units.py`, `ingest/unit_store.py`, `ingest/schema_units.py`, `ingest/db.py` | Einheiten, Zeilen, FTS5, Schema von `derived.db` |
 | `ingest/runner.py`, `ingest/worker.py` | Parser im Worker-Prozess ohne Schlüssel, mit rlimits; Ausgabe geprüft |
-| `ingest/projection.py`, `ingest/proj_build.py`, `ingest/claims.py`, `ingest/identity.py`, `ingest/schema_claims.py` | Claims, Konfidenz, Identitäten, Konflikte, Inbox, Status, Sichten |
-| `ingest/queries.py` | lesende Abfragen für die CLI-Ansichten, Suche, Reparse-Diff |
+| `ingest/projection.py`, `ingest/proj_build.py`, `ingest/claims.py`, `ingest/identity.py`, `ingest/schema_claims.py` | Claims, Evidenzgruppen, Konfidenz, Drei-Spuren-Regel, eigene Adressen, `d.unit.distrust`, Kontext aus dem Callback, Identitäten, Konflikte, Inbox, Status, Sichten |
+| `ingest/natures.py` | Arten der Prädikate (E45): `state` mit Verlauf, `version` mit Bereichen, `set` |
+| `ingest/queries.py` | lesende Abfragen für die CLI-Ansichten, Suche, Sammelbestätigung (`resolve_confirm`), `undo` (`resolve_distrust`, `cmd_ref`), Reparse-Diff |
+| `daemon/ops_eval.py` | ctl-Operationen der Auswertung (`show`, `search`, `claim.*`, `unit.distrust`, `reparse`), alles durch `redact_json` |
 | `parsers/*` | `nmap.xml`, `nmap.text`, `regex.net`, `listener.callback`, sichere XML- und Regex-Bausteine, Registry |
 | `scope/*` | Normalisierung, `ScopeMatcher`, Ziele aus argv |
 
-**CLI**: `cli/main.py` (alle Befehle), `cli/views.py` (Textansichten), `cli/setup.py` (Installer), `cli/doctor.py`.
+**CLI**: `cli/main.py` (Erfassung und Bedienung), `cli/analysis.py` (Befehle der Auswertung: `show`, `search`, `confirm`, `reject`, `undo`, `reparse`), `cli/common.py` (Daemon-Zugang, `read_secret` mit Zeitgrenze), `cli/views.py` (Textansichten), `cli/setup.py` (Installer), `cli/doctor.py`.
 
-**Leer (spätere Versionen)**: `ai/`, `rules/`, `export/`, `web/` (nur die gebaute SPA unter `web/static/`, ohne API).
+**Leer (spätere Versionen)**: `ai/` und `export/` (nur der Hinweis, dass jeder Ausgang `Redactor.redact_for_exit` nutzen muss), `rules/`, `web/` (nur die gebaute SPA unter `web/static/`, ohne API).
 
 ## Ablauf eines Befehls
 
 1. zsh sendet vor dem Befehl den C-Marker, danach den D-Marker. Der Shim prüft Nonce und Vordergrund und schickt `term.mark` (mit Shim-Zeit), die Ausgabe (`OUTX` mit Zeitindex) und das Getippte (`INPUT`) an den Daemon.
 2. Der Writer fasst Rahmen zusammen, schreibt alle 200 ms in `journal.db` (alles, verschlüsselt, ungeschwärzt) und bestätigt dem Shim. Ohne offenes Projekt hält der Daemon die Rahmen nur im Vorlauf (RAM).
-3. Commit-Hook: Die Auswertung verarbeitet nach 500 ms Ruhe die neuen Events im eigenen Thread. Fertige Einheiten gehen an die Parser im Worker, die Projektion berechnet Claims, Hosts, Services und Inbox in `derived.db`.
+3. Commit-Hook: Die Auswertung verarbeitet nach 500 ms Ruhe die neuen Events im eigenen Thread. Fertige Einheiten gehen an die Parser im Worker, die Projektion berechnet Claims, Hosts, Services und Inbox in `derived.db`. Im Profil lab gehen sichere Werte direkt als `auto` auf die Karte, die Inbox enthält nur, was zu entscheiden ist (Drei-Spuren-Regel). Nach jedem Durchgang meldet die Auswertung die Auto-Kontexte aus dem ersten Callback an den Daemon (Titel `(auto)`).
 4. Mark-Hook: Beim C-Marker auf Kali holt `ip route get` die Quell-IP (`net.route`). Beim D-Marker liest der Daemon die Begleitdateien (z. B. `-oA scans/lame`) sicher ein und schreibt `file.observed`; die XML wird zur eigenen Einheit.
 5. `ariadne show hosts` speichert alles Eingereihte, wartet auf einen Auswertungs-Durchgang und zeigt das Ergebnis.
 
@@ -128,9 +130,10 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 | `ariadne stop` | Projekt beenden und sperren |
 | `ariadne pause [--minutes N] [--terminal ID \| --all]`, `ariadne resume` | Pause dieses Terminals (Standard 10 min, wie `F12 r`) |
 | `ariadne status` | Daemon, Tresor, Projekt, Leerlauf-Uhr, Vorlauf, pro Terminal Zustand und Kontext |
-| `ariadne show hosts\|services\|inbox\|timeline\|keysteps\|pending` | Textansichten, alle Werte über `term_safe`, Secrets maskiert |
+| `ariadne show hosts\|services\|inbox\|timeline\|keysteps\|pending` | Textansichten, alle Werte über `term_safe`, Secrets maskiert, eigene Secrets ersetzt; `auto` und Zähler der stillen Spur, Zeitachse mit «nmap 14:02: 21 Werte übernommen (ariadne undo 9f3c1a7e@1234)» |
 | `ariadne search TEXT` | Volltextsuche über die Ausgabe (ohne Prompt-Echo), mit Kontext-Host |
-| `ariadne confirm g1a2b3c4d` / `ariadne confirm <claim>` | Sammelbestätigung einer Inbox-Gruppe bzw. eines Claims (Präfix ab 8 Zeichen) |
+| `ariadne undo 9f3c1a7e@1234 [--reason TEXT]` | Werte eines Befehls verwerfen (`d.unit.distrust`); Kurz-ID wie in `ariadne status` |
+| `ariadne confirm g1a2b3c4d` / `ariadne confirm <claim>` | Sammelbestätigung einer Inbox-Gruppe (nur sichere Werte, der Rest wird pro Grund gemeldet) bzw. eines Claims (Präfix ab 8 Zeichen) |
 | `ariadne reject <claim> [--reason]` | Claim verwerfen |
 | `ariadne mark foothold\|privesc\|pivot\|loot [--host H] [--note N]` | Schlüsselschritt, im Terminal mit dessen Offset und Kontext |
 | `ariadne import PFAD [--host H]` | Datei ausdrücklich übernehmen (auch ausserhalb des Arbeitsbereichs, nie über Symlinks, nie aus der Sperrliste) |
@@ -168,6 +171,15 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 - **`ip route get`** nur für IP-Literale aus argv (höchstens 8 pro Befehl), nie für Namen. Fehlt `ip`, gibt es keine Quell-IP.
 - **Begleitdateien** tragen die Empfangszeit im Daemon; sie erscheinen nach dem Befehl, der sie erzeugt hat, unter Umständen nach weiteren schnellen Befehlen.
 - **Terminals ohne BYE** (Shim abgestürzt) bleiben im Register und bekommen kein `term.close`. Mit BYE schreibt der Daemon `term.close` auch während einer Pause. Ein Terminal, das im Vorlauf endet, bleibt übernehmbar, bis sein Fenster abläuft.
+- **Drei-Spuren-Regel.** Systemkonten zählt die Projektion über das Attribut `uid` (1 bis 999); bis ein passwd-Parser (v0.2) es liefert, bleibt der Zähler 0. Ebenso kommen «vom Ziel angeboten» und «heuristisch, wichtig» erst mit Credential-Parsern im echten Betrieb vor. Hostnamen ausserhalb des Scopes, allgemeinere Versionen und ältere Zustände bleiben still. Die Sammelbestätigung lässt auch verdächtige Quellen aus; eigene Adressen in der Ausgabe der Gruppe zählt sie als `own_address`, ohne einen Claim dafür anzulegen.
+- **Eigene Adressen** kennt die Auswertung nur aus `net.local_addrs` (Daemon, `/proc`) und `net.route` (`ip route get` bei IP-Literalen in argv). Fehlen beide, bleibt Kali als Nebel ohne Inbox-Eintrag stehen. Eigene Adressen verfallen nie.
+- **Kontext aus dem Callback** nur im Profil lab (customer schlägt nur vor). Mehrdeutig sind mehrere erste Callbacks oder vertrauenswürdige Folge-Callbacks mit anderer IP; Callback-Zeilen, die das Ziel selbst ausgibt, zählen nicht. Offene Listener-Stufen parst die Pipeline bis 200 Zeilen sofort, danach wie bisher erst bei Stille oder Sitzungsende. Meldet die Auswertung einen Auto-Host nicht mehr, nimmt der Daemon ihn aus dem Live-Stapel aufnehmender Terminals.
+- **`ariadne undo`** nur für Befehle, aus denen Werte stammen. Zwischen `confirm` und `undo` gilt der spätere Entscheid; nur mit `d.claim.edit` gesetzte Werte überstehen `undo`. Eine Datei ohne Host (z. B. `loot/`) erzeugt im Profil lab «Kontext klären», das nur ein neuer Import mit `--host` löst.
+- **Kurz-IDs.** `ariadne status`, `ariadne undo` und «Kontext klären» zeigen die letzten 8 Zeichen der `terminal_id` (der Anfang einer UUIDv7 ist die Startzeit und bei Terminals aus derselben Minute gleich). `undo` und `--terminal` nehmen auch den Anfang, solange er eindeutig ist.
+- **Secret-Abfragen der CLI** enden nach 10 Minuten (`SECRET_PROMPT_S`), bevor die Anmeldung des Terminals (`pause_terminal`, 11 min) abläuft. Danach `ariadne start` neu aufrufen.
+- **`project close`** beendet das Projekt wie `stop` (`stopped: true`, `system.project_end` mit Grund `stop`), sperrt aber nicht; gebundene Terminals gehen in `held`.
+- **Leerlauf** zählt jeden Ausgaberahmen, auch im Vorlauf. Ein Programm mit Dauerausgabe (`watch`, `top`) hält das Projekt beliebig lange offen.
+- **Grosse Module.** `daemon/core.py` (rund 1950 Zeilen) und `ingest/proj_build.py` (rund 1400 Zeilen) sind nach dem Umbau gross; das Aufteilen ist offen.
 - Alle Messwerte stammen aus dem Container, nicht aus der Kali-VM; QTerminal ist ungeprüft.
 
 ## Offene Abweichungen von der Architektur
@@ -177,9 +189,9 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 - **3.1, Doppel-Wrapping:** «nested» gilt nicht mehr für jeden Shim unter den Vorfahren, sondern nur, wenn der Prozess direkt unter einem Vorfahren-Shim dasselbe kontrollierende Terminal hat wie die neue Shell (`/proc/<pid>/stat`, Feld `tty_nr`). Sonst bliebe jedes Fenster still unaufgezeichnet, das aus einer aufgezeichneten Shell startet. Den Multiplexer-Sonderfall braucht es dafür nicht mehr.
 - **3.3 und 3.5, Kontext-Stapel:** Massgeblich ist der Stapel des Shims (er sieht alle Marker, auch ohne Aufnahme). Der Daemon übernimmt ihn per `HELLO` (neues Terminal, Daemon-Neustart) und `req.ctx.sync` (ohne Aufnahme); der Shim übernimmt `STATE.stack` nur nach einem Kontext-Entscheid oder einem automatischen Host aus der Auswertung (`STATE.ctx_version`, `host_source="auto"`, nie im Journal). Der Shim wertet wie Daemon und Segmenter `cmd_expanded` aus (Aliase).
 - **3.6, Projektbindung:** Die Bindung reist im `HELLO` mit und übersteht so einen Daemon-Neustart. Kontext-Entscheide eines Terminals, das nicht aufnimmt, werden nicht gespeichert (siehe Grenzen).
-- **3.7, Protokoll:** `HELLO` trägt zusätzlich `stack`, `bound_project_id`, `bound_slug` und `gap_hint`, `STATE` zusätzlich `ctx_version` und `daemon_id` (Neustart erkennen, Lückengrund `daemon_down`). Neue Anfrage `req.ctx.sync`, neuer Lückengrund `multiplexer`.
+- **3.7, Protokoll:** Die Felder von `HELLO` und `STATE` stehen vollständig nur im Docstring von `_shim/protocol.py` (unter anderem `gap_hint`, Lückengrund `daemon_down`, Anfrage `req.ctx.sync`); die Architektur nennt nur die wichtigsten.
 - **3.8, Haltefrist:** Eine Folge, die länger als 8 KiB oder 100 ms offen bleibt, geht nicht mehr als normale Bytes weiter (fail-closed, siehe Grenzen). Abgebrochene Strings gefilterter Arten werden verworfen. Die Architektur sollte das so festhalten.
 - **5.8, IDNA:** Statt IDNA2003 überall gilt für Namen mit UTS-46-Deviation-Zeichen fail-closed `unknown`.
-- **8.5, Schwärzen:** Seit E72 kein Schwärzen vor dem Speichern mehr (kein Rückhalt, `file.observed.redactions` bleibt leer); die Architektur beschreibt noch den alten Weg. Eigene Secrets unter 4 Zeichen lehnt `secrets add` ab.
-- **3.6 und 3.7, Bedienung:** Kein REC-Schalter (E22); `rec.on`/`rec.status` antworten nur noch zur Kompatibilität, `rec.off`/`rec.toggle` mit Fehler `removed`. Protokoll v2 (`OUTX`, `INPUT`, `req.pause`, `req.rebind`, `req.status`), siehe Docstring von `_shim/protocol.py`.
+- **8.5, Schwärzen:** Eigene Secrets unter 4 Zeichen lehnt `secrets add` ab (die Architektur nennt keine Mindestlänge).
+- **`docs/web-api.md`** beschreibt noch `PUT /api/v1/rec` und die Modi `on`, `waiting`, `offline`. Mit der Web-API wird daraus Pause und Fortsetzen pro Terminal (`term.pause`/`term.resume` mit `source = webui`) und der Zustand pro Terminal aus `status.terminal_states`.
 - **8.6, Daemon-Start:** Die systemd-Unit startet mit `python -I -m ariadne.daemon` und `WorkingDirectory=/`, ebenso `--detach` (`-I`), damit kein Modul aus dem Arbeitsordner (z. B. Loot im Home) in den Prozess mit allen Schlüsseln lädt.

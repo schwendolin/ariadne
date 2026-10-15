@@ -21,23 +21,17 @@ Ein Fake-``ip`` liefert die Quell-IP für ``ip route get`` (es wird nichts gesen
 
 from __future__ import annotations
 
-import contextlib
-import os
 import re
 import shutil
-import signal
-import subprocess
 import sys
 import time
-from pathlib import Path
 
 import pexpect
 import pytest
 
 from ariadne.crypto.vault import OperatorVault
-from ariadne.daemon.client import CtlClient
-from ariadne.paths import default_paths
 from ariadne.project.service import ProjectService
+from tests.e2e.helpers import F12, PASSPHRASE, PROMPT, SECRET, Lab, run_cmd, scan
 from tests.integration.helpers import LHOST, TARGET, ms2
 
 pytestmark = [
@@ -46,161 +40,12 @@ pytestmark = [
     pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh fehlt"),
 ]
 
-PROMPT = "PRMT> "
-PASSPHRASE = "e2e-Passphrase-lang-genug"
-SECRET = "Kanarien-Geheimnis-8472"
-F12 = b"\x1b[24~"
-
-FAKE_NMAP = """#!{python} -I
-import sys
-args = sys.argv[1:]
-data = {data!r}
-if "-oA" in args:
-    base = args[args.index("-oA") + 1]
-    for ext, src in ((".xml", "lame.xml"), (".nmap", "lame.txt"), (".gnmap", None)):
-        with open(base + ext, "wb") as fh:
-            fh.write(open(data + "/" + src, "rb").read() if src else b"# Nmap done\\n")
-sys.stdout.buffer.write(open(data + "/lame.txt", "rb").read())
-"""
-
-FAKE_NC = """#!{python} -I
-import sys
-print("listening on [any] 4444 ...", flush=True)
-print("connect to [{lhost}] from (UNKNOWN) [{target}] 49152", flush=True)
-answers = {{"id": "uid=33(www-data) gid=33(www-data) groups=33(www-data)", "hostname": "lame"}}
-while True:
-    sys.stdout.write("$ ")
-    sys.stdout.flush()
-    line = sys.stdin.readline()
-    if not line or line.strip() == "exit":
-        break
-    print(answers.get(line.strip(), "sh: 1: not found"), flush=True)
-"""
-
-FAKE_IP = """#!/bin/sh
-echo "$3 via 10.0.2.2 dev tun0 src {lhost} uid 1000"
-echo "    cache"
-"""
-
-
-class Lab:
-    def __init__(self, base: Path) -> None:
-        self.base = base
-        self.home = base / "h"
-        self.run = base / "r"
-        self.bin = base / "bin"
-        self.data = base / "data"
-        for d in (self.home, self.bin, self.data):
-            d.mkdir()
-        self.run.mkdir(mode=0o700)
-        self.env = {
-            "HOME": str(self.home),
-            "XDG_CONFIG_HOME": str(self.home / ".config"),
-            "XDG_DATA_HOME": str(self.home / ".local" / "share"),
-            "XDG_STATE_HOME": str(self.home / ".local" / "state"),
-            "XDG_CACHE_HOME": str(self.home / ".cache"),
-            "XDG_RUNTIME_DIR": str(self.run),
-            "ARIADNE_PROJECTS_ROOT": str(self.home / "ariadne"),
-            "PATH": f"{self.bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
-            "LANG": "C.UTF-8",
-            "TERM": "xterm-256color",
-            "SHELL": shutil.which("zsh") or "/bin/zsh",
-        }
-        self.paths = default_paths(self.env)
-        self.daemon: subprocess.Popen[bytes] | None = None
-
-    def tools(self) -> None:
-        (self.data / "lame.xml").write_bytes(ms2("xml"))
-        (self.data / "lame.txt").write_bytes(ms2("text"))
-        for name, text in (("nmap", FAKE_NMAP.format(python=sys.executable, data=str(self.data))),
-                           ("nc", FAKE_NC.format(python=sys.executable, lhost=LHOST, target=TARGET)),
-                           ("ip", FAKE_IP.format(lhost=LHOST))):
-            f = self.bin / name
-            f.write_text(text)
-            f.chmod(0o755)
-
-    def cli(self, *args: str, secret: str | None = None, fd_flag: str = "--passphrase-fd",
-            check: bool = True) -> str:
-        argv = [sys.executable, "-m", "ariadne.cli.main", *args]
-        pass_fds: tuple[int, ...] = ()
-        r = None
-        if secret is not None:
-            r, w = os.pipe()
-            os.write(w, secret.encode() + b"\n")
-            os.close(w)
-            argv += [fd_flag, str(r)]
-            pass_fds = (r,)
-        try:
-            res = subprocess.run(argv, env=self.env, capture_output=True, text=True, timeout=120,
-                                 pass_fds=pass_fds, stdin=subprocess.DEVNULL, check=False)
-        finally:
-            if r is not None:
-                os.close(r)
-        if check:
-            assert res.returncode == 0, f"ariadne {' '.join(args)}: {res.stdout}{res.stderr}"
-        return res.stdout + res.stderr
-
-    def start_daemon(self) -> None:
-        self.paths.state_dir.mkdir(parents=True, exist_ok=True)
-        log = open(self.paths.state_dir / "e2e-daemon.log", "ab")  # noqa: SIM115
-        self.daemon = subprocess.Popen([sys.executable, "-m", "ariadne.daemon"], env=self.env,
-                                       stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd="/",
-                                       start_new_session=True)
-        log.close()
-        client = CtlClient(self.paths.ctl_sock, timeout=5)
-        deadline = time.monotonic() + 10
-        while not client.ping():
-            assert self.daemon.poll() is None, "Daemon beendet sich sofort"
-            assert time.monotonic() < deadline, "Daemon antwortet nicht"
-            time.sleep(0.05)
-
-    def stop_daemon(self) -> int | None:
-        """``ariadne daemon stop``, notfalls SIGTERM. Gibt den Exit-Code zurück."""
-        if self.daemon is None:
-            return None
-        with contextlib.suppress(Exception):
-            self.cli("daemon", "stop", check=False)
-        try:
-            rc = self.daemon.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            self.daemon.send_signal(signal.SIGTERM)
-            rc = self.daemon.wait(timeout=10)
-        self.daemon = None
-        return rc
-
-    def wait_status(self, needle: str, timeout: float = 10.0) -> str:
-        deadline = time.monotonic() + timeout
-        while True:
-            out = self.cli("status")
-            if needle in out:
-                return out
-            assert time.monotonic() < deadline, out
-            time.sleep(0.1)
-
-
-def run_cmd(c: pexpect.spawn, cmd: str, timeout: float = 30) -> str:
-    c.sendline(cmd)
-    c.expect_exact(PROMPT, timeout=timeout)
-    return c.before.decode("utf-8", "replace")
-
-
-def scan(root: Path, needles: list[bytes]) -> list[str]:
-    hits = []
-    for f in root.rglob("*"):
-        if f.is_file() and not f.is_symlink():
-            data = f.read_bytes()
-            hits += [f"{f}: {n[:8]!r}" for n in needles if n in data]
-    return hits
-
 
 @pytest.fixture
-def lab(tmp_path_factory: pytest.TempPathFactory):
-    lab = Lab(tmp_path_factory.mktemp("e2e"))  # kurzer Pfad: AF_UNIX-Grenze
-    lab.tools()
-    try:
-        yield lab
-    finally:
-        lab.stop_daemon()
+def lab(lab: Lab) -> Lab:
+    """Lab mit den Fixture-Daten von Metasploitable2, umgeschrieben auf Lame (10.10.10.3)."""
+    lab.tools(ms2("xml"), ms2("text"), target=TARGET, lhost=LHOST)
+    return lab
 
 
 def test_flight_recorder(lab: Lab) -> None:

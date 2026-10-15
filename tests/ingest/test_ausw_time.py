@@ -231,3 +231,19 @@ def test_schema_stale_detection(tmp_path):
     finally:
         fresh.close()
         old.close()
+
+
+def test_suspect_shim_time_falls_back_to_receive_time():
+    from ariadne.ingest.seg_stream import chunk_time, record_time
+
+    j = MemoryJournal()
+    good = j.append("term.out", {"terminal_id": "t", "stream_off": 0, "length": 1, "t_shim_ns": 5,
+                                 "mono_ns": 7}, b"x", terminal_id="t", stream_off=0, ts_utc_ns=99)
+    bad = j.append("term.out", {"terminal_id": "t", "stream_off": 1, "length": 1, "t_shim_ns": 5,
+                                "mono_ns": 7, "time_suspect": True}, b"y", terminal_id="t", stream_off=1,
+                   ts_utc_ns=99)
+    old = j.append("term.mark", {"terminal_id": "t", "stream_off": 2, "mark": "A", "counter": 1,
+                                 "fg_shell": True}, terminal_id="t", stream_off=2, ts_utc_ns=42)
+    assert record_time(good) == (5, 7, "test-boot")
+    assert chunk_time(bad) == (99, None, "test-boot", [])
+    assert record_time(old) == (42, None, "test-boot")  # altes Journal ohne Zeitfelder

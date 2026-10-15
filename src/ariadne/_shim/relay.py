@@ -514,6 +514,7 @@ class Shim:
             self._update_capture(now)
             self._refresh_title(now)
         elif self._pause_until is not None and now >= self._title_pause_t + TITLE_PAUSE_S:
+            self._title_pause_t = now  # Restminuten im Titel nachführen
             self._refresh_title(now)
         if self.prompt is not None and now >= self._prompt_t + PROMPT_IDLE_S:
             self.prompt.cancelled = self.prompt.done = True
@@ -804,6 +805,7 @@ class Shim:
             self._mux_sent = self._mux_on  # HELLO trug den Wert schon
         until = st.get("pause_until_ns")
         self._pause_until = until if type(until) is int and until > 0 else None
+        self._title_pause_t = now
         if self._pause_until is not None and rec == "paused":
             reason = "pause"
         if first and rec not in P.CAPTURE_STATES and t is not None:

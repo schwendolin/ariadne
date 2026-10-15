@@ -415,8 +415,13 @@ def _tix(raw: Iterable[Any] | None) -> list[tuple[int, int]]:
 
 
 def record_time(rec: Any) -> tuple[int, int | None, str | None]:
-    """(Wanduhr, monotone Uhr, boot_id) eines Events: Shim-Zeit, sonst Empfangszeit ohne ``mono``."""
+    """(Wanduhr, monotone Uhr, boot_id) eines Events: Shim-Zeit, sonst Empfangszeit ohne ``mono``.
+
+    Hat der Daemon die Shim-Zeit als unplausibel markiert (``time_suspect``), gilt die
+    Empfangszeit und keine monotone Uhr."""
     h: Mapping[str, Any] = rec.header
+    if h.get("time_suspect") is True:
+        return rec.ts_utc_ns, None, rec.boot_id
     return shim_time(h, rec.ts_utc_ns), _int(h.get("mono_ns")), rec.boot_id
 
 

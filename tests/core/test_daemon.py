@@ -7,6 +7,7 @@ stehen in ``test_daemon_capture.py``.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -129,6 +130,25 @@ def test_pause_terminal_sensitive_output(paths, operator):
         gaps = [{k: r.header[k] for k in ("stream_off", "reason", "bytes_lost")}
                 for r in j.iter_events(kinds=["term.gap"])]
         assert gaps == [{"stream_off": 16, "reason": "sensitive_output", "bytes_lost": 26}]
+        await shim.close()
+
+    run(paths, operator, scenario)
+
+
+def test_pause_terminal_seconds_outlast_the_secret_prompt(paths, operator):
+    """Die CLI meldet ihr Terminal länger an als ``pause_timeout`` (Abfrage der Passphrase)."""
+    async def scenario(d: Daemon) -> None:
+        res = await ctl_ok(paths.ctl_sock, "pause_terminal", terminal_id="term-cli-000002", seconds=660)
+        assert res["pending"]
+        shim = FakeShim(paths.term_sock, "term-cli-000002")
+        await shim.connect(proto=2)
+        await shim.wait_state(rec="preroll")
+        left = d.terminals["term-cli-000002"].pause.deadline - time.monotonic()
+        assert 600 < left <= 660
+        await ctl_ok(paths.ctl_sock, "pause_terminal", terminal_id="term-cli-000002", seconds=5)
+        assert d.terminals["term-cli-000002"].pause.deadline - time.monotonic() > 600  # nie verkürzt
+        bad = await ctl(paths.ctl_sock, "pause_terminal", terminal_id="term-cli-000002", seconds=99999)
+        assert not bad["ok"]
         await shim.close()
 
     run(paths, operator, scenario)

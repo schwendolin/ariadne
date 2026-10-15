@@ -580,6 +580,17 @@ class ContextStack:
             return True
         return False
 
+    def clear_auto_host(self, opened_at: int) -> bool:
+        """Auto-Host der Stufe mit ``opened_at`` entfernen, wenn die Auswertung ihn nicht mehr
+        meldet (z. B. zweiter Callback, Scope geändert). Hosts des Nutzers bleiben. Gibt zurück,
+        ob sich etwas geändert hat."""
+        for i in range(1, len(self.stages)):
+            st = self.stages[i]
+            if st.opened_at == opened_at and st.host is not None and st.host_source == "auto":
+                self.stages[i] = replace(st, host=None, host_source=None)
+                return True
+        return False
+
     def push(self, *, kind: str = "unknown", host: str | None = None, user: str | None = None,
              offset: int = 0, source: str = "hotkey") -> None:
         self.stages.append(Stage(kind=kind, host=host, user=user, opened_at=offset, source=source))

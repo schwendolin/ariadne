@@ -132,10 +132,12 @@ def _inbox_item(it: dict[str, Any]) -> str:
                 f"{SCOPE_TEXT.get(str(it.get('scope')), 'Scope unbekannt')}]{flag}")
     p = it.get("payload") or {}
     if kind == "ctx_unknown" and p.get("path"):
-        return (f"Kontext klären: Datei {s(p['path'], 120)} ({s(p.get('values'), 6)} Werte ohne Host; "
+        n = p.get("values") if isinstance(p.get("values"), int) else 0
+        return (f"Kontext klären: Datei {s(p['path'], 120)} ({n} {'Wert' if n == 1 else 'Werte'} ohne Host; "
                 "neu mit ariadne import PFAD --host HOST)")
     if kind in ("ctx_unknown", "ctx_suggestion"):
-        txt = f"Kontext klären: Terminal {s(p.get('terminal_id'), 8)}… ab Offset {s(p.get('from_off'), 12)}"
+        term = str(p.get("terminal_id") or "")[-8:]  # Kurz-ID wie in ariadne status
+        txt = f"Kontext klären: Terminal {s(term, 8)} ab Offset {s(p.get('from_off'), 12)}"
         txt += f", Stufe {s(p.get('kind'), 12)}, {s(p.get('units'), 6)} Einheiten"
         if p.get("candidate"):
             txt += f", Kandidat aus argv: {s(p['candidate'], 60)}"
@@ -216,7 +218,7 @@ def _timeline(items: list[dict[str, Any]], full: bool) -> list[str]:
 
 
 def _adopted_line(e: dict[str, Any]) -> str:
-    """«nmap 14:02: 21 Werte übernommen (ariadne undo 0199a2b3@1234)»."""
+    """«nmap 14:02: 21 Werte übernommen (ariadne undo 9f3c1a7e@1234)»."""
     title = str(e.get("title") or "")
     tool = s(title.split()[0] if title.split() else "Befehl", 32)
     ref = s(e.get("cmd_ref"), 64)

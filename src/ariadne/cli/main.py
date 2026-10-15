@@ -28,7 +28,7 @@ from typing import Any
 
 from ariadne import __version__
 from ariadne.cli import analysis
-from ariadne.cli.common import CliError, _call, _client, _terminal_id, read_secret, s, say
+from ariadne.cli.common import SECRET_PROMPT_S, CliError, _call, _client, _terminal_id, read_secret, s, say
 from ariadne.crypto.vault import MIN_PASSPHRASE, OperatorVault
 from ariadne.daemon.client import CtlError, DaemonUnavailable
 from ariadne.paths import Paths, default_paths
@@ -37,11 +37,15 @@ __all__ = ["main", "build_parser", "CliError"]
 
 
 def _pause_this_terminal(paths: Paths) -> None:
-    """Meldet einen Befehl an, der Schlüsselmaterial zeigt (``term.gap`` sensitive_output)."""
+    """Meldet einen Befehl an, der Schlüsselmaterial zeigt (``term.gap`` sensitive_output).
+
+    Die Anmeldung gilt bis zum nächsten Prompt, höchstens etwas länger als eine Secret-Abfrage
+    dauern darf (:data:`SECRET_PROMPT_S`). Muss vor jedem ``read_secret`` stehen.
+    """
     tid = os.environ.get("ARIADNE_TERMINAL_ID")
     if tid:
         try:
-            _call(paths, "pause_terminal", terminal_id=tid)
+            _call(paths, "pause_terminal", terminal_id=tid, seconds=SECRET_PROMPT_S + 60)
         except (CtlError, DaemonUnavailable):
             pass
 
@@ -73,12 +77,14 @@ def cmd_setup(paths: Paths, args: argparse.Namespace) -> int:
 def cmd_init(paths: Paths, args: argparse.Namespace) -> int:
     if OperatorVault(paths.operator_dir).exists:
         raise CliError("Operator-Tresor existiert bereits")
+    if args.passphrase_fd is None and not sys.stdin.isatty():
+        raise CliError("keine interaktive Eingabe; --passphrase-fd N verwenden")
     say("Neuer Operator-Tresor. Die Passphrase entsperrt alle lab-Projekte.")
+    _client(paths)
+    _pause_this_terminal(paths)  # vor getpass: die Eingabe kommt sonst in den Vorlauf (E26)
     pw = read_secret("Passphrase: ", args.passphrase_fd, confirm=True)
     if len(pw) < MIN_PASSPHRASE:
         raise CliError(f"Passphrase zu kurz (mindestens {MIN_PASSPHRASE} Zeichen)")
-    _client(paths)
-    _pause_this_terminal(paths)
     res = _call(paths, "init", passphrase=pw, handle=args.handle)
     say("Tresor angelegt und entsperrt.")
     say()

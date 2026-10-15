@@ -72,11 +72,16 @@ def group_ref(group_key: str) -> str:
 
 
 def cmd_ref(cmd_id: str | None) -> str | None:
-    """Kurzform einer ``cmd_id``: ``<8 Zeichen terminal_id>@<Offset>``."""
+    """Kurzform einer ``cmd_id``: ``<letzte 8 Zeichen der terminal_id>@<Offset>``.
+
+    Das Ende der terminal_id (UUIDv7) ist zufällig; der Anfang ist die Startzeit und
+    bei Terminals, die in derselben Minute starten, gleich. ``ariadne status`` zeigt
+    dieselbe Kurz-ID.
+    """
     if not isinstance(cmd_id, str) or "@" not in cmd_id:
         return None
     term, _, off = cmd_id.rpartition("@")
-    return f"{term[:8]}@{off}"
+    return f"{term[-8:]}@{off}"
 
 
 def _json(text: Any, default: Any) -> Any:
@@ -363,11 +368,14 @@ def resolve_claim(conn: Any, ref: str) -> str:
 
 
 def resolve_cmd(conn: Any, ref: str) -> str:
-    """Volle ``cmd_id`` zu einer ``cmd_id`` oder ihrer Kurzform ``<8 Zeichen>@<Offset>``."""
+    """Volle ``cmd_id`` zu einer ``cmd_id`` oder ihrer Kurzform ``<8 Zeichen>@<Offset>``.
+
+    Die Kurzform nimmt das Ende der terminal_id (:func:`cmd_ref`) oder ihren Anfang.
+    """
     ref = ref.strip()
     term, sep, off = ref.rpartition("@")
     if not sep or not off.isdigit() or len(term) < 8 or len(ref) > 200:
-        raise RefError("ungültiger Verweis (Befehl wie 0199a2b3@1234, siehe ariadne show timeline)")
+        raise RefError("ungültiger Verweis (Befehl wie 9f3c1a7e@1234, siehe ariadne show timeline)")
     known: set[str] = set()
     for table in ("obs_unit", "unit", "cmd_block"):
         try:
@@ -377,7 +385,8 @@ def resolve_cmd(conn: Any, ref: str) -> str:
             continue
     if ref in known:
         return ref
-    hits = sorted(c for c in known if c.startswith(term) and c.rpartition("@")[2] == off)
+    hits = sorted(c for c in known if c.rpartition("@")[2] == off
+                  and (c.startswith(term) or c.rpartition("@")[0].endswith(term)))
     if not hits:
         raise RefError("Befehl nicht gefunden (ariadne show timeline)")
     if len(hits) > 1:

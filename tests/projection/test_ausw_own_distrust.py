@@ -122,7 +122,7 @@ def test_distrust_rejects_only_values_from_that_command():
     os_ = c[(H.key, "host.os", "Linux")]  # auch von Befehl B: nur geschwächt
     assert (os_["state"], os_["confidence"]) == ("auto", 0.85)
     assert rows(conn, "SELECT cmd_id, rejected, weakened FROM unit_distrust") == [(CMD_A, 2, 1)]
-    assert queries.distrust_result(conn, CMD_A) == {"cmd_id": CMD_A, "cmd_ref": "0199a2b3@100",
+    assert queries.distrust_result(conn, CMD_A) == {"cmd_id": CMD_A, "cmd_ref": "00000001@100",
                                                     "rejected": 2, "weakened": 1}
     dis = rows(conn, "SELECT group_key, distrusted FROM claim_source WHERE claim_key = ? ORDER BY 1",
                os_["claim_key"])
@@ -196,3 +196,21 @@ def test_resolve_cmd_short_and_full():
         except queries.RefError:
             continue
         raise AssertionError(bad)
+
+
+def test_cmd_ref_unique_for_terminals_started_in_the_same_minute():
+    """UUIDv7: Terminals, die kurz nacheinander starten, haben denselben Anfang der terminal_id.
+    Die Kurzform nimmt deshalb das zufällige Ende (wie ``ariadne status``)."""
+    conn, p = _two_commands()
+    other = "0199a2b3-0000-7000-8000-00000000beef@100"  # gleicher Anfang, gleicher Offset wie CMD_A
+    apply_items(p, make_unit("x", unit_id="o", cmd_id=other), [])
+    p.rebuild()
+    assert queries.cmd_ref(CMD_A) == "00000001@100" and queries.cmd_ref(other) == "0000beef@100"
+    assert queries.resolve_cmd(conn, "00000001@100") == CMD_A
+    assert queries.resolve_cmd(conn, "0000beef@100") == other
+    try:
+        queries.resolve_cmd(conn, "0199a2b3@100")  # Anfang: nicht eindeutig
+    except queries.RefError as exc:
+        assert "nicht eindeutig" in str(exc)
+    else:
+        raise AssertionError("Anfang zweier Terminals darf nicht eindeutig sein")

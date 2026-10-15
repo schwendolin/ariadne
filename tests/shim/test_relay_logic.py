@@ -139,6 +139,8 @@ def test_pause_stops_capture_and_gap_pause_even_without_bytes():
     shim._refresh_title(time.monotonic())
     assert b"[PAUSE 9 min lame]" in shim._disp
     assert shim._hello()["pause_until_ns"] == until  # übersteht einen Daemon-Neustart
+    shim._tick(time.monotonic())
+    assert shim._timeout(time.monotonic()) > 20  # keine Dauerschleife während der Pause
     t.state_msg(shim, False, rec="on", project="lame", pause_until_ns=None)
     gap = [f for k, f in t.events if k == "term.gap"]
     assert gap and gap[0]["reason"] == "pause" and gap[0]["bytes_lost"] == 0

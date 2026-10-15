@@ -87,7 +87,7 @@ def register(sub: Any) -> None:
     sp.set_defaults(fn=cmd_confirm)
 
     sp = sub.add_parser("undo", help="Werte eines Befehls verwerfen (Rückgängig pro Befehl)")
-    sp.add_argument("ref", help="Befehl wie 0199a2b3@1234 (siehe ariadne show timeline) oder volle cmd_id")
+    sp.add_argument("ref", help="Befehl wie 9f3c1a7e@1234 (siehe ariadne show timeline) oder volle cmd_id")
     sp.add_argument("--reason", help="Grund (steht im Journal)")
     sp.set_defaults(fn=cmd_undo)
 

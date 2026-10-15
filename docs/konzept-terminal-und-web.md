@@ -480,6 +480,8 @@ Die Web-Ebene zeigt danach: http:80 → `/`, `/admin-old/` (Schlüssel helpdesk)
 | **v0.2** | Eingabemarken, `remote_cmd`, Kontext aus dem Callback, `shell.context`; Ontologie v2, Formparser, Secrets als Claims; Kernparser nach Häufigkeit mit `ariadne fixture export` und Parser-Abdeckung; KI-Extraktion mit Belegprüfung; Finding-Vorschläge aus Regeln im Reiter Findings; Lagebild mit verdichteter Zeitachse; Zeitindex (Protokoll v2), RAM-Vorlauf, zstd, Speicherwächter; Browser zuerst als Minimal-Schnitt mit Speichergrenzen, dann Login-Erkennung, HAR- und Burp-Import, Web-Baum in der UI; `setup --root` |
 | **v0.3** | Firefox-Erweiterung (`web.nav`, `web.dom`, Tab-Screenshot), Burp in der Kette als Option, Caido-Import, faraday_plugins als optionale Brücke, Findings mit CVSS, Testprofil im verschlüsselten Arbeitsbereich, Scope-Sperre im Recorder für customer. Die Webshots entfallen |
 
+Stand 2026-10-15: umgesetzt sind Shim-Zeit an jedem Ereignis mit Zeitindex und Sortierung nach monotoner Uhr, das Zusammenfassen der Rahmen im Writer, Eingaben ohne Echo-Vergleich, `ariadne start`, `stop` und `pause` mit gespeichertem Zustand und Rebind, der RAM-Vorlauf, die Multiplexer-Pause, Schwärzen nur an den Ausgängen sowie die Drei-Spuren-Regel mit Evidenzgruppen, eigenen Adressen, Prädikat-Arten, `d.unit.distrust` und Kontext aus dem Callback (gemessen: MS2 86 → 0, Lame 23 → 0 Inbox-Einträge); offen bleiben Echo-Vergleich mit `remote_cmd`, zstd und Speicherwächter.
+
 Ehrlich gesagt wird v0.2 damit deutlich grösser. Wenn es eng wird, würde ich den Browser auf den Minimal-Schnitt plus Importe begrenzen und den Rest nach v0.3 schieben, nicht die Kette.
 
 ### 5.4 Wo die Berichte auseinandergingen

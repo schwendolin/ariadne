@@ -687,8 +687,9 @@ class Daemon:
             until = h["pause_until_ns"]
             if until is not None and until > self._wall() and t.pause_until_ns is None:
                 t.pause_until_ns = min(until, self._wall() + MAX_PAUSE_MIN * 60_000_000_000)
-            if self._pending_sensitive.pop(tid, None) is not None:
-                t.pause = Pause(start=-1, end=-1, deadline=time.monotonic() + self.pause_timeout)
+            deadline = self._pending_sensitive.pop(tid, None)
+            if deadline is not None:
+                t.pause = Pause(start=-1, end=-1, deadline=deadline)
             self.terminals[tid] = t
         elif t.conn is not None and t.conn is not writer:
             with contextlib.suppress(Exception):
@@ -1102,11 +1103,24 @@ class Daemon:
 
     # ---- Auswertung -> Live-Stapel (E23) ------------------------------------ #
     def _on_ingest_update(self, update: IngestUpdate) -> None:
+        """Auto-Hosts aus der Auswertung in den Live-Stapel (E23). ``auto_contexts`` ist die
+        vollständige Liste: Ein Auto-Host, den sie nicht mehr nennt, fällt bei aufnehmenden
+        Terminals weg (z. B. zweiter Callback, Scope geändert)."""
+        want: dict[str, dict[int, str]] = {}
         for ac in update.auto_contexts:
-            t = self.terminals.get(ac.terminal_id)
-            if t is None or not isinstance(ac.host, str):
-                continue
-            if t.stack.set_auto_host(int(ac.opened_at), ac.host):
+            if isinstance(ac.host, str) and isinstance(ac.opened_at, int):
+                want.setdefault(ac.terminal_id, {})[int(ac.opened_at)] = ac.host
+        for t in list(self.terminals.values()):
+            hosts = want.get(t.terminal_id, {})
+            changed = False
+            for opened_at, host in hosts.items():
+                changed = t.stack.set_auto_host(opened_at, host) or changed
+            if t.recording:
+                for st in list(t.stack.stages):
+                    if (st.host_source == "auto" and st.host is not None
+                            and hosts.get(st.opened_at) != st.host):
+                        changed = t.stack.clear_auto_host(st.opened_at) or changed
+            if changed:
                 t.ctx_version += 1
                 self._send_state(t)
 
@@ -1736,17 +1750,23 @@ class Daemon:
         """Verwirft Ausgaben und Eingaben eines Terminals bis zum nächsten Prompt (``sensitive_output``).
 
         Gilt in allen Zuständen (auch Vorlauf und gesperrt). Kennt der Daemon das Terminal
-        noch nicht (gerade gestartet), gilt die Anmeldung für sein erstes HELLO.
+        noch nicht (gerade gestartet), gilt die Anmeldung für sein erstes HELLO. Kommt kein
+        Prompt, endet die Pause nach ``seconds`` (Standard ``pause_timeout``, höchstens 3600);
+        die CLI bricht ihre Passphrase-Abfrage vorher ab.
         """
         tid = _arg_str(args, "terminal_id", max_len=64) or ""
+        seconds = _arg_int(args, "seconds", 1, 3600, max(1, int(self.pause_timeout)))
+        deadline = time.monotonic() + (seconds if "seconds" in args else self.pause_timeout)
         t = self.terminals.get(tid)
         if t is None:
-            if len(self._pending_sensitive) < 256:
-                self._pending_sensitive[tid] = time.monotonic() + self.pause_timeout
+            if len(self._pending_sensitive) < 256 or tid in self._pending_sensitive:
+                self._pending_sensitive[tid] = max(deadline, self._pending_sensitive.get(tid, 0.0))
             return {"paused": True, "pending": True}
         if t.pause is None:
             start = t.recv_end if t.recording else t.shim_off
-            t.pause = Pause(start=start, end=start, deadline=time.monotonic() + self.pause_timeout)
+            t.pause = Pause(start=start, end=start, deadline=deadline)
+        else:
+            t.pause.deadline = max(t.pause.deadline, deadline)
         return {"paused": True}
 
     def op_resume_terminal(self, args: dict[str, Any]) -> dict[str, Any]:

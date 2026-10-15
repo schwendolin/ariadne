@@ -717,10 +717,18 @@ def test_auto_context_from_ingest_sets_live_stack_not_journal(paths, operator):
         await shim.event(2, "term.ctx_snapshot", stream_off=10, stack=snap)
         await shim.wait_ack(2)
         assert d.terminals[shim.terminal_id].stack.label() == "10.10.10.3 revshell (auto)"
+        # meldet die Auswertung den Auto-Host nicht mehr (z. B. zweiter Callback), fällt er weg
+        d._on_ingest_update(IngestUpdate(4, ()))
+        st = await shim._wait(lambda: shim.state if shim.state.get("ctx_version") == 2 else None, 3)
+        assert "host" not in st["stack"][-1] and d.terminals[shim.terminal_id].stack.label() == "? revshell"
+        d._on_ingest_update(IngestUpdate(5, (AutoContext(shim.terminal_id, 10, "ip:default/10.10.10.3"),)))
+        await shim._wait(lambda: shim.state.get("ctx_version") == 3, 3)
+        assert d.terminals[shim.terminal_id].stack.label() == "10.10.10.3 revshell (auto)"
         # Host des Nutzers geht vor
         await shim.event(3, "req.ctx.set", host="10.10.10.9")
-        await shim._wait(lambda: shim.state.get("ctx_version") == 2, 3)
-        d._on_ingest_update(IngestUpdate(4, (AutoContext(shim.terminal_id, 10, "ip:default/10.10.10.3"),)))
+        await shim._wait(lambda: shim.state.get("ctx_version") == 4, 3)
+        d._on_ingest_update(IngestUpdate(6, (AutoContext(shim.terminal_id, 10, "ip:default/10.10.10.3"),)))
+        d._on_ingest_update(IngestUpdate(7, ()))
         assert d.terminals[shim.terminal_id].stack.label() == "10.10.10.9 revshell"
         d.flush()
         for h in headers(d.project.journal, "term.ctx_snapshot"):

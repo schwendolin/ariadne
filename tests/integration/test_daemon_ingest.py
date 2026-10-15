@@ -115,7 +115,7 @@ def test_nmap_flow_companions_routes_views_and_decisions(paths, operator, fake_i
         assert nmap_rows and nmap_rows[0]["src_ip"] == LHOST and nmap_rows[0]["context"] == "Kali"
         nmap_row = nmap_rows[0]
         assert nmap_row["adopted"] >= 50 and not nmap_row["distrusted"]
-        assert nmap_row["cmd_ref"] == f"{shim.terminal_id[:8]}@{nmap_row['cmd_id'].rpartition('@')[2]}"
+        assert nmap_row["cmd_ref"] == f"{shim.terminal_id[-8:]}@{nmap_row['cmd_id'].rpartition('@')[2]}"
         assert any(e["type"] == "file" and e["title"] == "scans/lame.xml" for e in tl)
 
         # Nichts zu entscheiden: kein Eintrag für den nmap-Lauf (vorher eine Gruppe pro Lauf)
