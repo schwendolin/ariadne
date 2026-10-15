@@ -16,6 +16,7 @@ import pytest
 
 from ariadne.daemon.core import Daemon
 from ariadne.daemon.ingest import IngestService
+from ariadne.ingest.schema_claims import CLAIMS_VERSION
 from tests.core.fakeshim import FakeShim, close_all, ctl, ctl_ok
 from tests.integration.helpers import LHOST, TARGET, Term, ms2
 
@@ -515,7 +516,7 @@ def test_stale_derived_db_is_rebuilt_before_queries(paths, operator):
         conn = d.project.connect_derived(readonly=True)
         try:
             row = conn.execute("SELECT value FROM meta WHERE key = 'schema_claims_version'").fetchone()
-            assert tuple(row) == ("2",)
+            assert tuple(row) == (str(CLAIMS_VERSION),)
         finally:
             conn.close()
         await shim.close()

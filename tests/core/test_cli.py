@@ -176,8 +176,9 @@ def test_cli_full_flow_and_canary(cli_env, tmp_path):
 
     res = _cli(env, "stop")
     assert res.returncode == 0 and "Projekt lame beendet und gesperrt. Kettenkopf: seq" in res.stdout
-    res = _cli(env, "start", secret=PW)
-    assert res.returncode == 1 and "Kein aktives Projekt" in res.stderr
+    res = _cli(env, "start", secret=PW)  # nennt das zuletzt beendete Projekt (Befund F6)
+    assert res.returncode == 1 and "Projekt lame ist beendet mit ariadne stop. Weiter: ariadne start lame" \
+        in res.stderr
     res = _cli(env, "start", "nix", secret=PW)  # gescheiterter Start lässt den Tresor nicht offen
     assert res.returncode == 1 and "existiert nicht" in res.stderr
     assert "Tresor:   gesperrt" in _cli(env, "status").stdout
