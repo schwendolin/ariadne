@@ -24,13 +24,13 @@ Am Ende einer Lab-Session liegt ein Markdown-Bericht bereit: Übersicht, Angriff
 
 Ein typischer Ablauf:
 
-1. `ariadne project new lame --target 10.10.10.3` legt das Projekt an.
-2. Klick auf REC in der Web-Oberfläche. Ab jetzt nimmt Ariadne alle Terminals auf.
-3. `nmap -sV -oA scans/lame 10.10.10.3` füllt die Karte mit Ports und Versionen.
+1. `ariadne start lame --target 10.10.10.3` entsperrt Ariadne und legt das Projekt an. Ab jetzt nimmt Ariadne alle Terminals auf, auch parallele, mit genauem Zeitstempel.
+2. Das Dashboard läuft im Browser, in der Kali oder über einen SSH-Tunnel auf dem Mac.
+3. `nmap -sV -oA scans/lame 10.10.10.3` setzt Ports und Versionen direkt auf die Karte, markiert als «auto».
 4. Der Denkanstoss «Unauthentisierten Zugriff auf FTP prüfen» erscheint, mit Begründung und Beleg.
-5. In der Reverse Shell drückt man `F12` und `h` und setzt den Host. Ab dann stimmt der Kontext, und die `/etc/passwd` landet beim richtigen Host.
+5. Kommt die Reverse Shell, setzt Ariadne den Host aus dem ersten Callback selbst. Nur bei Pivots oder Port-Forwards setzt man ihn mit `F12` und `h`. Ab dann stimmt der Kontext, und die `/etc/passwd` landet beim richtigen Host.
 6. `F12` und `k` markiert den Foothold als Schlüsselschritt. Der Faden wächst.
-7. Am Ende erzeugt `ariadne export` das Writeup-Gerüst mit allen Belegen.
+7. Am Ende erzeugt `ariadne export` das Writeup-Gerüst mit allen Belegen, `ariadne backup` sichert das Projekt ausserhalb der VM, und `ariadne stop` sperrt.
 
 ## Für wen und in welchem Rahmen
 
@@ -46,11 +46,11 @@ Ein typischer Ablauf:
 
 ## Grundsätze
 
-1. **Beobachten, nicht handeln.** Ariadne schickt keine Pakete an Ziele und löst keine Zielnamen per DNS auf. Die einzige Ausnahme ist ein Webseiten-Screenshot auf ausdrücklichen Klick, nach Scope-Prüfung und über einen Proxy, der den Scope erzwingt.
+1. **Beobachten, nicht handeln.** Ariadne schickt keine eigenen Pakete an Ziele und löst keine Zielnamen per DNS auf. Der Browser-Recorder ist kein Widerspruch: Er leitet nur weiter, was dein Testbrowser verlangt, und löst dafür die Namen auf, die der Browser anfragt.
 2. **Jeder Fakt hat eine Quelle.** Ein Klick auf einen Wert zeigt den Befehl, den Output-Ausschnitt, die Datei oder die Bildregion, aus der er stammt.
 3. **Rohdaten sind unveränderlich.** Was aufgenommen wurde, bleibt dauerhaft und verschlüsselt gespeichert. Auswertungen lassen sich jederzeit neu berechnen, deine Entscheide überstehen das.
-4. **Die Aufnahme steuerst du.** Ein REC-Knopf schaltet die Aufnahme für alle Terminals ein und aus. Der Zustand ist immer sichtbar.
-5. **Vorschlag vor Automatik.** Neue Werte landen in einer Inbox und auf der Karte als Nebel. Bestätigen färbt ein. Ein Automodus ist pro Projekt zuschaltbar.
+4. **Einmal starten, alles aufnehmen.** Solange ein Projekt aktiv ist, nimmt Ariadne alle Terminals auf. `F12 r` pausiert ein Terminal für 10 Minuten. Der Zustand ist immer sichtbar.
+5. **Automatisch, was sicher ist, Entscheid, wo es zählt.** Werte bekannter Parser im Scope gehen direkt auf die Karte, markiert als «auto» und pro Befehl rückgängig. Unsicheres bleibt als Nebel. KI-Werte, Widersprüche und Unklares landen in der Arbeitsliste, und dein Entscheid geht immer vor.
 6. **KI als Denkpartner, nicht als Autopilot.** Denkanstösse kommen aus festen Regeln und aus einem Sprachmodell, immer begründet, gekennzeichnet und mit Belegen. Ein Lernmodus gibt zuerst eine Frage, dann eine Richtung, erst zuletzt einen Befehl.
 7. **Zieldaten sind feindlich.** Alles, was ein Ziel beeinflussen kann, wird so behandelt, als hätte ein Angreifer es geschrieben: Output, Banner, Hostnamen, Dateien, Bilder und KI-Texte darüber.
 8. **Local-first.** Ariadne läuft ohne Internet. Daten gehen nur an einen Cloud-Dienst, wenn das Projekt es erlaubt.
@@ -59,19 +59,19 @@ Ein typischer Ablauf:
 
 ## Was Ariadne kann
 
-**Aufnehmen.** Ein kleiner Wrapper um jede Shell nimmt den Output aller Terminals auf, unabhängig von Terminal-Programm und Multiplexer. Shell-Integrationen für zsh und bash (später fish) liefern Befehlsgrenzen, Exit-Codes und Arbeitsordner. Dazu kommen der überwachte Projektordner, Screenshots, später auch Burp-Exporte, Zwischenablage, Browser-Verlauf und PCAPs.
+**Aufnehmen.** Ein kleiner Wrapper um jede Shell nimmt Ein- und Ausgabe aller Terminals auf, unabhängig von Terminal-Programm und Multiplexer, mit einem Zeitstempel auf die Millisekunde. Shell-Integrationen für zsh und bash (später fish) liefern Befehlsgrenzen, Exit-Codes und Arbeitsordner. Daraus entsteht eine Zeitachse aller Terminals. Dazu kommen der überwachte Projektordner, Screenshots, ab v0.2 ein Aufzeichnungs-Proxy für den Browser, Burp- und HAR-Importe, später Zwischenablage und PCAPs.
 
 **Kontext kennen.** Ariadne führt pro Terminal einen Stapel, zum Beispiel `Kali › web01 (www-data) › mysql`. Startet eine Remote-Session, steht der Kontext zuerst auf «unbekannt». Mit einem Tastenkürzel setzt du den Host, auch mitten in evil-winrm oder einer Reverse Shell.
 
 **Verstehen.** Parser lesen die Ausgaben bekannter Tools, bevorzugt ihre strukturierten Dateien wie nmap-XML. Ein Regex-Netz fängt IPs, Hashes, URLs und CVEs aus beliebigem Text. Ein Sprachmodell ergänzt, darf aber nur Werte liefern, die wörtlich im Rohtext stehen.
 
-**Karte zeigen.** Die Web-Oberfläche zeigt eine Karte mit umschaltbaren Ebenen: Topologie, Services, Credentials, Angriffspfad, später Web-Struktur und Active Directory. Dazu kommen Tabellen, eine Credential-Matrix, eine Zeitachse, die Inbox und die Belegansicht.
+**Karte zeigen.** Die Web-Oberfläche zeigt links die Karte mit umschaltbaren Ebenen (Topologie, Services, Credentials, Angriffspfad, später Web-Struktur und Active Directory) und rechts die Arbeitsliste «Als Nächstes». Dazu kommen Tabellen, eine Credential-Matrix, eine Zeitachse und die Belegansicht. Das Dashboard lässt sich über einen SSH-Tunnel auch vom Mac aus öffnen.
 
 **Denkanstösse geben.** Regeln erkennen offene Prüfziele («SMB offen, Shares noch nicht aufgelistet»). Auf Knopfdruck erstellt ein Sprachmodell aus einem kompakten Lagebild weitere Anstösse. Ariadne führt nichts davon aus.
 
 **Belegen und berichten.** Der Export erzeugt Markdown: Übersicht, Angriffspfad, Writeup-Gerüst, Hosts und Belege. Eine Vorlage folgt dem Schema aus dem Modul Cybersecurity (Reconnaissance, Scanning/Enumeration, Exploitation, Post-Exploitation, Reporting) mit MITRE-ATT&CK-IDs, Schweregraden und Massnahmen.
 
-**Schützen.** Projekte sind strikt getrennt und verschlüsselt. Eigene Secrets (sudo-Passwort, API-Keys) werden vor dem Speichern geschwärzt. Eine Hash-Kette macht nachträgliche Änderungen am Rohlog erkennbar.
+**Schützen.** Projekte sind strikt getrennt und verschlüsselt. Gespeichert wird alles vollständig; eigene Secrets (sudo-Passwort, API-Keys) werden ersetzt, bevor etwas Ariadne verlässt: vor der KI, beim Export und im Bericht. Eine Hash-Kette macht nachträgliche Änderungen am Rohlog erkennbar. Backups sind verschlüsselt und liegen ausserhalb der VM.
 
 ## Was Ariadne nicht ist
 
@@ -88,14 +88,14 @@ Jede Version ist für sich nutzbar. Ab v0.1 läuft jede Lab-Übung mit Ariadne, 
 
 | Version | Ziel | Kern |
 |---|---|---|
-| **v0.1** Flugschreiber mit erster Karte | Eine Metasploitable2- oder einfache HTB-Session lückenlos aufnehmen und als Writeup exportieren | Shell-Wrapper für zsh und bash, REC, Kontext per Tastenkürzel, verschlüsselte Ablage, nmap-Parser und Regex-Netz, Inbox, Web-Oberfläche mit Karte im Nebel, Belegansicht, Screenshots unter X11, Regeln und KI-Denkanstoss auf Knopfdruck, Markdown-Export |
-| **v0.2** Bild ausmalen und verstehen | Ein Lab mit mehreren Hosts, Pivots und Credentials | typische Lab-Tools als Parser, linpeas, KI-Extraktion, lokale KI über Ollama, Credential-Matrix, Tunnel, Fragen an die Karte, OCR, Burp-Import, Offline-Paket |
-| **v0.3** bereit für Kunden | Ein (fiktiver) Kundenauftrag nach professionellen Massstäben | Kundenprofil, verschlüsselter Arbeitsordner, Aktivitätsprotokoll-Export, Cleanup-Liste, Findings, Löschnachweis, Vision, Webseiten-Screenshots, PCAP, Active Directory |
-| **v0.4+** Ausbau | Grosse Netze, Komfort, Langzeitpflege | semantischer Zoom, Zeitreise, Burp- und Browser-Erweiterung, Teamfunktionen |
+| **v0.1** Flugschreiber mit erster Karte | Eine Metasploitable2- oder einfache HTB-Session lückenlos aufnehmen und als Writeup exportieren | Shell-Wrapper für zsh und bash, `ariadne start` mit Daueraufnahme, Kontext per Tastenkürzel, verschlüsselte Ablage, nmap-Parser und Regex-Netz, Drei-Spuren-Regel, Web-Oberfläche «Karte und Arbeitsliste», Belegansicht, Screenshots unter X11, Regeln und KI-Denkanstoss auf Knopfdruck, Markdown-Export, Backup, Fernzugriff vom Mac über Tailscale und SSH |
+| **v0.2** Bild ausmalen und verstehen | Ein Lab mit mehreren Hosts, Pivots und Credentials | typische Lab-Tools als Parser, linpeas, KI-Extraktion, lokale KI über Ollama, Credential-Matrix, Tunnel, Fragen an die Karte, OCR, Browser-Recorder mit Testbrowser, HAR- und Burp-Import, Offline-Paket |
+| **v0.3** bereit für Kunden | Ein (fiktiver) Kundenauftrag nach professionellen Massstäben | Kundenprofil, verschlüsselter Arbeitsordner, Aktivitätsprotokoll-Export, Cleanup-Liste, Findings, Löschnachweis, Vision, Firefox-Erweiterung mit Tab-Screenshots, PCAP, Active Directory |
+| **v0.4+** Ausbau | Grosse Netze, Komfort, Langzeitpflege | semantischer Zoom, Zeitreise, Burp-Erweiterung, Teamfunktionen |
 
 ## Erfolgskriterien
 
-- **v0.1:** Eine vollständige Metasploitable2-Session ist mit REC aufgenommen. Jeder Fakt auf der Karte führt zu seiner Quelle, der Faden zeigt Foothold und Root, und der Export taugt ohne Nacharbeit als Gerüst für einen Lab-Bericht.
+- **v0.1:** Eine vollständige Metasploitable2-Session ist nach einem einzigen `ariadne start` aufgenommen. Jeder Fakt auf der Karte führt zu seiner Quelle, der Faden zeigt Foothold und Root, und der Export taugt ohne Nacharbeit als Gerüst für einen Lab-Bericht.
 - **Kein Klartext-Leck:** Ein Canary-Test findet nach dem Schliessen eines Projekts keinen markierten Testwert im Klartext, weder im Home noch in Logs, Coredumps oder Exporten.
 - **Robustheit:** Ein feindliches Test-Ziel (präparierte Hostnamen, Escape-Sequenzen, gefälschte Marker, XSS-Strings) bringt weder Shell, Daemon noch Web-Oberfläche dazu, etwas Unerwünschtes zu tun.
 - **Nutzung:** Ab v0.1 läuft jede Lab-Übung mit Ariadne. Sinkt die Nutzung, ist das ein Signal für das Backlog, nicht für mehr Funktionen.
@@ -105,4 +105,4 @@ Jede Version ist für sich nutzbar. Ab v0.1 läuft jede Lab-Übung mit Ariadne, 
 Keine blockierenden Fragen mehr. Was noch offen ist, klärt sich beim Bauen:
 
 1. **Testmaterial:** Echte Outputs aus Metasploitable2 fehlen noch. Bis dahin bauen die Tests auf nachgestellten Outputs der wichtigsten Tools auf (nmap zuerst). Sobald echte Outputs vorliegen, ersetzen sie die nachgestellten.
-2. **VM-Details:** Hypervisor und Ressourcen sind unbekannt. `ariadne doctor` prüft beim ersten Start, was nötig ist (Shared Folders, Festplattenverschlüsselung, Display-Server).
+2. **VM-Details:** Die Kali läuft als VM im SmartLearn-Netz der Schule (VMware vSphere), bedient über die Webkonsole; sie kommt ins Internet, und Tailscale ist erlaubt. Offen sind Masterset, Hostkeys und Lebensdauer der VM. `ariadne remote check` und `ariadne doctor` prüfen das beim ersten Start.
