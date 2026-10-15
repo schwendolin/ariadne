@@ -157,9 +157,9 @@ def test_condition_4_open_conflict_is_decided_once():
     ck = _one(conn, S21.key, "service.product", "vsftpd")["conflict_key"]
     p.apply_decision(dec(30, "d.conflict.resolve", conflict_key=ck, keep_open=True))
     p.rebuild()
-    # bewusst offen gelassen: kein Inbox-Eintrag mehr, aber nie automatisch aufgelöst
+    # bewusst offen gelassen: kein Inbox-Eintrag mehr, nie automatisch aufgelöst und nie auto (R5)
     assert len(inbox(conn, "conflict")) == 1
-    assert _lane(conn, S21.key, "service.product", "vsftpd")[0] == "auto"
+    assert _lane(conn, S21.key, "service.product", "vsftpd") == ("candidate", "quiet", "kept_open")
 
 
 # --------------------------------------------------------------------- Bedingung 5: verdächtig, Massenfund

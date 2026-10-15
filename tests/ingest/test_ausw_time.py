@@ -13,6 +13,7 @@ from typing import Any
 from ariadne.ingest import queries
 from ariadne.ingest.db import apply_schema, get_meta, schema_stale, set_meta
 from ariadne.ingest.runner import InProcessRunner
+from ariadne.ingest.schema_claims import CLAIMS_VERSION
 from ariadne.store.memory import MemoryJournal
 from tests.ingest.helpers import BASE_TS, SEC, StubParser, StubProjector
 
@@ -219,7 +220,7 @@ def test_schema_stale_detection(tmp_path):
         assert not schema_stale(fresh)
         apply_schema(fresh)
         assert not schema_stale(fresh)
-        assert get_meta(fresh, "schema_claims_version") == "2"
+        assert get_meta(fresh, "schema_claims_version") == str(CLAIMS_VERSION)
         old.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         old.execute("CREATE TABLE claim (claim_key TEXT PRIMARY KEY)")
         set_meta(old, "schema_units_version", "1")

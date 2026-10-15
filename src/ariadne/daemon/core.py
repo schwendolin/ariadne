@@ -25,16 +25,30 @@ offen ist, nehmen alle Terminals auf. Zustand pro Terminal (Reihenfolge verbindl
 In ``locked`` und ``preroll`` hält der Daemon Rahmen und Events im Vorlauf und
 bestätigt sie sofort. ``ariadne start`` übernimmt ihn auf Wunsch mit den
 Original-Zeiten (``origin="preroll"``). In ``paused``, ``held`` und ``off`` werden
-Rahmen bestätigt und verworfen.
+Rahmen bestätigt und verworfen. Ausfallpuffer: Ist der Daemon neu gestartet (nicht
+``ariadne lock``) und ein Terminal an das noch aktive Projekt gebunden, gilt für das,
+was es sendet (auch seinen Ring), kein Vorlauf-Fenster, nur das Leerlauf-Ende.
+
+Wiederaufnahme im selben Projekt (Pause, ``lock``/``stop`` und ``start``, A -> B -> A)
+beginnt am Offset des Shims; :meth:`Daemon._ensure_open` richtet am gespeicherten
+Ende aus und vermerkt die Lücke mit ihrem Grund. Nach einem Neustart schreibt der
+Daemon nichts doppelt, was schon im Journal steht (``term.open``, Marker, Eingaben).
+
+**Schlüsselmaterial** (``pause_terminal``): gilt nur für das, was der Shim nach der
+Anmeldung gelesen hat, und endet nur an einem Prompt-Marker von danach, an der Frist,
+mit ``resume_terminal`` oder BYE; Zustandswechsel (Pause, Sperre, Wechsel) beenden sie nicht.
 
 **Ende eines Projekts:** ``stop``, Leerlauf (``idle_end_hours`` ohne Aktivität in
 irgendeinem Terminal), Wechsel durch ``start <anderes>``, ``lock`` und Daemon-Ende.
 Davor steht ``system.project_end``, danach der Checkpoint ``close``.
 
 **Zeit (E96).** Rahmen tragen die Shim-Zeit (``t_shim_ns``, ``mono_ns``, Zeitindex
-``tix``). Der Daemon setzt ``time_suspect``, wenn sie mehr als 5 s von der
-Empfangszeit abweicht oder die monotone Uhr rückwärts läuft. Eigene ``term.*``-Events
-tragen die Shim-Zeit, wenn der Daemon sie am Offset kennt.
+``tix``). Der Daemon setzt ``time_suspect``, wenn der Versatz von Wand- und Monotonuhr
+des Rahmens mehr als 5 s von seinem eigenen abweicht, die monotone Zeit in der Zukunft
+liegt oder rückwärts läuft (ohne Monotonuhr: Abstand zur Empfangszeit). Spät
+zugestellte Rahmen behalten so ihre Zeit. Eigene ``term.*``-Events tragen die
+Shim-Zeit, wenn der Daemon sie am Offset kennt. Leerlauf misst Bootzeit und Wanduhr
+(Suspend zählt), die Pause des Nutzers hat zusätzlich eine monotone Frist.
 
 **Eingaben (E26).** INPUT-Rahmen werden zu ``term.input`` (Body = Bytes). Nie in Logs.
 
@@ -1585,7 +1599,8 @@ class Daemon:
             "terminals": len(connected),
             "recording": sum(1 for t in connected if t.recording),
             "waiting": 0,
-            "active": ({"slug": a["slug"], "stopped": a["stopped"], "end_reason": a.get("end_reason")}
+            "active": ({"slug": a["slug"], "stopped": a["stopped"],
+                        **({"end_reason": a["end_reason"]} if a.get("end_reason") else {})}
                        if a else None),
             "locked": self.operator is None,
             "idle": {"last_activity_ns": self.last_activity, "idle_s": idle_s,

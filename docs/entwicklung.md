@@ -25,7 +25,7 @@ Alle Tests laufen ohne Netz, nur in `tmp_path` und mit isolierten `HOME`/`XDG_*`
 |---|---|---|
 | `tests/unit/` | Fundament-Verträge (`test_foundation.py`, `test_contract_v01.py`), sicheres Öffnen, Kontext-argv, CLI-Ansichten (`test_cli_views.py`, `test_ausw_views.py`, `test_ausw_cli.py`), Mark-Hook-Regeln, Anmeldung des Terminals vor jeder Secret-Abfrage (`test_cli_secret_order.py`) | |
 | `tests/shim/` | Scanner, Marker, Hotkeys, Ringpuffer, Transport, Titel; PTY-Tests mit echter zsh/bash gegen einen Fake-Daemon | `pty` |
-| `tests/core/` | Krypto, Journal- und Blob-Vertrag (Memory und SQLCipher), Redaktor, Projekte, Daemon mit Fake-Shim (`test_daemon.py` Grundfluss, `test_daemon_capture.py` Daueraufnahme, Pause, Wechsel, Vorlauf, Zeit, Eingaben, Canary E72), CLI per Subprozess | |
+| `tests/core/` | Krypto, Journal- und Blob-Vertrag (Memory und SQLCipher), Redaktor, Projekte, Daemon mit Fake-Shim (`test_daemon.py` Grundfluss, `test_daemon_capture.py` Daueraufnahme, Pause, Wechsel, Vorlauf, Zeit, Eingaben, Canary E72, `test_daemon_review.py` Korrekturen aus den Reviews: Strom-Ausrichtung, Schlüsselmaterial-Pause, Ausfallpuffer, Uhren und Leerlauf), CLI per Subprozess | |
 | `tests/unit/test_erf_*.py` | Writer: Zusammenfassen der Rahmen ohne Verlust an Zeitgenauigkeit (Hypothesis) | |
 | `tests/ingest/` | Scope, Ziele aus argv, Normalizer (Goldens, Hypothesis), Segmenter, Pipeline, Worker-Grenzen | |
 | `tests/parsers/`, `tests/golden/` | Parser einzeln und als Golden-Fälle (`input.*`, `meta.toml`, `expected.jsonl`) | |
@@ -36,7 +36,7 @@ Alle Tests laufen ohne Netz, nur in `tmp_path` und mit isolierten `HOME`/`XDG_*`
 Befehle:
 
 ```sh
-python -m pytest                                   # alles (etwa 3 min, 1045 Tests)
+python -m pytest                                   # alles (etwa 3,5 min, 1078 Tests)
 python -m pytest -m "not pty and not e2e"          # ohne echte Shells (schnell)
 python -m pytest tests/e2e -m e2e                  # nur der Flugschreiber
 python -m pytest tests/golden --update-golden      # Golden-Erwartungen neu schreiben, zeigt vorher den Diff

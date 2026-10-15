@@ -908,20 +908,24 @@ class _Builder:
             if len(heads) < 2:
                 continue
             ck = conflict_key(subject, pred)
-            state, choice, did = "open", None, None
+            state, choice, did, chosen = "open", None, None, None
             d = resolution.get(ck)
             if d is not None:
                 did = d.id
                 if d.payload.get("keep_open"):
                     state = "kept_open"
                 elif d.payload.get("choice") is not None:
+                    # Wahl als claim_key oder als Wert (Web-UI zeigt beides, docs/web-api.md)
                     state, choice = "resolved", str(d.payload.get("choice"))
-                    if choice not in {c.key for c in heads}:
+                    picked = [c for c in heads if choice in (c.key, c.value_text)]
+                    if len(picked) != 1:
                         self.orphans.append((d, "Wert gehört nicht mehr zum Widerspruch", choice))
                         state, choice, did = "open", None, None
+                    else:
+                        chosen = picked[0].key
             for c in heads:
                 c.conflict_key = ck
-                if state == "resolved" and c.key == choice:
+                if state == "resolved" and c.key == chosen:
                     if c.decision_id is None:  # die Wahl gilt wie eine Bestätigung (Spur user)
                         c.state, c.decision_id, c.lane_reason = "confirmed", did, "resolved"
                         c.confidence = 1.0

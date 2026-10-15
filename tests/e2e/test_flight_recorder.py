@@ -163,6 +163,9 @@ def test_flight_recorder(lab: Lab) -> None:
     finally:
         c.close(force=True)
 
+    # Erst wenn der Daemon das Ende des Terminals verarbeitet hat (BYE, term.close), sonst
+    # kann ein sofortiges stop unter Last davor liegen (beide Wege sind gültig).
+    lab.wait_status("Terminals: 0 verbunden")
     assert "Projekt lame beendet und gesperrt" in lab.cli("stop")
     assert lab.stop_daemon() == 0
     assert not lab.paths.ctl_sock.exists() and not lab.paths.term_sock.exists()
