@@ -52,6 +52,10 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 | E28 | 2026-10-08, geändert 2026-10-15 | Offene Terminals wechseln beim Projektwechsel ins neue Projekt, sobald dort wieder die lokale Kali-Shell läuft; eine laufende Remote-Sitzung bleibt bis dahin beim alten Projekt. Vorher: gebundene Terminals pausieren, bis ihr altes Projekt wieder aktiv ist | einfache Bedienung bei strikter Projekttrennung (E70) | Nutzer + KI | fest | F8.1, A3.6, TW 1 |
 | E95 | 2026-10-15 | Ohne aktives Projekt hält Ariadne die letzten 15 Minuten pro Terminal nur im Arbeitsspeicher. `ariadne start` fragt, ob sie ins Projekt übernommen werden | nichts geht verloren, wenn man das Starten vergisst, und nichts liegt unverschlüsselt auf der Platte | Nutzer + KI | fest | TW 2 |
 | E96 | 2026-10-15 | Massgeblich ist die Zeit, die der Shim beim Lesen misst (Wanduhr in Nanosekunden plus monotone Uhr); sortiert wird nach der monotonen Uhr. Die Empfangszeit im Daemon dient nur noch als Kontrolle | die Empfangszeit lag bis zu 250 ms daneben; Nutzer will «haargenaue» Zeitstempel, realistisch etwa 1 ms | Nutzer + KI | fest | TW 2.2 |
+| E101 | 2026-10-15 | `ariadne unlock` bei aktivem Projekt öffnet dieses Projekt wie `ariadne start` ohne Projektnamen; die Aufnahme läuft sofort weiter. Das gilt auch vom Mac aus per `ssh -t kali-sl unlock` | ein Schritt statt zwei nach einem Neustart der VM | Nutzer | fest | E74, E22 |
+| E102 | 2026-10-15 | Stürzt der Daemon ab oder startet er neu, während ein Projekt aktiv ist, übernimmt `ariadne start` bzw. `unlock` die gepufferte Ausgabe seit dem Ausfall ohne Rückfrage. Nur der Vorlauf ohne Projekt (E95) wird weiter erfragt | das Projekt war aktiv, die Aufnahme hätte ohnehin laufen sollen | Nutzer | fest | E22, E95 |
+| E103 | 2026-10-15 | `ariadne lock` sperrt nur den Tresor, das Projekt bleibt aktiv; bis zum nächsten `start` oder `unlock` wird nichts gespeichert (nur Puffer im RAM). `ariadne stop` beendet das Projekt | Sperren in einer Pause soll das Projekt nicht beenden | Nutzer | fest | E22, E74 |
+| E104 | 2026-10-15 | Eingaben ohne Echo (Passwortabfragen von sudo, ssh, su, mysql; erkannt am Terminalmodus und am fehlenden Echo in der Ausgabe) werden vollständig gespeichert, aber in CLI und Dashboard verdeckt angezeigt; ein Klick zeigt sie | vollständige Daten (E26) ohne Passwörter offen auf dem Bildschirm | Nutzer | fest | E26, E99 |
 
 ## Quellen
 
@@ -146,4 +150,4 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 
 Erledigt am 2026-10-09: Diplomarbeit (keine), KI-Regeln der Schule (entfällt), Hotkey (E29), Umgebung (E09), Budget (E66), Obsidian (E58), Tools (E69).
 
-Erledigt am 2026-10-15: alle Fragen aus den Konzepten Terminal und Web (TW 1 bis 8) und Fernzugriff (FZ 1 bis 7), siehe E09 bis E100.
+Erledigt am 2026-10-15: alle Fragen aus den Konzepten Terminal und Web (TW 1 bis 8) und Fernzugriff (FZ 1 bis 7), siehe E09 bis E104.
