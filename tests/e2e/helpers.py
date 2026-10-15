@@ -19,9 +19,11 @@ import time
 from pathlib import Path
 
 import pexpect
+import pytest
 
 from ariadne.daemon.client import CtlClient
 from ariadne.paths import default_paths
+from ariadne.sources.localaddr import read_local_addrs
 
 PROMPT = "PRMT> "
 PASSPHRASE = "e2e-Passphrase-lang-genug"
@@ -92,6 +94,7 @@ class Lab:
     def tools(self, xml: bytes, text: bytes, *, target: str, lhost: str) -> None:
         """Fake-Tools: ``nmap`` gibt ``text`` aus und schreibt bei ``-oA`` ``xml``; ``nc -lvnp``
         meldet einen Callback von ``target``; ``ip route get`` nennt ``lhost`` als Quelle."""
+        skip_if_own_address(target)
         (self.data / "scan.xml").write_bytes(xml)
         (self.data / "scan.txt").write_bytes(text)
         for name, body in (("nmap", FAKE_NMAP.format(python=sys.executable, data=str(self.data))),
@@ -180,6 +183,16 @@ class Lab:
         for c in self.terms:
             c.close(force=True)
         self.terms = []
+
+
+def skip_if_own_address(*ips: str) -> None:
+    """Der E2E-Daemon liest die eigenen Adressen dieses Rechners aus /proc (A5). Hat der
+    Testrechner selbst eine Ziel-Adresse des Fixture-Netzes (VirtualBox vergibt im
+    Host-only-Netz oft .101 zuerst), wäre das Ziel «eigene Adresse»: dann überspringen."""
+    own = set(read_local_addrs() or ())
+    hit = sorted(own & set(ips))
+    if hit:
+        pytest.skip(f"Testrechner hat die Fixture-Adresse {hit[0]} selbst (eigene Adresse, A5)")
 
 
 def run_cmd(c: pexpect.spawn, cmd: str, timeout: float = 30) -> str:

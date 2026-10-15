@@ -202,6 +202,7 @@ class _Claim:
     history: bool = False
     own: bool = False
     host_scope: str | None = None
+    settled: str | None = None  # Widerspruch entschieden: "resolved" (nicht gewählt) oder "kept_open"
     eff: list[_Src] = field(default_factory=list)  # Quellen ohne misstraute Gruppen
 
     @property
@@ -451,6 +452,8 @@ class _Builder:
                        ) -> dict[tuple[str, int], tuple[str, int]]:
         """Auto-Host je Listener-Stufe (E23, Profil lab): genau ein erster Callback, IP im
         Scope, nicht Loopback, keine eigene Adresse, kein Entscheid und kein Host aus dem Stapel.
+        Der Callback braucht eine Meldung des Listeners davor (``listener_status=seen``),
+        sonst bleibt es beim Vorschlag in der Inbox.
 
         Weitere vertrauenswürdige Callbacks (``not_first``, etwa eine zweite Sitzung im
         msf-Handler) mit anderer IP machen die Stufe mehrdeutig. Ergebnis: Stufe ->
@@ -487,6 +490,8 @@ class _Builder:
                    for u in stage_units[key]):
                 continue  # Host steht schon im Stapel (Hotkey vor dem Callback)
             first = min(cbs, key=lambda o: (o.journal_seq, o.ts, o.obs_id))
+            if first.attrs.get("listener_status") != "seen":
+                continue  # ohne Meldung des Listeners davor kann die Zeile vom Ziel stammen
             host = normalize_identifier(first.subject)
             if host is None or len({o.subject for o in cbs} | extra[key] | {first.subject}) != 1:
                 continue  # mehrdeutig
@@ -911,8 +916,17 @@ class _Builder:
                     state = "kept_open"
                 elif d.payload.get("choice") is not None:
                     state, choice = "resolved", str(d.payload.get("choice"))
+                    if choice not in {c.key for c in heads}:
+                        self.orphans.append((d, "Wert gehört nicht mehr zum Widerspruch", choice))
+                        state, choice, did = "open", None, None
             for c in heads:
                 c.conflict_key = ck
+                if state == "resolved" and c.key == choice:
+                    if c.decision_id is None:  # die Wahl gilt wie eine Bestätigung (Spur user)
+                        c.state, c.decision_id, c.lane_reason = "confirmed", did, "resolved"
+                        c.confidence = 1.0
+                elif state != "open":
+                    c.settled = state  # nicht gewählt bzw. offen gelassen: nie auto, nie Inbox
             self.conflicts[ck] = (subject, pred, heads, state, choice, did)
 
     # ------------------------------------------------------------------ Massenfund
@@ -946,10 +960,13 @@ class _Builder:
 
     def _customer_lane(self, c: _Claim) -> tuple[str, str]:
         p = PREDICATES.get(c.predicate)
-        if c.state == "auto":
-            return "auto", "automode"
         if c.own:
             return "quiet", "own_address"
+        if c.settled is not None:
+            c.state = "candidate"
+            return "quiet", c.settled
+        if c.state == "auto":
+            return "auto", "automode"
         if p is not None and p.inbox and c.state == "candidate":
             return "decide", "inbox"
         return "quiet", "not_inbox"
@@ -962,6 +979,8 @@ class _Builder:
             return "quiet", "own_address"
         if c.history:
             return "quiet", "history"
+        if c.settled is not None:
+            return "quiet", c.settled  # die andere Wahl gilt bzw. bewusst offen: nie auto
         if c.host_scope == "context":
             return "decide", "context"
         if c.host_scope == "local":
@@ -1359,7 +1378,7 @@ class _Builder:
                 int(any(s.from_target for s in srcs)), strongest.trust,
                 strongest.parser_id or ("user" if strongest.trust == "user" else None), len(srcs),
                 int(c.is_secret), int(any(s.suspect for s in srcs)), c.scope, c.decision_id,
-                c.lane, c.lane_reason, c.group_key, int(c.history),
+                c.lane, c.lane_reason, c.group_key, int(c.history), c.host_scope,
             ))
             for s in srcs:
                 self.res.claim_sources.append((c.key, s.obs_id, s.mention_id, s.decision_id, s.unit_id,

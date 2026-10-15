@@ -63,6 +63,8 @@ _HELP = ("r Pause, h Host, b Stufe zurück, k Schlüsselschritt, s Screenshot, "
          "2x Präfix sendet ihn durch. Taste schliesst.")
 _KEYSTEPS = {"f": "foothold", "p": "privesc", "v": "pivot", "l": "loot"}
 _MUX_COMM = ("tmux", "screen", "zellij", "dtach")  # Client im Vordergrund (comm "tmux: client")
+MUX_FRESH_S = 1.0  # so lange nach einem Gruppenwechsel comm bei jedem Blick lesen
+MUX_RECHECK_S = 0.25  # danach ein «kein Multiplexer» höchstens so oft neu prüfen
 
 
 # --------------------------------------------------------------------------- #
@@ -139,11 +141,14 @@ class Shim:
         self._rec_broken = False
         self._ctx_version: int | None = None  # STATE.ctx_version, zuletzt übernommen
         self._mux_pgrp = -1  # Vordergrund-Prozessgruppe beim letzten Blick
+        self._mux_pgrp_t = 0.0  # seit wann (monoton)
+        self._mux_read_t = 0.0  # comm zuletzt gelesen
         self._mux_fg = False
         self._mux_from: int | None = None  # Beginn der Pause (Multiplexer im Vordergrund)
         self._mux_sent: bool | None = None  # zuletzt per req.status gemeldet
         self._mux_on = False  # Multiplexer-Client im Vordergrund (zuletzt geprüft)
         self._pause_until: int | None = None  # Pause des Nutzers bis (Wanduhr, ns), vom Daemon
+        self._pause_mono: int | None = None  # dieselbe Frist monoton (Rücksprung der Wanduhr)
         self._title_pause_t = 0.0
         self._at_prompt = False  # letzter gültiger Marker A oder D mit fg_shell, danach kein C
         self._read_t: tuple[int, int] | None = None  # Zeit des laufenden read() (Wanduhr, mono)
@@ -239,7 +244,7 @@ class Shim:
             "bound_project_id": self._bound_id,
             "bound_slug": self._bound_slug,
             # Eine laufende Pause übersteht so einen Neustart des Daemons.
-            "pause_until_ns": self._pause_until if self._paused_locally() else None,
+            "pause_until_ns": self._hello_pause(),
             "mux": self._mux_on,
         }
 
@@ -412,20 +417,44 @@ class Shim:
             self._hup = True
             return
         self._read_t = (wall, mono)
-        if self.prompt is not None:
-            self._prompt_input(data, now)
-            return
-        if now < self._cpr_until and _CPR.fullmatch(data):
-            self._cpr_until = 0.0
-            return
         try:
-            acts = self.input.feed(data, now)
+            if self.prompt is not None:
+                self._prompt_input(data, now)
+                return
+            if now < self._cpr_until and _CPR.fullmatch(data):
+                self._cpr_until = 0.0
+                return
+            if self._mux_input(data, now):
+                return
+            try:
+                acts = self.input.feed(data, now)
+            except Exception:
+                self._to_child += data  # Tasten nie verschlucken; das Notfall-Relay schreibt sie
+                raise
+            for act in acts:
+                self._on_action(act, now)
+        finally:
+            self._read_t = None  # spätere Events ohne eigenes read() tragen nicht diese Zeit
+
+    def _mux_input(self, data: bytes, now: float) -> bool:
+        """Multiplexer im Vordergrund (E8): Eingaben samt Hotkey unverändert an tmux.
+
+        Die Panes haben eigene Shims; ``F12 r`` muss die Pane pausieren, in der man
+        arbeitet, nicht das äussere Terminal. Ein angefangener Präfix verfällt.
+        """
+        try:
+            mux = self._check_mux(now)
         except Exception:
-            self._to_child += data  # Tasten nie verschlucken; das Notfall-Relay schreibt sie
-            raise
-        for act in acts:
-            self._on_action(act, now)
-        self._read_t = None
+            mux = False
+        if not mux:
+            return False
+        if self.input.armed:
+            self.input.armed_at = None
+            self._notice = None
+            self._refresh_title(now)
+        self.input.observe(data, now)
+        self._to_child += data
+        return True
 
     def _on_stdout(self, now: float) -> None:
         if not self._disp:
@@ -510,7 +539,7 @@ class Shim:
             except Exception:
                 self._broken()
         if self._pause_until is not None and not self._paused_locally():
-            self._pause_until = None  # lokal abgelaufen, auch ohne neuen STATE
+            self._pause_until = self._pause_mono = None  # lokal abgelaufen, auch ohne neuen STATE
             self._update_capture(now)
             self._refresh_title(now)
         elif self._pause_until is not None and now >= self._title_pause_t + TITLE_PAUSE_S:
@@ -562,10 +591,18 @@ class Shim:
             pgrp = os.tcgetpgrp(self.master)
         except OSError:
             return False
+        now = time.monotonic()
         if pgrp != self._mux_pgrp:
-            self._mux_pgrp = pgrp
-            comm = procutil.read_comm(pgrp) or ""
-            self._mux_fg = comm.startswith(_MUX_COMM)
+            self._mux_pgrp, self._mux_pgrp_t = pgrp, now
+        elif self._mux_fg or (now - self._mux_pgrp_t >= MUX_FRESH_S
+                              and now - self._mux_read_t < MUX_RECHECK_S):
+            return self._mux_fg
+        # Zwischen tcsetpgrp und exec heisst die neue Gruppe noch wie die Shell; ein Wrapper
+        # (sh -c '...; exec tmux') ebenso. Ein «kein Multiplexer» gilt deshalb nie dauerhaft:
+        # kurz nach dem Wechsel bei jedem Blick, danach höchstens alle MUX_RECHECK_S neu lesen.
+        self._mux_read_t = now
+        comm = procutil.read_comm(pgrp) or ""
+        self._mux_fg = comm.startswith(_MUX_COMM)
         return self._mux_fg
 
     def _check_mux(self, now: float) -> bool:
@@ -718,14 +755,34 @@ class Shim:
 
     # ------------------------------------------------------- REC-Zustand
 
+    def _pause_left_ns(self) -> int:
+        """Restzeit der Pause: die kürzere aus Wanduhr- und monotoner Frist."""
+        if self._pause_until is None:
+            return 0
+        left = self._pause_until - time.time_ns()
+        if self._pause_mono is not None:
+            left = min(left, self._pause_mono - time.monotonic_ns())
+        return max(left, 0)
+
+    def _hello_pause(self) -> int | None:
+        """Laufende Pause für HELLO (Wanduhr); nach einem Rücksprung der Wanduhr aus der
+        monotonen Restzeit, damit ein neuer Daemon sie nicht verlängert."""
+        if not self._paused_locally() or self._pause_until is None:
+            return None
+        until = self._pause_until
+        if self._pause_mono is not None:
+            by_mono = time.time_ns() + max(self._pause_mono - time.monotonic_ns(), 0)
+            if by_mono < until - 1_000_000_000:
+                until = by_mono
+        return until
+
     def _paused_locally(self) -> bool:
-        return self._pause_until is not None and time.time_ns() < self._pause_until
+        return self._pause_until is not None and self._pause_left_ns() > 0
 
     def _pause_deadline(self, now: float) -> float | None:
         if self._pause_until is None:
             return None
-        left = (self._pause_until - time.time_ns()) / 1e9
-        return min(now + max(left, 0.0), self._title_pause_t + TITLE_PAUSE_S)
+        return min(now + self._pause_left_ns() / 1e9, self._title_pause_t + TITLE_PAUSE_S)
 
     def _want_capture(self) -> bool:
         t = self.transport
@@ -733,19 +790,24 @@ class Shim:
             return False
         if t.ready:
             return self._effective_rec() in P.CAPTURE_STATES
+        last = self._last_rec
         if t.connected:  # vorläufig, bis der erste STATE kommt
-            return self._last_rec is None or self._last_rec in P.CAPTURE_STATES
-        return self._last_rec in P.CAPTURE_STATES
+            return last is None or self._after_pause(last) in P.CAPTURE_STATES
+        # Daemon weg: weiter in den Ring puffern, wenn zuletzt aufgenommen wurde, auch wenn
+        # die Pause inzwischen abgelaufen ist (sonst gälte die ganze Ausfallzeit als Pause).
+        return self._after_pause(last) in P.CAPTURE_STATES
 
-    def _effective_rec(self) -> str | None:
+    def _after_pause(self, rec: str | None) -> str | None:
         """``paused`` gilt nur bis ``pause_until_ns`` (Wanduhr), auch ohne neuen STATE."""
-        rec = self._rec
         if rec == "paused" and not self._paused_locally():
             st = self.transport.state if self.transport is not None else {}
             if isinstance(st.get("project"), str):
                 return "on"
             return "preroll" if st.get("preroll_minutes") else "off"
         return rec
+
+    def _effective_rec(self) -> str | None:
+        return self._after_pause(self._rec)
 
     def _stop_reason(self) -> str:
         t = self.transport
@@ -804,7 +866,10 @@ class Shim:
             self._daemon_id = did
             self._mux_sent = self._mux_on  # HELLO trug den Wert schon
         until = st.get("pause_until_ns")
-        self._pause_until = until if type(until) is int and until > 0 else None
+        until = until if type(until) is int and until > 0 else None
+        if until != self._pause_until:  # nur eine neue Frist umrechnen, sonst gälte ein Rücksprung
+            self._pause_mono = time.monotonic_ns() + (until - time.time_ns()) if until else None
+        self._pause_until = until
         self._title_pause_t = now
         if self._pause_until is not None and rec == "paused":
             reason = "pause"
@@ -879,8 +944,7 @@ class Shim:
         pause_min = None
         if self._paused_locally():
             rec = "paused"
-            assert self._pause_until is not None
-            pause_min = max(1, math.ceil((self._pause_until - time.time_ns()) / 60e9))
+            pause_min = max(1, math.ceil(self._pause_left_ns() / 60e9))
             self._title_pause_t = now
         else:
             rec = self._effective_rec()  # abgelaufene Pause: der neue STATE folgt

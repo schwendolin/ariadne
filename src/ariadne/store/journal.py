@@ -322,6 +322,23 @@ class SqlCipherJournal:
             return 0
         return int(row[0]) + int(json.loads(row[1]).get("length", 0))
 
+    def stream_extent(self, terminal_id: str) -> int:
+        """Wie :meth:`stream_end`, zählt aber auch Lücken (``term.gap``) am Ende mit."""
+        end = self.stream_end(terminal_id)
+        for off, header in self.conn.execute(
+                "SELECT stream_off, header FROM event WHERE kind = 'term.gap' AND terminal_id = ?",
+                (terminal_id,)):
+            if off is not None:
+                end = max(end, int(off) + int(json.loads(header).get("bytes_lost", 0) or 0))
+        return end
+
+    def recent_events(self, terminal_id: str, limit: int = 256) -> list[EventRecord]:
+        """Die letzten ``limit`` Events eines Terminals (neueste zuletzt)."""
+        rows = self.conn.execute(
+            f"SELECT {_COLS} FROM event WHERE terminal_id = ? ORDER BY seq DESC LIMIT ?",  # noqa: S608
+            (terminal_id, int(limit))).fetchall()
+        return [self._record(r) for r in reversed(rows)]
+
     def verify(self) -> VerifyReport:
         problems: list[str] = []
         prev = chain.genesis_hash(self.project_id)

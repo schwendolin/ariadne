@@ -31,8 +31,8 @@ Die Hauptbereiche:
 
 Was das Design am stärksten prägt:
 
-- Hauptfall ist das Dashboard in halber Bildschirmbreite, etwa 720 px, auf dem Mac neben der Webkonsole der Kali. Das Nebeneinander von Karte und Liste aus B trägt dort nicht (2.1).
-- Gearbeitet wird im Terminal. Das Dashboard bekommt einen Blick zur Seite: Was ist neu, was braucht mich?
+- Das Dashboard läuft als volles Browserfenster. Der Nutzer wechselt zwischen der Webkonsole der Kali und dem Dashboard hin und her, er hat es nicht dauernd daneben (2.1).
+- Gearbeitet wird im Terminal. Beim Wechsel ins Dashboard muss sofort klar sein: Was ist seit dem letzten Besuch neu, was braucht mich?
 - Meist ist nichts zu entscheiden. Der häufigste Zustand der Arbeitsliste ist «nichts zu klären».
 - Alles läuft lokal und offline, ohne externe Schriften oder Ressourcen.
 - Daten von Zielen sind feindlich und erscheinen nur als Text. Secrets sind verdeckt. Entsperren gibt es im Browser nicht.
@@ -48,11 +48,10 @@ Die Kali läuft als VM mit 1 vCPU und 4 GB RAM im Netz der Schule. Der Nutzer be
 
 | Fall | Wie | Fläche für das Dashboard | Wie oft |
 |---|---|---|---|
-| Hauptfall (Weg B) | Mac, normaler Browser, SSH-Tunnel über Tailscale, links die Webkonsole | halbe Breite eines MacBooks: etwa **720 x 800 px** | fast immer |
-| Zweitfall | Mac, Dashboard allein, etwa für den Bericht | etwa **1440 x 900 px** | ab und zu |
-| Sonderfall (Weg E) | Firefox in der Kali neben dem Terminal | bei 1366x768 etwa **680 x 650 px**, mit `xrandr` auf 1920x1080 etwa 940 px | wenn der Tunnel fehlt |
+| Hauptfall (Weg B) | Mac, normaler Browser, SSH-Tunnel über Tailscale. Webkonsole und Dashboard sind je ein volles Fenster, der Nutzer wechselt dazwischen (Tab, Space, Cmd+Tab) | **volles Browserfenster**, Bildschirmgrösse in der Design-Session festlegen (12.4) | fast immer |
+| Sonderfall (Weg E) | Firefox in der Kali, im Wechsel mit dem Terminal | Auflösung der VM-Konsole, etwa **1366 x 768**, mit `xrandr` bis 1920 x 1080 | wenn der Tunnel fehlt |
 
-Prototyp B stellt unter 860 px Karte und Liste untereinander, die Karte mit 75 % der Höhe. Bei 720 px ist «Als Nächstes» beim Blick zur Seite also nicht sichtbar. E86 (nebeneinander) und E87 (Karte mindestens 70 %, gemessen bei 1440x900) passen nicht auf den Hauptfall (Frage 1). Die Sitzung hängt am Tunnel, Mac zuklappen beendet sie. Bei Weg E kann eine Lehrperson das Dashboard über die Schulplattform mitsehen (4.4).
+Weil der Nutzer wechselt statt daneben zu schauen, sieht er das Dashboard nicht dauernd. Entscheidend ist der Moment des Wechsels: Was ist seit dem letzten Besuch passiert, und was braucht ihn (Fragen 1 und 2)? Bei voller Fensterbreite passen Karte und «Als Nächstes» aus B nebeneinander (E86), und E87 ist bei 1440 x 900 gemessen. Die Sitzung hängt am Tunnel, Mac zuklappen beendet sie. Bei Weg E kann eine Lehrperson das Dashboard über die Schulplattform mitsehen (4.4).
 
 ### 2.2 Arbeitsweise und Häufigkeit
 
@@ -60,7 +59,7 @@ Ein Lab-Abend dauert Stunden, mit drei Terminals parallel. Eine Anmeldung gilt h
 
 | Häufigkeit | Was der Nutzer tut |
 |---|---|
-| dauernd, beim Blick zur Seite | Karte und «Als Nächstes» überfliegen, Neues seit dem letzten Blick sehen, Aufnahmezustand prüfen |
+| oft, bei jedem Wechsel ins Dashboard | Neues seit dem letzten Besuch sehen, «Als Nächstes» und Karte überfliegen, Aufnahmezustand prüfen |
 | mehrmals pro Abend | Host-Detail öffnen, Denkanstoss aufklappen und Vorlage kopieren, Kontext klären, Terminal pausieren |
 | selten | Rückgängig in der Zeitachse, Belegansicht, Finding, Screenshot, Export |
 | einmal pro Abend oder Projekt | Anmeldung, leeres Projekt, gesperrt, Sitzung beendet, Einstellungen |
@@ -245,7 +244,7 @@ Gemeinsame Zustände und Fehlertexte stehen in 5.14. Funktionen ab v0.2 beschrei
 
 **Aufbau in B (bisheriger Entscheid):** Abschnitte **Klären**, **Bestätigen** und **Denkanstösse**, jeder Kopf mit der Zahl offener Einträge oder «erledigt». Nur der aktuelle Eintrag ist aufgeklappt, nach einem Entscheid springt der Cursor weiter. Erledigte bleiben gedämpft stehen, verworfene durchgestrichen. Der Host des aktuellen Eintrags ist auf der Karte markiert. Darüber steht die stille Summe, etwa «21 Werte ausserhalb des Scopes, 2 Erwähnungen».
 
-**Hauptzustand «Nichts zu klären».** Im Profil lab der häufigste Fall: Nur Denkanstösse sind offen (Anhang A.7). Was die Spalte dann zeigt und ob sie bei 720 px dauernd Platz braucht, ist Frage 1.
+**Hauptzustand «Nichts zu klären».** Im Profil lab der häufigste Fall: Nur Denkanstösse sind offen (Anhang A.7). Was die Spalte dann zeigt, ist Frage 1.
 
 **Klären**
 
@@ -541,7 +540,7 @@ Regeln aus B: Einzeltasten wirken nur mit Fokus in der Liste und sind in Eingabe
 
 Ziel ist eine Vorlage, nach der Claude Code das Dashboard in Svelte baut.
 
-**12.1 Screens in Runden.** Runde 1 zuerst und am sorgfältigsten, jeweils bei 720 und 1440 px.
+**12.1 Screens in Runden.** Runde 1 zuerst und am sorgfältigsten, jeweils als volles Fenster in den Breiten aus 12.4.
 
 | Runde | Screens |
 |---|---|
@@ -553,7 +552,7 @@ Ziel ist eine Vorlage, nach der Claude Code das Dashboard in Svelte baut.
 
 **12.3 Tokens für hell und dunkel** mit Name, Wert hell, Wert dunkel und Verwendung: Farben nach Bedeutung (Hintergrund, Fläche, Text, gedämpfter Text, Linie, Fokus, Zugriff user, Zugriff admin/root, Faden, Handlungsbedarf, Warnung, Fehler, Nebel, ausserhalb Scope), Schrift gemäss Frage 9, Abstände, Radien, Linien, Bewegung. Tokens werden CSS-Variablen.
 
-**12.4 Breiten und Verhalten:** 680, 720 und 1440 px mit der Lösung aus Frage 1. Hover, Fokus, Auswahl, Zoom, Einblenden, Puls, die Wege aus 4.6 und die Kürzel aus Abschnitt 11.
+**12.4 Breiten und Verhalten:** volles Browserfenster in der Bildschirmgrösse des Nutzers, als Referenz 1440 x 900 und 1920 x 1080, dazu 1366 x 768 für Weg E. Schmaler als etwa 1000 px nur als Rückfall, ohne eigenen Entwurf. Hover, Fokus, Auswahl, Zoom, Einblenden, Puls, die Wege aus 4.6 und die Kürzel aus Abschnitt 11.
 
 **12.5 Format:** am liebsten eine statische HTML-Datei ohne externe Ressourcen, sonst Screenshots plus Token-Liste, mit den Daten aus Anhang A und mindestens einem feindlichen Wert aus A.10. Dazu die Antworten auf Abschnitt 13. Änderungen an E86, E87, E88, E99 und an Architektur 7.5 ausdrücklich nennen, damit sie ins Entscheidungsprotokoll kommen.
 
@@ -565,8 +564,8 @@ Ziel ist eine Vorlage, nach der Claude Code das Dashboard in Svelte baut.
 
 Nach Wichtigkeit geordnet.
 
-1. **Schmale Breite und Ruhezustand.** Bei 720 px tragen Karte und «Als Nächstes» nebeneinander nicht (2.1). Umschalter Karte oder Liste, Liste zuerst, Hinweis «2 offen» über der Karte? Was zeigt die Spalte, wenn nichts zu klären ist, und braucht sie dann Platz? Gilt «Karte mindestens 70 %» auch hier?
-2. **Neues seit dem letzten Blick.** Setzt die UI den Bezugspunkt selbst (B) oder der Nutzer per Knopf «Gesehen» (Rohbau)? Wie erscheint «+N seit HH:MM»? Ohne Browser-Speicher geht der Bezugspunkt beim Neuladen verloren, ausser der Server merkt ihn sich.
+1. **Rückkehr und Ruhezustand.** Was sieht der Nutzer zuerst, wenn er aus der Webkonsole ins Dashboard wechselt? Was zeigt die Spalte «Als Nächstes», wenn nichts zu klären ist, und braucht sie dann Platz? Gilt «Karte mindestens 70 %» weiter?
+2. **Neues seit dem letzten Besuch.** Setzt die UI den Bezugspunkt selbst (B) oder der Nutzer per Knopf «Gesehen» (Rohbau)? Wie erscheint «+N seit HH:MM»? Ohne Browser-Speicher geht der Bezugspunkt beim Neuladen verloren, ausser der Server merkt ihn sich.
 3. **Kopfzeile.** Stimmt die Sichtbarkeit aus 4.2? Profil und Herkunft immer oder bei Bedarf? Zahl der Klärungen und Denkanstösse in der Kopfzeile (Empfehlung) oder nur in der Liste (E87)? Wo sitzt die Pause, mit welcher Dauer?
 4. **Karte und Tastatur.** Host-Karten als HTML-Overlay (mehrzeilig, fokussierbar, wie in B) oder als Knoten auf der Zeichenfläche? Tastaturweg zu den Hosts: Tab, Pfeiltasten oder eine Hostliste? Services als Zahl oder als Satelliten? Host-Tabelle schon in v0.1?
 5. **Farben.** Werden die Darstellungen aus Architektur 7.5 übernommen? Bleibt die Profilfarbe aus Architektur 7.4 trotz E87?
@@ -742,7 +741,7 @@ E.. = [entscheide.md](../entscheide.md), A = [architektur.md](../architektur.md)
 
 | Briefing | Quellen |
 |---|---|
-| 2.1 Geräte | E09, E60, E90, E93, E100, FZ 4.4 (Weg B), FZ 4.6 (Weg E, `xrandr`), UI-F A1 (1366x768) |
+| 2.1 Geräte | E09, E60, E90, E93, E100, Nutzer am 2026-10-15 (volles Fenster, wechselt zwischen Webkonsole und Dashboard), FZ 4.4 (Weg B), FZ 4.6 (Weg E, `xrandr`), UI-F A1 (1366x768) |
 | 2.2, 2.5 Arbeitsweise, Mengen | E22, E42, E50, E92, TW 2.1, TW 2.5, A 5.11, A 7.5, A 11, API 7, API 8, `events.py` |
 | 2.3 Darstellung | E96, A 7.4, A 7.5, UI-F A4, A5, I1, I2, O08 |
 | 2.4 Technische Grenzen | A 7.1, A 7.2, A 7.7, E93, FZ R8, FZ R12, `webui/README.md` |

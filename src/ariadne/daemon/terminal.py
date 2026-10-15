@@ -50,11 +50,27 @@ class AckEntry:
 
 @dataclass
 class Pause:
-    """Aufnahme pausiert wegen Schlüsselmaterial auf dem Bildschirm (``sensitive_output``)."""
+    """Aufnahme pausiert wegen Schlüsselmaterial auf dem Bildschirm (``sensitive_output``).
+
+    ``since_mono``/``since_wall``: Zeitpunkt der Anmeldung (CLOCK_MONOTONIC bzw. Wanduhr).
+    Die Pause gilt nur für Gelesenes danach und endet nur an einem Prompt-Marker, den der
+    Shim danach gelesen hat: Wiederholte Rahmen aus seinem Ring (nach einem Neustart des
+    Daemons) beenden sie nicht und fallen nicht in die Lücke.
+    """
 
     start: int
     end: int
     deadline: float
+    since_mono: int = 0
+    since_wall: int = 0
+
+    def covers(self, mono: int | None, wall: int | None = None) -> bool:
+        """Gilt die Pause für etwas, das der Shim zu dieser Zeit gelesen hat?"""
+        if isinstance(mono, int) and 0 < mono and self.since_mono:
+            return mono >= self.since_mono
+        if isinstance(wall, int) and 0 < wall and self.since_wall:
+            return wall >= self.since_wall
+        return True  # ohne Shim-Zeit (Protokoll v1): wie bisher
 
 
 @dataclass(frozen=True)
@@ -103,6 +119,7 @@ class Terminal:
     gap_hint: str | None = None
     pause: Pause | None = None  # Schlüsselmaterial (sensitive_output), bis zum nächsten Prompt
     pause_until_ns: int | None = None  # Pause des Nutzers (E22), Wanduhr
+    pause_mono_until: int | None = None  # dieselbe Frist auf der monotonen Uhr des Daemons
     pause_source: str = "hotkey"
     mux: bool = False  # Multiplexer-Client im Vordergrund (nur Anzeige)
     last_mono: int | None = None  # monotone Shim-Zeit des letzten Rahmens (time_suspect)
@@ -112,6 +129,9 @@ class Terminal:
     last_state: dict[str, Any] | None = None
     closed: bool = False
     ctx_version: int = 0  # zählt Kontext-Entscheide; der Shim übernimmt STATE.stack nur dann
+    ends: dict[str, int] = field(default_factory=dict)  # Stromende pro Projekt bei Aufnahme-Ende
+    dup_end: int = -1  # Journal-Ende beim Öffnen: davor Gespeichertes nicht noch einmal schreiben
+    dup_keys: set[tuple[Any, ...]] = field(default_factory=set)  # Events genau an dup_end
 
     def note_frame(self, off: int, wall: int, mono: int | None, recv: int = 0) -> None:
         if self.frame_offs and off < self.frame_offs[-1]:

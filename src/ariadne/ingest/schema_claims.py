@@ -18,6 +18,8 @@ laufen mit ``sqlite3`` wie mit ``sqlcipher3``.
 * Spuren (E42): ``claim.lane`` ist ``auto``, ``quiet``, ``decide`` oder ``user``,
   ``lane_reason`` der Grund; ``history = 1`` heisst durch einen neueren Zustand
   oder eine genauere Version abgelöst (E45). ``group_key`` ist die Evidenzgruppe.
+  ``host_scope`` ist das Scope-Urteil, nach dem Spur und Sammelbestätigung gehen
+  (bei Konto, Secret und Hinweis das des Hosts, auf dem beobachtet wurde, A1).
 
 :data:`CLAIMS_VERSION` steht als ``schema_claims_version`` in ``meta``. Weicht sie
 ab, baut die Auswertung ``derived.db`` neu (``CREATE ... IF NOT EXISTS`` ergänzt
@@ -31,7 +33,7 @@ from __future__ import annotations
 __all__ = ["SCHEMA_SQL", "VIEWS_SQL", "MASK", "statements", "CLAIMS_VERSION"]
 
 MASK = "••••••••"
-CLAIMS_VERSION = 2
+CLAIMS_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS obs_unit (
@@ -169,7 +171,8 @@ CREATE TABLE IF NOT EXISTS claim (
   lane                TEXT NOT NULL DEFAULT 'quiet' CHECK (lane IN ('auto','quiet','decide','user')),
   lane_reason         TEXT,
   group_key           TEXT,
-  history             INTEGER NOT NULL DEFAULT 0
+  history             INTEGER NOT NULL DEFAULT 0,
+  host_scope          TEXT
 );
 CREATE INDEX IF NOT EXISTS claim_entity ON claim(entity_id);
 CREATE INDEX IF NOT EXISTS claim_lane ON claim(lane, lane_reason);

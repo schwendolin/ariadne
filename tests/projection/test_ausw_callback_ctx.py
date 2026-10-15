@@ -13,6 +13,7 @@ SP = Span(0, 0)
 H = "ip:default/192.168.56.101"
 REV = {"kind": "revshell", "opened_at": 100}
 LISTEN = "listening on [any] 4444 ...\n"
+SEEN = {"listener_status": "seen"}  # Handler-Meldung von msf stand davor
 
 
 def _cb(ip: str) -> str:
@@ -60,7 +61,7 @@ def test_ambiguous_callbacks_stay_manual():
     conn, p = new_projector()
     msf = {"kind": "msf", "opened_at": 100}
     apply_items(p, _seg("x", context=msf), [
-        Obs(Ref.ip("192.168.56.101"), "access.callback", "msf:4444", SP),
+        Obs(Ref.ip("192.168.56.101"), "access.callback", "msf:4444", SP, attrs=SEEN),
         Mention("callback", "192.168.56.103:40001", SP, {"reason": "not_first", "listener": "msf"}),
     ], parser_id="listener.callback", trust="tool_text", auto_eligible=False)
     p.rebuild()
@@ -68,7 +69,7 @@ def test_ambiguous_callbacks_stay_manual():
     # gleiche IP in der zweiten Sitzung bleibt eindeutig; Text des Ziels (after_output) zählt nicht
     conn, p = new_projector()
     apply_items(p, _seg("x", context=msf), [
-        Obs(Ref.ip("192.168.56.101"), "access.callback", "msf:4444", SP),
+        Obs(Ref.ip("192.168.56.101"), "access.callback", "msf:4444", SP, attrs=SEEN),
         Mention("callback", "192.168.56.101:40002", SP, {"reason": "not_first"}),
         Mention("callback", "6.6.6.6:1", SP, {"reason": "after_output"}),
     ], parser_id="listener.callback", trust="tool_text", auto_eligible=False)
@@ -120,3 +121,26 @@ def test_customer_profile_only_suggests():
 def test_context_label_marks_auto():
     assert queries.context_label({"kind": "revshell", "host": H, "host_source": "auto"}) == (
         "192.168.56.101 [revshell] (auto)")
+
+
+def test_forged_first_line_without_listener_status_stays_manual():
+    """Befund SEC-2: ``nc -lnp`` ohne -v gibt keine Callback-Zeile aus; die erste solche Zeile
+    stammt vom Ziel. Ohne Meldung des Listeners davor kein Auto-Host, nur der Vorschlag."""
+    conn, _ = _stage(_cb("192.168.56.120"))
+    assert queries.auto_contexts(conn) == []
+    kinds = [i["kind"] for i in inbox(conn) if i["group"].startswith("ctx:")]
+    assert kinds == ["ctx_suggestion"]
+    # als Befehls-Einheit des Listeners ebenso
+    conn, p = new_projector()
+    feed(p, make_unit(_cb("192.168.56.120") + "id\n", argv=["nc", "-lnp", "4444"], unit_id="c1",
+                      terminal_id="t1", context=REV, start=100), journal_seq=10,
+         parsers=[ListenerCallbackParser()])
+    p.rebuild()
+    assert queries.auto_contexts(conn) == []
+    # msf ohne gestarteten Handler (z. B. nur Scanner-Ausgabe mit eingeschleuster Zeile)
+    conn, p = new_projector()
+    msf = {"kind": "msf", "opened_at": 100}
+    apply_items(p, _seg("x", context=msf), [Obs(Ref.ip("192.168.56.101"), "access.callback", "msf:4444", SP)],
+                parser_id="listener.callback", trust="tool_text", auto_eligible=False)
+    p.rebuild()
+    assert queries.auto_contexts(conn) == []

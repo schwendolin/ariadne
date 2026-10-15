@@ -16,7 +16,7 @@ import pytest
 
 from ariadne.daemon.core import Daemon
 from ariadne.daemon.ingest import IngestService
-from tests.core.fakeshim import FakeShim, ctl, ctl_ok
+from tests.core.fakeshim import FakeShim, close_all, ctl, ctl_ok
 from tests.integration.helpers import LHOST, TARGET, Term, ms2
 
 FAKE_IP = f"""#!/bin/sh
@@ -30,6 +30,8 @@ async def _fake_clock() -> dict[str, Any]:
 
 
 def run(paths, operator, scenario, **kw: Any) -> None:
+    kw.setdefault("local_addrs", lambda: None)  # hermetisch: nie die Adressen des Testrechners
+
     async def main() -> None:
         d = Daemon(paths, check_peer_comm=False, operator=operator, batch_interval=0.02,
                    clock_check=_fake_clock, ingest=IngestService(debounce=0.05, periodic=0), **kw)
@@ -38,8 +40,18 @@ def run(paths, operator, scenario, **kw: Any) -> None:
             await scenario(d)
         finally:
             await d.stop()
+            await close_all()
 
     asyncio.run(main())
+
+
+def test_run_never_reads_local_addresses_of_the_test_machine(paths, operator):
+    """Befund F8: Integrationstests lesen nie /proc des Testrechners (wie tests/core)."""
+
+    async def scenario(d: Daemon) -> None:
+        assert d._read_addrs is not None and d._read_addrs() is None
+
+    run(paths, operator, scenario)
 
 
 @pytest.fixture
@@ -376,12 +388,14 @@ def test_redaction_reparse_retried_after_failure(paths, operator):
 
     async def main() -> None:
         d = Daemon(paths, check_peer_comm=False, operator=operator, batch_interval=0.02,
-                   clock_check=_fake_clock, ingest=_FlakyReparse(debounce=0.05, periodic=0))
+                   clock_check=_fake_clock, ingest=_FlakyReparse(debounce=0.05, periodic=0),
+                   local_addrs=lambda: None)
         await d.start()
         try:
             await scenario(d)
         finally:
             await d.stop()
+            await close_all()
 
     asyncio.run(main())
 

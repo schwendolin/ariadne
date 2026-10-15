@@ -535,6 +535,41 @@ def test_outer_shim_pauses_while_tmux_client_in_foreground(box_factory, tmp_path
         finish(c)
 
 
+
+@pytest.mark.skipif(not shutil.which("tmux"), reason="tmux fehlt")
+def test_tmux_behind_wrapper_detected_and_hotkey_reaches_pane(box_factory, tmp_path_factory):
+    """Befunde F2 und R1: Ein Wrapper vor ``exec tmux`` läuft in derselben Prozessgruppe;
+    die Erkennung darf «kein Multiplexer» nicht festschreiben. F12 r gehört der Pane."""
+    shell = SHELLS[0]
+    box = box_factory(shell=shell)
+    sock = tmp_path_factory.mktemp("tm") / "s"
+    with FakeDaemon(box.sock) as d:
+        c = spawn(box, shell)
+        d.wait_for(lambda: d.hellos())
+        outer = d.frames(P.HELLO)[0].conn
+        c.sendline(f"sh -c 'echo wrapper-$((3*4)); sleep 0.5; exec tmux -S {sock} -f /dev/null new-session'")
+        d.wait_for(lambda: len(d.hellos()) >= 2, timeout=8)
+        c.expect_exact(PROMPT)  # Prompt im Pane
+        c.sendline("echo PANE-$((6*7))")
+        c.expect_exact("PANE-42")
+        time.sleep(0.3)
+        c.send(F12)
+        time.sleep(0.25)
+        c.send(b"r")
+        assert d.wait_for(lambda: [r for r in d.frames(P.EVENT)
+                                   if r.conn != outer and r.obj["kind"] == "req.pause"])
+        c.sendline("exit")
+        c.expect_exact(PROMPT)
+        run_cmd(c, "echo AUSSEN-$((7*6))")
+        assert d.wait_for(lambda: [r for r in d.outs()
+                                   if r.conn == outer and b"AUSSEN-42" in r.obj[4]])
+        outer_bytes = b"".join(r.obj[4] for r in d.outs() if r.conn == outer)
+        assert b"wrapper-12" in outer_bytes and b"PANE-42" not in outer_bytes
+        assert not [r for r in d.frames(P.EVENT) if r.conn == outer and r.obj["kind"] == "req.pause"]
+        outer_in = b"".join(r.obj.data for r in d.frames(P.INPUT) if r.conn == outer)
+        assert b"echo PANE" not in outer_in
+        finish(c)
+
 def test_pause_hotkey_title_and_resume_gap(box_factory):
     """E22: F12 r pausiert dieses Terminal, ein zweites F12 r hebt die Pause auf."""
     shell = SHELLS[0]

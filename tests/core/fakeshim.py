@@ -11,6 +11,15 @@ from typing import Any
 from ariadne._shim import protocol as P
 from ariadne.ids import new_id
 
+_LIVE: set[FakeShim] = set()  # offene Verbindungen; close_all() räumt sie am Ende eines Laufs ab
+
+
+async def close_all() -> None:
+    """Schliesst alle noch offenen Fake-Shims (auch wenn ein Test vorher fehlschlug), damit
+    kein StreamWriter erst nach dem Ende der Schleife eingesammelt wird."""
+    for shim in list(_LIVE):
+        await shim.close()
+
 
 class FakeShim:
     def __init__(self, sock: Path, terminal_id: str | None = None) -> None:
@@ -26,6 +35,7 @@ class FakeShim:
 
     async def connect(self, **hello: Any) -> FakeShim:
         self._reader, self._writer = await asyncio.open_unix_connection(str(self.sock))
+        _LIVE.add(self)
         msg = {"proto": 1, "terminal_id": self.terminal_id, "tty": "/dev/pts/7", "shell": "zsh",
                "term": "xterm-256color", "rows": 40, "cols": 120, "shim_version": "test", "pid": 4242,
                "resume_from_seq": None}
@@ -116,6 +126,7 @@ class FakeShim:
         await self.send(P.encode_json(P.BYE, {"exit_code": exit_code}))
 
     async def close(self) -> None:
+        _LIVE.discard(self)
         if self._writer is not None:
             self._writer.close()
         if self._task is not None:

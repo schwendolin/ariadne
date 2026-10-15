@@ -153,18 +153,36 @@ def _ptrace() -> Check:
     return Check(OK, f"kernel.yama.ptrace_scope = {val}")
 
 
-def swap_check(swaps: str, dm_uuid: Callable[[str], str | None]) -> Check:
+def _crypted(name: str, dm_uuid: Callable[[str], str | None],
+             slaves: Callable[[str], list[str]], depth: int = 0) -> bool:
+    """Liegt das Gerät auf dm-crypt? Auch über Zwischenschichten (LVM auf LUKS, Kali-Standard)."""
+    if not name.startswith("dm-") or depth > 8:
+        return False
+    if (dm_uuid(name) or "").startswith("CRYPT-"):
+        return True
+    return any(_crypted(sl, dm_uuid, slaves, depth + 1) for sl in slaves(name))
+
+
+def swap_check(swaps: str, dm_uuid: Callable[[str], str | None],
+               slaves: Callable[[str], list[str]] | None = None,
+               file_dev: Callable[[str], str | None] | None = None) -> Check:
     """Vorlauf und Puffer liegen nur im RAM (E95); unverschlüsselter Swap kann sie auf die Platte bringen.
 
-    ``swaps`` ist der Inhalt von ``/proc/swaps``; zram und dm-crypt gelten als sicher.
+    ``swaps`` ist der Inhalt von ``/proc/swaps``; zram und dm-crypt gelten als sicher, auch
+    unter LVM (``slaves``: die Geräte unter einem dm-Gerät). Eine Swap-Datei zählt nach dem
+    Gerät ihres Dateisystems (``file_dev``).
     """
+    under = slaves or (lambda _n: [])
     unsafe = []
     for line in swaps.splitlines()[1:]:
-        dev = line.split()[0] if line.split() else ""
+        parts = line.split()
+        dev = parts[0] if parts else ""
         name = os.path.basename(dev)
         if not dev or name.startswith("zram"):
             continue
-        if name.startswith("dm-") and (dm_uuid(name) or "").startswith("CRYPT-"):
+        if len(parts) > 1 and parts[1] == "file" and file_dev is not None:
+            name = file_dev(dev) or name
+        if _crypted(name, dm_uuid, under):
             continue
         unsafe.append(dev)
     if unsafe:
@@ -180,11 +198,24 @@ def _swap() -> Check:
         except OSError:
             return None
 
+    def slaves(name: str) -> list[str]:
+        try:
+            return sorted(os.listdir(f"/sys/block/{name}/slaves"))
+        except OSError:
+            return []
+
+    def file_dev(path: str) -> str | None:
+        try:
+            dev = os.stat(path).st_dev
+            return os.path.basename(os.readlink(f"/sys/dev/block/{os.major(dev)}:{os.minor(dev)}"))
+        except OSError:
+            return None
+
     try:
         swaps = Path("/proc/swaps").read_text()
     except OSError:
         return Check(WARN, "Swap unbekannt", "/proc/swaps nicht lesbar")
-    return swap_check(swaps, dm_uuid)
+    return swap_check(swaps, dm_uuid, slaves, file_dev)
 
 
 def run_checks(paths: Paths) -> list[Check]:

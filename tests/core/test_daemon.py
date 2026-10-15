@@ -15,7 +15,7 @@ import pytest
 
 from ariadne.daemon.core import Daemon
 from tests.core.conftest import OWN_SECRET
-from tests.core.fakeshim import FakeShim, ctl, ctl_ok
+from tests.core.fakeshim import FakeShim, close_all, ctl, ctl_ok
 
 
 async def _fake_clock() -> dict[str, Any]:
@@ -33,6 +33,7 @@ def run(paths, operator, scenario: Callable[[Daemon], Awaitable[None]], **kw: An
             await scenario(d)
         finally:
             await d.stop()
+            await close_all()  # auch nach einem Fehlschlag: sonst trifft die Warnung fremde Tests
         return d
 
     return asyncio.run(main())

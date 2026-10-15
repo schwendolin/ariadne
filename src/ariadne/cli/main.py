@@ -30,6 +30,7 @@ from ariadne import __version__
 from ariadne.cli import analysis
 from ariadne.cli.common import SECRET_PROMPT_S, CliError, _call, _client, _terminal_id, read_secret, s, say
 from ariadne.crypto.vault import MIN_PASSPHRASE, OperatorVault
+from ariadne.daemon.active import read_active
 from ariadne.daemon.client import CtlError, DaemonUnavailable
 from ariadne.paths import Paths, default_paths
 
@@ -164,7 +165,8 @@ def cmd_status(paths: Paths, args: argparse.Namespace) -> int:
     if p:
         say(f"Projekt:  {s(p['slug'])} ({s(p['profile'])}), Aufnahme läuft")
     elif active and not active.get("stopped"):
-        say(f"Projekt:  {s(active.get('slug'))} aktiv, gesperrt (weiter mit ariadne start)")
+        how = "nicht geöffnet" if op.get("unlocked") else "gesperrt"
+        say(f"Projekt:  {s(active.get('slug'))} aktiv, {how} (weiter mit ariadne start)")
     else:
         say("Projekt:  - (ariadne start <slug> --target <ziel>)")
     if p and p.get("chain_head_ok") is False:
@@ -199,6 +201,22 @@ def _ask_yes(prompt: str) -> bool:
     return answer.strip().lower() in ("j", "ja", "y", "yes")
 
 
+_END_TEXT = {"stop": "mit ariadne stop", "idle": "nach Leerlauf"}
+
+
+def _no_active(active: dict[str, Any] | None) -> CliError:
+    """Meldung ohne aktives Projekt; nennt das zuletzt beendete, wenn es eines gibt."""
+    slug = (active or {}).get("slug")
+    if not slug:
+        return CliError("Kein aktives Projekt. ariadne start <slug> --target <ziel>")
+    if (active or {}).get("end_reason") == "missing":
+        return CliError(f"Projekt {s(slug, 64)} gibt es nicht mehr (Ordner fehlt). "
+                        "ariadne start <slug> --target <ziel>")
+    how = _END_TEXT.get(str((active or {}).get("end_reason")), "")
+    return CliError(f"Projekt {s(slug, 64)} ist beendet{' ' + how if how else ''}. "
+                    f"Weiter: ariadne start {s(slug, 64)}")
+
+
 def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     if not OperatorVault(paths.operator_dir).exists:
         raise CliError("kein Operator-Tresor (ariadne init)")
@@ -209,17 +227,18 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     st = _call(paths, "status")
     active = st.get("active") or {}
     if not args.slug and not st.get("project") and (not active or active.get("stopped")):
-        raise CliError("Kein aktives Projekt. ariadne start <slug> --target <ziel>")
+        raise _no_active(active)
     pw = None
     if not st["operator"]["unlocked"]:
         pw = read_secret("Passphrase: ", args.passphrase_fd)
-    adopt = False
+    adopt = asked = False
     info = _call(paths, "preroll.info")
     if info.get("terminals") and info.get("seconds"):
         n, k = math.ceil(int(info["seconds"]) / 60), int(info["terminals"])
         if args.preroll == "yes":
             adopt = True
         elif args.preroll == "ask" and sys.stdin.isatty():
+            asked = True
             adopt = _ask_yes(f"Die letzten {n} Minuten aus {k} Terminals übernehmen? [j/N] ")
     try:
         res = _call(paths, "start", passphrase=pw, slug=args.slug, targets=args.target or None,
@@ -232,10 +251,13 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
                 "--not-customer")
             return 1
         if exc.code == "no_active_project":
-            raise CliError("Kein aktives Projekt. ariadne start <slug> --target <ziel>") from None
+            raise CliError(s(str(exc), 300)) from None
         if exc.code == "project_not_found":
-            raise CliError(f"Projekt {s(args.slug, 64)} existiert nicht. Neu anlegen: "
-                           f"ariadne start {s(args.slug, 64)} --target <ziel>") from None
+            slug = args.slug or active.get("slug")
+            if not slug:
+                raise CliError("Projekt existiert nicht. ariadne start <slug> --target <ziel>") from None
+            raise CliError(f"Projekt {s(slug, 64)} existiert nicht. Neu anlegen: "
+                           f"ariadne start {s(slug, 64)} --target <ziel>") from None
         raise
     if res.get("unlocked"):
         say("Entsperrt.")
@@ -252,15 +274,27 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     if pre.get("adopted"):
         say(f"Vorlauf übernommen: {math.ceil(int(pre.get('seconds') or 0) / 60)} min aus "
             f"{s(pre.get('terminals'))} Terminals.")
-    say(f"Aufnahme läuft ({s(res.get('recording', 0))} Terminals). Pause: F12 r oder ariadne pause. "
-        f"Ende: ariadne stop.")
+    elif pre.get("discarded_terminals") and args.preroll == "ask" and not asked:
+        say(f"Vorlauf verworfen: {math.ceil(int(pre.get('discarded_seconds') or 0) / 60)} min aus "
+            f"{s(pre.get('discarded_terminals'))} Terminals (ohne Terminal keine Frage; übernehmen mit "
+            f"--preroll yes).")
+    held = int(res.get("held") or 0)
+    switching = f"; {held} wechseln an der nächsten lokalen Eingabeaufforderung" if held else ""
+    say(f"Aufnahme läuft ({s(res.get('recording', 0))} Terminals{switching}). Pause: F12 r oder "
+        f"ariadne pause. Ende: ariadne stop.")
     return 0
 
 
 def cmd_stop(paths: Paths, args: argparse.Namespace) -> int:
+    active = read_active(paths.active_file)
+    # Läuft der Daemon nicht, ist ein aktives Projekt trotzdem nur in active.json beendet, die
+    # allein der Daemon schreibt: dann starten (er beginnt gesperrt) und beenden lassen.
+    start = active is not None and not active["stopped"]
     try:
-        res = _call(paths, "stop", start=False)
+        res = _call(paths, "stop", start=start)
     except CliError:
+        if start:
+            raise
         say("Daemon läuft nicht, nichts aktiv.")
         return 0
     if not res.get("stopped"):
@@ -441,7 +475,8 @@ def cmd_mark(paths: Paths, args: argparse.Namespace) -> int:
                 terminal_id=getattr(args, "terminal", None) or os.environ.get("ARIADNE_TERMINAL_ID"))
     raw = str(res.get("host") or "")
     shown = raw.split("/", 1)[1] if raw.startswith("ip:") else raw.removeprefix("name:")
-    host = f" für {s(shown, 80)}" if shown else " (ohne Host)"
+    auto = " (auto)" if res.get("host_auto") else ""
+    host = f" für {s(shown, 80)}{auto}" if shown else " (ohne Host)"
     say(f"Schlüsselschritt {s(res['step'], 12)} gespeichert{host}.")
     return 0
 

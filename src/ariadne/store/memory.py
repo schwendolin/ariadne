@@ -143,6 +143,17 @@ class MemoryJournal:
                 end = max(end, r.stream_off + int(r.header.get("length", 0)))
         return end
 
+    def stream_extent(self, terminal_id: str) -> int:
+        end = self.stream_end(terminal_id)
+        for row in self._rows:
+            r = row.rec
+            if r.kind == "term.gap" and r.terminal_id == terminal_id and r.stream_off is not None:
+                end = max(end, r.stream_off + int(r.header.get("bytes_lost", 0) or 0))
+        return end
+
+    def recent_events(self, terminal_id: str, limit: int = 256) -> list[EventRecord]:
+        return [row.rec for row in self._rows if row.rec.terminal_id == terminal_id][-limit:]
+
     def verify_head(self) -> bool:
         if not self._rows:
             return True

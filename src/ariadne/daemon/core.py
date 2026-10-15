@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import json
 import logging
@@ -155,11 +156,27 @@ _STOP_HINT = {"paused": "pause", "held": "project_switch", "locked": "no_project
               "off": "no_project"}
 
 
-def _plausible_mono(mono: int | None, now: int) -> int:
+def _boottime_ns() -> int:
+    """CLOCK_BOOTTIME (Linux), sonst CLOCK_MONOTONIC."""
+    clk = getattr(time, "CLOCK_BOOTTIME", None)
+    return time.clock_gettime_ns(clk) if clk is not None else time.monotonic_ns()
+
+
+def _plausible_mono(mono: int | None, now: int, max_age_ns: int = 3_600_000_000_000) -> int:
     """Monotone Shim-Zeit als Fensterschlüssel, sonst die eigene (gleicher Boot, gleiche Uhr)."""
-    if isinstance(mono, int) and now - 3_600_000_000_000 <= mono <= now:
+    if isinstance(mono, int) and now - max_age_ns <= mono <= now:
         return mono
     return now
+
+
+def _dup_key(kind: str, header: dict[str, Any], body: bytes | None) -> tuple[Any, ...]:
+    """Kennung eines Events für den Vergleich mit dem Journal (Wiederholung nach Neustart)."""
+    off = header.get("stream_off")
+    if kind == "term.mark":
+        return (kind, off, header.get("mark"), header.get("counter"))
+    if kind == "term.input":
+        return (kind, off, hashlib.sha256(body or b"").hexdigest())
+    return (kind, off, json.dumps(header, sort_keys=True, default=str))
 
 
 def _cut_time(wall: int, mono: int | None, tix: tuple[tuple[int, int], ...],
@@ -192,6 +209,7 @@ class Daemon:
         local_addrs: Callable[[], tuple[str, ...] | None] | None | bool = True,
         wall_clock: Callable[[], int] | None = None,
         mono_clock: Callable[[], int] | None = None,
+        boot_clock: Callable[[], int] | None = None,
     ) -> None:
         self.paths = paths
         self.check_peer_comm = check_peer_comm
@@ -205,12 +223,15 @@ class Daemon:
         self.pause_timeout = pause_timeout
         self._wall = wall_clock or time.time_ns
         self._mono = mono_clock or time.monotonic_ns
+        self._boot = boot_clock or _boottime_ns  # zählt Suspend mit (Leerlauf, E22)
         self.config = config if config is not None else load_recording(paths.config_file)
         self.preroll = PrerollStore(window_s=self.config.preroll_minutes * 60,
                                     terminal_bytes=self.config.preroll_terminal_mib << 20,
-                                    total_bytes=self.config.preroll_total_mib << 20, clock=self._mono)
+                                    total_bytes=self.config.preroll_total_mib << 20, clock=self._mono,
+                                    keep_s=self.config.idle_end_s, wall_clock=self._wall)
         self.active: dict[str, Any] | None = read_active(paths.active_file)
         self.last_activity = self._mono()
+        self._last_act = (self._boot(), self._wall())  # Leerlauf: Bootzeit und Wanduhr
         self._idle_checked = self._mono()
         self._clock_check = clock_check or hardening.clock_status
         self._read_addrs: Callable[[], tuple[str, ...] | None] | None = (
@@ -218,7 +239,11 @@ class Daemon:
         self._addrs_written: tuple[str, ...] | None = None
         self._addrs_checked = 0
         self._runtime_secrets: list[tuple[str, str]] = []
-        self._pending_sensitive: dict[str, float] = {}  # Anmeldung vor dem ersten HELLO
+        # Anmeldung vor dem ersten HELLO: Frist (monoton, s) und Zeit der Anmeldung (mono, Wand)
+        self._pending_sensitive: dict[str, tuple[float, int, int]] = {}
+        # Gesperrt durch ``ariadne lock`` (sonst: Daemon neu gestartet, Projekt noch aktiv)
+        self._user_locked = False
+        self._stopping = False
         self._departed: dict[str, Terminal] = {}  # beendete Terminals mit Vorlauf
         self._commit_hooks: list[CommitHook] = []
         self._mark_hooks: list[MarkHook] = []
@@ -321,14 +346,19 @@ class Daemon:
             return
         self._started = False
         hardening.sd_notify("STOPPING=1")
+        self._stopping = True  # ab hier nichts mehr annehmen: der Shim behält es im Ring
         for srv in self._servers:
             srv.close()
+        if self.project is not None:
+            self._close_current("shutdown")
+        # Den letzten Stapel bestätigen, bevor die Verbindungen schliessen. Sonst sendet der
+        # Shim ihn nach dem Neustart erneut und Marker und Eingaben stünden doppelt im Journal.
+        self.advance_acks()
+        await self._drain_conns(0.5)
         for t in list(self.terminals.values()):
             if t.conn is not None:
                 with contextlib.suppress(Exception):
                     t.conn.close()
-        if self.project is not None:
-            self._close_current("shutdown")
         self.preroll.discard()
         if self._writer_task is not None:
             self._writer_task.cancel()
@@ -342,6 +372,18 @@ class Daemon:
                 os.unlink(sock)
         self._lock.release()
         log.info("ariadned beendet")
+
+    async def _drain_conns(self, timeout: float) -> None:
+        conns = [t.conn for t in self.terminals.values() if t.conn is not None and not t.conn.is_closing()]
+        if not conns:
+            return
+
+        async def drain(c: asyncio.StreamWriter) -> None:
+            with contextlib.suppress(Exception):
+                await c.drain()
+
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.gather(*(drain(c) for c in conns)), timeout)
 
     async def run(self) -> None:
         """Startet, wartet auf ``shutdown`` (oder :meth:`request_stop`) und räumt auf."""
@@ -368,8 +410,8 @@ class Daemon:
             if t.pause is not None and now >= t.pause.deadline:
                 self._end_pause(t, None)
             self._check_user_pause(t)
-        for tid, deadline in list(self._pending_sensitive.items()):
-            if now >= deadline:
+        for tid, pending in list(self._pending_sensitive.items()):
+            if now >= pending[0]:
                 del self._pending_sensitive[tid]
         mono = self._mono()
         if mono - self._idle_checked >= IDLE_CHECK_NS:
@@ -386,13 +428,21 @@ class Daemon:
 
     def _activity(self) -> None:
         self.last_activity = self._mono()
+        self._last_act = (self._boot(), self._wall())
+
+    def _idle_ns(self) -> int:
+        """Zeit seit der letzten Aktivität. CLOCK_MONOTONIC steht bei Suspend still, darum die
+        Bootzeit (zählt Suspend mit) und die Wanduhr (springt nach einer angehaltenen VM, ein
+        Rücksprung zählt nicht); es gilt die grössere."""
+        boot0, wall0 = self._last_act
+        return max(self._boot() - boot0, self._wall() - wall0, 0)
 
     def _check_idle(self) -> bool:
         """Leerlauf-Ende (E22): Projekt schliessen und sperren. Gibt zurück, ob es endete."""
         limit = self.config.idle_end_s
         if self.project is None or limit is None:
             return False
-        idle_ns = self._mono() - self.last_activity
+        idle_ns = self._idle_ns()
         if idle_ns < limit * 1_000_000_000:
             return False
         log.info("Leerlauf: Projekt wird beendet")
@@ -429,7 +479,7 @@ class Daemon:
 
     def state_of(self, t: Terminal) -> str:
         """Zustand eines Terminals nach Vertrag 3.4 (Reihenfolge verbindlich)."""
-        if t.pause_until_ns is not None and t.pause_until_ns > self._wall():
+        if self._user_paused(t):
             return "paused"
         active = self._active_id()
         if t.bound_project_id is not None and t.bound_project_id != active:
@@ -441,6 +491,13 @@ class Daemon:
         if self.preroll.enabled:
             return "preroll"
         return "off"
+
+    def _user_paused(self, t: Terminal) -> bool:
+        """Pause des Nutzers läuft: weder die Frist der Wanduhr noch die monotone ist um
+        (ein Rücksprung der Wanduhr verlängert sie so nicht)."""
+        if t.pause_until_ns is None or t.pause_until_ns <= self._wall():
+            return False
+        return t.pause_mono_until is None or t.pause_mono_until > self._mono()
 
     def status_of(self, t: Terminal) -> str:
         """Zustand, wie ihn der Shim sieht (v1: ``on``, ``waiting`` oder ``off``)."""
@@ -551,15 +608,10 @@ class Daemon:
             t.bound_project_id = p.info.id
             t.bound_slug = p.info.slug
         t.recording = True
-        if p.info.id not in t.opened_in:
-            t.pending_open = True  # term.open folgt am ersten Offset des Shims
-            return
-        tid = t.terminal_id
-        self.writer.add_event(AppendItem(
-            "term.ctx_snapshot", {"terminal_id": tid, "stream_off": t.recv_end,
-                                  "stack": t.stack.journal_snapshot(), **self._shim_time(t, t.recv_end)},
-            origin="daemon", terminal_id=tid, stream_off=t.recv_end), t)
-        t.gap_hint = t.gap_hint or "no_project"
+        # term.open (nur beim ersten Mal im Projekt) und Schnappschuss folgen am ersten Offset
+        # des Shims; :meth:`_ensure_open` richtet den Strom am Journal aus und vermerkt die
+        # Lücke seit dem Ende der letzten Aufnahme in diesem Projekt (A -> B -> A, lock, stop).
+        t.pending_open = True
 
     def _ensure_open(self, t: Terminal, off: int | None = None) -> None:
         """Erstes Event eines Terminals im Projekt: ``term.open``, ``term.bind``, Schnappschuss.
@@ -574,21 +626,63 @@ class Daemon:
         t.pending_open = False
         tid = t.terminal_id
         cur = t.shim_off if off is None else max(off, 0)
-        end = p.journal.stream_end(tid)
+        end = self._stored_end(t, p)
         start = max(end, cur)
         t.recv_end = t.stored_end = start
         if end > 0 and cur > end:
             self.writer.add_event(AppendItem(
-                "term.gap", {"terminal_id": tid, "stream_off": end, "reason": "no_project",
+                "term.gap", {"terminal_id": tid, "stream_off": end, "reason": t.gap_hint or "no_project",
                              "bytes_lost": cur - end, **self._shim_time(t, cur)},
                 origin="daemon", terminal_id=tid, stream_off=end), t)
+            t.gap_hint = None
+        self._guard_dups(t, p, end)
         self._write_open(t, start, origin="daemon")
+
+    @staticmethod
+    def _opened_before(p: OpenProject, tid: str) -> bool:
+        return next(iter(p.journal.iter_events(kinds=["term.open"], terminal_id=tid)), None) is not None
+
+    def _stored_end(self, t: Terminal, p: OpenProject) -> int:
+        """Ende des Stroms von ``t`` in ``p`` samt Lücken: Journal und, was in dieser Sitzung
+        aufgenommen wurde (der Writer hat es vielleicht noch nicht gespeichert)."""
+        ext = getattr(p.journal, "stream_extent", None)
+        end = int(ext(t.terminal_id)) if callable(ext) else p.journal.stream_end(t.terminal_id)
+        return max(end, t.ends.get(p.info.id, 0))
+
+    def _guard_dups(self, t: Terminal, p: OpenProject, end: int) -> None:
+        """Schutz vor doppelten Events nach einem Neustart: Was der Shim erneut sendet, weil
+        das ACK fehlte, steht vielleicht schon im Journal. Events und Eingaben vor ``end``
+        sind gespeichert; genau an ``end`` entscheidet der Vergleich mit den letzten Events."""
+        t.dup_end, t.dup_keys = -1, set()
+        recent = getattr(p.journal, "recent_events", None)
+        if end <= 0 or not callable(recent) or p.info.id in t.opened_in:
+            return  # in dieser Sitzung schon aufgenommen: nichts wird wiederholt
+        t.dup_end = end
+        for r in recent(t.terminal_id, 256):
+            if r.kind != "term.out" and r.stream_off is not None and r.stream_off >= end:
+                t.dup_keys.add(_dup_key(r.kind, r.header, r.body))
+
+    def _is_dup(self, t: Terminal, kind: str, off: Any, header: dict[str, Any], body: bytes | None) -> bool:
+        if t.dup_end < 0 or not isinstance(off, int):
+            return False
+        if t.recv_end > t.dup_end:
+            t.dup_end, t.dup_keys = -1, set()  # neue Ausgabe gespeichert: Grenze liegt hinter uns
+            return False
+        if off < t.dup_end:
+            return True
+        key = _dup_key(kind, header, body)
+        if off == t.dup_end and key in t.dup_keys:
+            t.dup_keys.discard(key)
+            return True
+        return False
 
     def _write_open(self, t: Terminal, at: int, *, origin: str, stack: ContextStack | None = None,
                     ts: int | None = None) -> None:
         p = self.project
         assert p is not None
         tid = t.terminal_id
+        if p.info.id not in t.opened_in and self._opened_before(p, tid):
+            t.opened_in.add(p.info.id)  # Daemon neu gestartet: term.open steht schon im Journal
         if p.info.id not in t.opened_in:
             header = {
                 "terminal_id": tid, "tty": t.tty, "shell": t.shell, "term": t.term, "rows": t.rows,
@@ -607,8 +701,16 @@ class Daemon:
             origin=origin, terminal_id=tid, stream_off=at, ts_utc_ns=ts), t)
 
     def _stop_recording(self, t: Terminal, hint: str) -> None:
-        if t.pause is not None:
-            self._end_pause(t, None)  # Lücke mit Grund sensitive_output zuerst vermerken
+        pause = t.pause
+        if pause is not None:
+            # Lücke sensitive_output bis hier vermerken, die Pause aber behalten: Sie gilt in
+            # allen Zuständen bis zum nächsten Prompt (Vertrag 4.3), auch wenn ein anderes
+            # Terminal währenddessen sperrt, pausiert oder das Projekt wechselt.
+            self._end_pause(t, None)
+            t.pause = Pause(start=-1, end=-1, deadline=pause.deadline, since_mono=pause.since_mono,
+                            since_wall=pause.since_wall)
+        if t.recording and t.bound_project_id is not None and not t.pending_open:
+            t.ends[t.bound_project_id] = t.recv_end
         t.recording = False
         t.pending_open = False
         t.gap_hint = hint
@@ -687,9 +789,11 @@ class Daemon:
             until = h["pause_until_ns"]
             if until is not None and until > self._wall() and t.pause_until_ns is None:
                 t.pause_until_ns = min(until, self._wall() + MAX_PAUSE_MIN * 60_000_000_000)
-            deadline = self._pending_sensitive.pop(tid, None)
-            if deadline is not None:
-                t.pause = Pause(start=-1, end=-1, deadline=deadline)
+                t.pause_mono_until = self._mono() + (t.pause_until_ns - self._wall())
+            pending = self._pending_sensitive.pop(tid, None)
+            if pending is not None:
+                t.pause = Pause(start=-1, end=-1, deadline=pending[0], since_mono=pending[1],
+                                since_wall=pending[2])
             self.terminals[tid] = t
         elif t.conn is not None and t.conn is not writer:
             with contextlib.suppress(Exception):
@@ -711,11 +815,13 @@ class Daemon:
 
     def _on_bye(self, t: Terminal) -> None:
         p = self.project
-        known = (t.recording or (p is not None and p.info.id in t.opened_in
-                                 and t.bound_project_id == p.info.id))
-        if known and not t.closed and not t.pending_open:
+        opened = p is not None and p.info.id in t.opened_in
+        known = t.recording or (opened and t.bound_project_id == p.info.id)  # type: ignore[union-attr]
+        if known and not t.closed and (not t.pending_open or opened):
             # Auch ohne laufende Aufnahme: sonst bleibt die letzte Einheit offen und die
             # Auswertung lädt das Terminal bei jedem Start neu.
+            if t.recording:
+                self._ensure_open(t)
             if t.pause is not None:
                 self._end_pause(t, None)
             self.writer.add_event(AppendItem(
@@ -731,6 +837,8 @@ class Daemon:
         log.info("Terminal beendet")
 
     def _on_frame(self, t: Terminal, ftype: int, payload: bytes) -> None:
+        if self._stopping:
+            return  # Daemon endet: unbestätigt lassen, der nächste bekommt es erneut
         obj: dict[str, Any] | None = None
         if ftype in DATA_FRAMES:
             seq = P.frame_seq(ftype, payload)
@@ -765,7 +873,7 @@ class Daemon:
         if ftype == P.INPUT:
             fr = P.decode_input(payload)
             t.note_off(fr.out_end)
-            if t.pause is not None:
+            if t.pause is not None and t.pause.covers(fr.t_mono_ns, fr.t_wall_ns):
                 return  # Schlüsselmaterial: auch Eingaben (Passphrase) verwerfen
             fields = {"out_end": fr.out_end, "wall": fr.t_wall_ns, "mono": fr.t_mono_ns, "tix": fr.tix,
                       "paste": fr.paste}
@@ -782,9 +890,9 @@ class Daemon:
             tix = ()
         end = off + len(data)
         t.note_off(end)
-        if t.pause is not None:
+        if t.pause is not None and t.pause.covers(mono, wall):
             if t.pause.start < 0:
-                t.pause.start = t.recv_end if t.recording else off
+                t.pause.start = t.recv_end if t.recording and not t.pending_open else off
             t.pause.end = max(t.pause.end, end)
             return
         if t.recording:
@@ -792,8 +900,19 @@ class Daemon:
         elif self.state_of(t) in ("preroll", "locked"):
             self._hold(t, "out", off, recv, mono, data=data, fields={"wall": wall, "mono": mono, "tix": tix})
 
+    def _time_suspect(self, wall: int, mono: int | None, recv: int) -> bool:
+        """Shim-Zeit unplausibel? Shim und Daemon teilen Wand- und Monotonuhr: Plausibel ist ein
+        Rahmen, dessen Versatz (Wand minus Mono) zu dem des Daemons passt, auch wenn er spät
+        ankommt (Ring nach einem Ausfall, Vorlauf). Ohne Monotonuhr gilt der Abstand zum Empfang."""
+        if not isinstance(mono, int) or mono <= 0:
+            return abs(wall - recv) > SUSPECT_NS
+        dmono = self._mono()
+        if mono > dmono + SUSPECT_NS:
+            return True  # aus der Zukunft
+        return abs((wall - mono) - (self._wall() - dmono)) > SUSPECT_NS
+
     def _suspect(self, t: Terminal, wall: int, mono: int | None, recv: int) -> bool:
-        bad = abs(wall - recv) > SUSPECT_NS
+        bad = self._time_suspect(wall, mono, recv)
         if mono is not None:
             if t.last_mono is not None and mono < t.last_mono:
                 bad = True
@@ -837,12 +956,14 @@ class Daemon:
             "terminal_id": t.terminal_id, "stream_off": off, "out_end": f["out_end"], "length": len(data),
             "t_shim_ns": f["wall"], "mono_ns": mono, "tix": [list(x) for x in f.get("tix") or ()] or None,
             "paste": True if f.get("paste") else None,
-            "time_suspect": True if abs(int(f["wall"]) - recv) > SUSPECT_NS else None,
+            "time_suspect": True if self._time_suspect(int(f["wall"]), mono, recv) else None,
         }
         try:
             header = events.validate_header("term.input", header)
         except ValueError:
             log.warning("Ungültiges term.input verworfen")
+            return
+        if self._is_dup(t, "term.input", off, header, bytes(data)):
             return
         self.writer.add_event(AppendItem("term.input", header, bytes(data), origin=origin,
                                          terminal_id=t.terminal_id, stream_off=off, ts_utc_ns=recv), t)
@@ -852,10 +973,21 @@ class Daemon:
     def _hold(self, t: Terminal, kind: str, off: int, recv: int, mono: int | None, *,
               data: bytes | None = None, fields: dict[str, Any] | None = None,
               stack_before: ContextStack | None = None) -> None:
-        """Eintrag im Vorlauf halten (nur RAM)."""
-        held = Held(kind, off, recv, _plausible_mono(mono, self._mono()), t.bound_project_id,
-                    bytearray(data) if data is not None else None, dict(fields or {}))
+        """Eintrag im Vorlauf halten (nur RAM).
+
+        Ausfallpuffer: Nach einem Neustart des Daemons (nicht nach ``ariadne lock``) ist das
+        Projekt noch aktiv; was ein daran gebundenes Terminal jetzt sendet (auch seinen Ring
+        aus der Zeit ohne Daemon), gilt ohne Vorlauf-Fenster bis zum Leerlauf-Ende.
+        """
+        keep = self._outage(t)
+        max_age = (self.config.idle_end_s or 7 * 86400) * 1_000_000_000 if keep else 3_600_000_000_000
+        held = Held(kind, off, recv, _plausible_mono(mono, self._mono(), max_age), t.bound_project_id,
+                    bytearray(data) if data is not None else None, dict(fields or {}), keep=keep)
         self.preroll.add(t.terminal_id, held, stack_before or t.stack)
+
+    def _outage(self, t: Terminal) -> bool:
+        return (not self._user_locked and self.project is None and t.bound_project_id is not None
+                and t.bound_project_id == self._active_id())
 
     # ---- Events vom Shim --------------------------------------------------- #
     def _process_event(self, t: Terminal, obj: dict[str, Any], entry: AckEntry) -> None:
@@ -886,7 +1018,10 @@ class Daemon:
             t.stack = apply_stack_event(t.stack, kind, header)
         if kind == "term.mark":
             mark = header["mark"]
-            if mark in ("A", "D") and header.get("fg_shell") and t.pause is not None:
+            if (mark in ("A", "D") and header.get("fg_shell") and t.pause is not None
+                    and t.pause.covers(header.get("mono_ns"), header.get("t_shim_ns"))):
+                # Nur ein Prompt, den der Shim nach der Anmeldung gelesen hat: alte Marker aus
+                # seinem Ring (Wiederholung nach einem Neustart) beenden die Pause nicht.
                 self._end_pause(t, off)
             if mark == "C" and local_before and t.recording:
                 self._check_local_addrs(on_mark=True)
@@ -925,6 +1060,8 @@ class Daemon:
             t.recv_end = max(t.recv_end, end)
         else:
             self._ensure_open(t, off)
+            if self._is_dup(t, kind, off, header, None):
+                return
         self.writer.add_event(AppendItem(kind, header, origin=origin, terminal_id=t.terminal_id,
                                          stream_off=off, ts_utc_ns=recv), t, mark_ctx)
 
@@ -939,8 +1076,12 @@ class Daemon:
             if pause.start < 0:
                 return
             self._ensure_open(t, pause.start)
-            start = min(pause.start, t.recv_end) if pause.start >= 0 else t.recv_end
+            # Was vor dem Beginn der Pause gespeichert wurde, gehört nicht in die Lücke (und
+            # nach einem Sprung beim Öffnen beginnt sie erst an der Shim-Position).
+            start = max(pause.start, t.recv_end)
             end = max(pause.end, at_off or 0, t.recv_end)
+            if end <= start:
+                return
             self.writer.add_event(AppendItem(
                 "term.gap",
                 {"terminal_id": tid, "stream_off": start, "reason": "sensitive_output",
@@ -954,18 +1095,18 @@ class Daemon:
 
     # ---- Pause des Nutzers (E22) ------------------------------------------- #
     def _check_user_pause(self, t: Terminal) -> None:
-        if t.pause_until_ns is not None and t.pause_until_ns <= self._wall():
-            t.pause_until_ns = None
+        if t.pause_until_ns is not None and not self._user_paused(t):
+            t.pause_until_ns = t.pause_mono_until = None
             self._refresh(t)
 
     def _set_pause(self, t: Terminal, minutes: int | None, source: str) -> int | None:
         """``None`` schaltet um, 0 setzt fort, sonst Pause (neu oder verlängert). Gibt das Ende zurück."""
         now = self._wall()
-        paused = t.pause_until_ns is not None and t.pause_until_ns > now
+        paused = self._user_paused(t)
         if minutes is None:
             minutes = 0 if paused else self.config.pause_minutes
         if minutes <= 0:
-            t.pause_until_ns = None
+            t.pause_until_ns = t.pause_mono_until = None
             self._refresh(t)
             return None
         until = now + min(minutes, MAX_PAUSE_MIN) * 60_000_000_000
@@ -976,6 +1117,7 @@ class Daemon:
                                "source": source},
                 origin=_origin(source), terminal_id=t.terminal_id, stream_off=t.recv_end), t)
         t.pause_until_ns = until
+        t.pause_mono_until = self._mono() + min(minutes, MAX_PAUSE_MIN) * 60_000_000_000
         t.pause_source = source
         self._refresh(t)
         return until
@@ -1086,9 +1228,7 @@ class Daemon:
         if note is not None and (not isinstance(note, str) or len(note) > 500):
             raise ValueError("note")
         host = obj.get("host")
-        host_n = normalize_host(host) if isinstance(host, str) and host.strip() else t.stack.top().host
-        if host_n == "local":
-            host_n = None
+        host_n = normalize_host(host) if isinstance(host, str) and host.strip() else _decided_host(t)
         if not self._can_store_decision(t):
             self._flash(t, "Schlüsselschritt nicht gespeichert: kein Projekt offen")
             return
@@ -1172,15 +1312,19 @@ class Daemon:
     def _service(self) -> ProjectService:
         return ProjectService(self.paths, self.operator)
 
-    def _set_active(self, slug: str, project_id: str, *, stopped: bool) -> None:
+    def _set_active(self, slug: str, project_id: str, *, stopped: bool,
+                    end_reason: str | None = None) -> None:
         try:
-            self.active = write_active(self.paths.active_file, slug, project_id, stopped=stopped)
+            self.active = write_active(self.paths.active_file, slug, project_id, stopped=stopped,
+                                       end_reason=end_reason)
         except OSError as exc:
             log.error("active.json nicht geschrieben (%s)", type(exc).__name__)
-            self.active = {"slug": slug, "project_id": project_id, "stopped": stopped, "since_utc": None}
+            self.active = {"slug": slug, "project_id": project_id, "stopped": stopped, "since_utc": None,
+                           "end_reason": end_reason if stopped else None}
 
     def _open_project(self, slug: str, *, refresh: bool = True) -> OpenProject:
         """Öffnet ``slug`` (ein anderes offenes Projekt endet mit Grund ``switch``)."""
+        self._activity()  # ein gerade geöffnetes Projekt endet nicht sofort im Leerlauf
         if self.project is not None and self.project.info.slug == slug:
             return self.project
         if self.operator is None:
@@ -1191,6 +1335,7 @@ class Daemon:
         if self.project is not None:
             self._close_current("switch")
         self.project = new
+        self._user_locked = False
         if self.ingest is not None:
             self.ingest.attach(new)
         self._update_redactor()
@@ -1240,7 +1385,7 @@ class Daemon:
         head = self._close_current(reason, idle_s=idle_s)
         a = self.active
         if a is not None and not a["stopped"]:
-            self._set_active(a["slug"], a["project_id"], stopped=True)
+            self._set_active(a["slug"], a["project_id"], stopped=True, end_reason=reason)
         self._lock_operator()
         self._refresh_all()
         return slug, head
@@ -1277,17 +1422,22 @@ class Daemon:
     def _replay(self, t: Terminal, p: OpenProject, buf: Any, entries: list[Held], departed: bool) -> int:
         tid = t.terminal_id
         first, last = entries[0], entries[-1]
-        end_in_p = p.journal.stream_end(tid)
+        end_in_p = self._stored_end(t, p)
         start = max(first.stream_off, end_in_p)
         if t.bound_project_id is None:
             t.bound_project_id, t.bound_slug = p.info.id, p.info.slug
         t.recording, t.pending_open = True, False
         t.recv_end = t.stored_end = start
+        self._guard_dups(t, p, end_in_p)
         if end_in_p > 0 and first.stream_off > end_in_p:
+            # Ausfallpuffer: Was zwischen Journal-Ende und dem ältesten gehaltenen Rahmen fehlt,
+            # ging mit dem Daemon verloren; sonst lag es im Vorlauf und ist abgelaufen.
             self.writer.add_event(AppendItem(
-                "term.gap", {"terminal_id": tid, "stream_off": end_in_p, "reason": "no_project",
+                "term.gap", {"terminal_id": tid, "stream_off": end_in_p,
+                             "reason": "daemon_down" if buf.outage else "no_project",
                              "bytes_lost": first.stream_off - end_in_p},
                 origin="daemon", terminal_id=tid, stream_off=end_in_p), t)
+        t.gap_hint = None
         win = ContextStack.from_snapshot(buf.start_stack.snapshot())
         self._write_open(t, start, origin="daemon", stack=win, ts=first.recv_ns)
 
@@ -1421,7 +1571,7 @@ class Daemon:
     def op_status(self, args: dict[str, Any]) -> dict[str, Any]:
         connected = self._connected()
         a = self.active
-        idle_s = max(0, (self._mono() - self.last_activity) // 1_000_000_000)
+        idle_s = self._idle_ns() // 1_000_000_000
         res = {
             "version": __version__,
             "pid": os.getpid(),
@@ -1435,7 +1585,8 @@ class Daemon:
             "terminals": len(connected),
             "recording": sum(1 for t in connected if t.recording),
             "waiting": 0,
-            "active": {"slug": a["slug"], "stopped": a["stopped"]} if a else None,
+            "active": ({"slug": a["slug"], "stopped": a["stopped"], "end_reason": a.get("end_reason")}
+                       if a else None),
             "locked": self.operator is None,
             "idle": {"last_activity_ns": self.last_activity, "idle_s": idle_s,
                      "end_after_s": self.config.idle_end_s},
@@ -1477,6 +1628,7 @@ class Daemon:
         self.operator = op
         self._runtime_secrets = [("ariadne:passphrase", passphrase)] if passphrase else []
         self._update_redactor()
+        self._activity()
         log.info("Operator entsperrt")
         self._refresh_all()
         return {"already": False, "handle": op.handle, "operator_id": op.operator_id, "reopened": None}
@@ -1484,6 +1636,7 @@ class Daemon:
     def op_lock(self, args: dict[str, Any]) -> dict[str, Any]:
         head = self._close_current("lock")
         self._lock_operator()
+        self._user_locked = True
         log.info("Operator gesperrt")
         self._refresh_all()
         return {"closed_project": head is not None}
@@ -1501,6 +1654,12 @@ class Daemon:
             a = self.active
             if a is not None and not a["stopped"]:
                 slug = str(a["slug"])
+                if self.project is None and slug not in {x.slug for x in ProjectService(self.paths).list()}:
+                    # Projektordner gelöscht: nicht ewig «gesperrt» bleiben (Befund F11)
+                    self._set_active(slug, str(a["project_id"]), stopped=True, end_reason="missing")
+                    self._refresh_all()
+                    raise OpError("no_active_project", f"Projekt {slug} gibt es nicht mehr. "
+                                  "ariadne start <slug> --target <ziel>")
             elif self.project is not None:
                 slug = self.project.info.slug
             else:
@@ -1532,15 +1691,18 @@ class Daemon:
         elif targets:
             targets_ignored = True
         before = self.project.info.slug if self.project is not None else None
+        outage = [t for t in self.terminals.values() if self._outage(t)]
         p = self._open_project(slug, refresh=False)
         switched = before if before is not None and before != p.info.slug else None
+        for t in outage:
+            t.gap_hint = t.gap_hint or "daemon_down"  # was der Ausfallpuffer nicht mehr hat
         if adopt:
             pre = self._adopt_preroll(p)
             pre["adopted"] = pre["terminals"] > 0
         else:
             info = self.preroll.info()
             pre = {"terminals": 0, "seconds": 0, "bytes": 0, "adopted": False,
-                   "discarded_terminals": info["terminals"]}
+                   "discarded_terminals": info["terminals"], "discarded_seconds": info["seconds"]}
             self.preroll.discard()
             self._departed.clear()
         self._refresh_all()
@@ -1551,6 +1713,8 @@ class Daemon:
             "workspace": str(p.info.workspace), "created": created, "switched_from": switched,
             "unlocked": unlocked, "preroll": pre,
             "recording": sum(1 for t in self._connected() if t.recording),
+            # gebunden an das alte Projekt: wechseln an der nächsten lokalen Eingabeaufforderung
+            "held": sum(1 for t in self._connected() if self.state_of(t) == "held"),
         }
         if targets_ignored:
             res["targets_ignored"] = True
@@ -1626,7 +1790,7 @@ class Daemon:
         head = self._close_current("stop")
         a = self.active
         if a is not None and not a["stopped"]:
-            self._set_active(a["slug"], a["project_id"], stopped=True)
+            self._set_active(a["slug"], a["project_id"], stopped=True, end_reason="stop")
         self._refresh_all()
         if head is None:
             return {"closed": False}
@@ -1757,16 +1921,24 @@ class Daemon:
         tid = _arg_str(args, "terminal_id", max_len=64) or ""
         seconds = _arg_int(args, "seconds", 1, 3600, max(1, int(self.pause_timeout)))
         deadline = time.monotonic() + (seconds if "seconds" in args else self.pause_timeout)
+        since_mono, since_wall = time.monotonic_ns(), time.time_ns()  # Uhren des Shims (E96)
         t = self.terminals.get(tid)
         if t is None:
             if len(self._pending_sensitive) < 256 or tid in self._pending_sensitive:
-                self._pending_sensitive[tid] = max(deadline, self._pending_sensitive.get(tid, 0.0))
+                old = self._pending_sensitive.get(tid, (0.0, 0, 0))
+                self._pending_sensitive[tid] = (max(deadline, old[0]), since_mono, since_wall)
             return {"paused": True, "pending": True}
         if t.pause is None:
-            start = t.recv_end if t.recording else t.shim_off
-            t.pause = Pause(start=start, end=start, deadline=deadline)
+            if t.recording:
+                start = -1 if t.pending_open else t.recv_end
+            else:
+                start = t.shim_off
+            t.pause = Pause(start=start, end=start, deadline=deadline, since_mono=since_mono,
+                            since_wall=since_wall)
         else:
+            # Erneute Anmeldung (zweite Abfrage): gilt ab jetzt, ein Prompt dazwischen zählt nicht.
             t.pause.deadline = max(t.pause.deadline, deadline)
+            t.pause.since_mono, t.pause.since_wall = since_mono, since_wall
         return {"paused": True}
 
     def op_resume_terminal(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1807,13 +1979,16 @@ class Daemon:
         t = self.terminals.get(tid) if tid else None
         header: dict[str, Any] = {"step": step}
         item_tid = item_off = None
+        auto_host: str | None = None
         if t is not None and t.recording and t.bound_project_id in (None, p.info.id):
             self._ensure_open(t)
             item_tid, item_off = t.terminal_id, t.recv_end
             header.update(terminal_id=item_tid, stream_off=item_off)
             if host is None:
-                top = t.stack.top().host
-                host = top if top and top != "local" else None
+                host = _decided_host(t)
+                if host is None:  # Auto-Host nur anzeigen, die Auswertung leitet ihn selbst ab
+                    top = t.stack.top()
+                    auto_host = top.host if top.host_source == "auto" else None
         if host:
             header["host"] = host
         if note:
@@ -1821,7 +1996,10 @@ class Daemon:
         self.submit(AppendItem("d.keystep.mark", header, origin="cli", terminal_id=item_tid,
                                stream_off=item_off))
         self.writer.flush_now()
-        return {"step": step, "host": host, "terminal": item_tid is not None}
+        res: dict[str, Any] = {"step": step, "host": host or auto_host, "terminal": item_tid is not None}
+        if auto_host and not host:
+            res["host_auto"] = True
+        return res
 
     async def op_import(self, args: dict[str, Any]) -> dict[str, Any]:
         self._require_project()
@@ -1861,6 +2039,16 @@ _UNSAFE = {
     "project_changed": "Projekt wurde während des Imports gewechselt",
     "open_failed": "Datei lässt sich nicht öffnen",
 }
+
+
+def _decided_host(t: Terminal) -> str | None:
+    """Host der obersten Stufe, wenn ihn der Nutzer gesetzt hat. Ein Auto-Host (E23) kommt nie
+    als Entscheid ins Journal: Die Auswertung leitet ihn über den Kontext der Einheit ab, und
+    ein späteres ``F12 h`` korrigiert ihn rückwirkend (Vertrag 2.3)."""
+    top = t.stack.top()
+    if top.host is None or top.host == "local" or top.host_source == "auto":
+        return None
+    return top.host
 
 
 def _origin(source: str) -> str:

@@ -268,7 +268,8 @@ def _merge_idents(conn: Any) -> set[str]:
 def _exclusion(conn: Any, key: str, own: set[str], merges: set[str]) -> tuple[str | None, dict[str, Any]]:
     """Grund, aus dem eine Sammelbestätigung den Claim auslässt (oder ``None``), und eine Kurzform."""
     r = conn.execute(
-        "SELECT c.subject_identifier, c.predicate, c.value_json, c.confidence, c.scope, c.lane_reason, "
+        "SELECT c.subject_identifier, c.predicate, c.value_json, c.confidence, "
+        "COALESCE(c.host_scope, c.scope), c.lane_reason, "
         "c.conflict_key, c.suspect, k.state, v.value_text FROM claim c "
         "LEFT JOIN conflict k ON k.conflict_key = c.conflict_key "
         "JOIN v_claim v ON v.claim_key = c.claim_key WHERE c.claim_key = ?", (key,)).fetchone()

@@ -39,6 +39,7 @@ class Held:
     fields: dict[str, Any] = field(default_factory=dict)  # Rahmenfelder bzw. Event-Header
     size: int = 0  # gezählte Bytes (bleibt nach wipe() gleich)
     nbytes: int = 0  # Nutzbytes (Ausgabe oder Eingabe)
+    keep: bool = False  # Ausfallpuffer (Daemon neu gestartet, Projekt aktiv): kein Zeitfenster
 
     def __post_init__(self) -> None:
         self.nbytes = len(self.data) if self.data is not None else 0
@@ -68,6 +69,11 @@ class TermPreroll:
     bytes: int = 0
     dropped_bytes: int = 0  # verdrängte Ausgabe-Bytes (Fenster und Grenzen)
 
+    @property
+    def outage(self) -> bool:
+        """Enthält Rahmen aus dem Ausfallpuffer (nach einem Neustart bei aktivem Projekt)."""
+        return any(e.keep for e in self.entries)
+
     def oldest_mono(self) -> int | None:
         return self.entries[0].mono if self.entries else None
 
@@ -90,8 +96,11 @@ class TermPreroll:
 
 class PrerollStore:
     def __init__(self, *, window_s: int, terminal_bytes: int, total_bytes: int,
-                 clock: Callable[[], int]) -> None:
+                 clock: Callable[[], int], keep_s: int | None = None,
+                 wall_clock: Callable[[], int] | None = None) -> None:
         self.window_s = window_s
+        self.keep_s = keep_s  # Fenster für den Ausfallpuffer (``None``: ohne Zeitgrenze)
+        self._wall = wall_clock  # Empfangszeit gegen die Wanduhr: Suspend zählt mit
         self.terminal_bytes = terminal_bytes
         self.total_bytes = total_bytes
         self._clock = clock  # monotone Uhr in ns
@@ -104,7 +113,7 @@ class PrerollStore:
 
     def add(self, terminal_id: str, entry: Held, stack_before: ContextStack) -> None:
         """Hält ``entry``. ``stack_before`` ist der Stapel vor diesem Eintrag (Fensteranfang)."""
-        if not self.enabled:
+        if not self.enabled and not entry.keep:
             entry.wipe()
             return
         buf = self.bufs.get(terminal_id)
@@ -125,10 +134,18 @@ class PrerollStore:
         self.expire()
 
     def expire(self) -> None:
-        """Verdrängt alles, was älter als das Fenster ist."""
-        limit = self._clock() - self.window_s * 1_000_000_000
+        """Verdrängt alles, was älter als das Fenster ist (Ausfallpuffer: ``keep_s``)."""
+        now = self._clock()
+        wall = self._wall() if self._wall is not None else None
+        win = self.window_s * 1_000_000_000
+        keep = self.keep_s * 1_000_000_000 if self.keep_s is not None else None
         for tid, buf in list(self.bufs.items()):
-            while buf.entries and buf.entries[0].mono < limit:
+            while buf.entries:
+                e = buf.entries[0]
+                span = keep if e.keep else win
+                # CLOCK_MONOTONIC steht während Suspend still; die Wanduhr der Annahme nicht.
+                if span is None or (e.mono >= now - span and (wall is None or e.recv_ns >= wall - span)):
+                    break
                 self.bytes -= buf.pop_oldest().size
             if not buf.entries:
                 buf.wipe()

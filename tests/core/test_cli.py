@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -322,3 +323,73 @@ def test_cli_misc_without_daemon(tmp_path):
     res = _cli(env, "doctor")
     assert "[ok] Python" in res.stdout and "ptrace_scope" in res.stdout
     assert not Path(env["XDG_RUNTIME_DIR"], "ariadne", "ctl.sock").exists()
+
+
+def _daemon_down(paths) -> None:
+    with contextlib.suppress(Exception):
+        CtlClient(paths.ctl_sock, timeout=5).call("shutdown")
+    end = time.monotonic() + 10
+    while time.monotonic() < end and CtlClient(paths.ctl_sock, timeout=1).ping():
+        time.sleep(0.05)
+
+
+def test_cli_start_stop_messages_from_review(tmp_path):
+    """Befunde F5, F6, F7, F8 (Entscheidtreue) und F11 (Tests): ehrliche Meldungen zu Vorlauf,
+    beendetem und gelöschtem Projekt, Wechsel und ``stop`` ohne laufenden Daemon."""
+    from ariadne.daemon.active import read_active
+
+    env = make_env(tmp_path)
+    env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
+    env["LANG"] = "C.UTF-8"
+    paths = default_paths(env)
+    (tmp_path / "live.py").write_text(LIVE_SHIM)
+    proc = None
+    try:
+        assert _cli(env, "init", secret=PW).returncode == 0
+        proc = subprocess.Popen([sys.executable, str(tmp_path / "live.py"), new_id(), "vorlauf\r\n"],
+                                env=env, text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        _wait_line(proc, "STATE preroll")
+        _wait_line(proc, "ACK 1")
+        res = _cli(env, "start", "lame", "--target", "10.10.10.3")  # ohne TTY: keine Frage
+        assert res.returncode == 0, res.stderr
+        assert "Vorlauf verworfen: 1 min aus 1 Terminals" in res.stdout and "--preroll yes" in res.stdout
+        _wait_line(proc, "STATE on")
+        assert "beendet und gesperrt" in _cli(env, "stop").stdout
+        _wait_line(proc, "STATE held")
+        res = _cli(env, "start")
+        assert res.returncode == 1, res.stdout
+        assert "Projekt lame ist beendet mit ariadne stop. Weiter: ariadne start lame" in res.stderr
+        res = _cli(env, "start", "beta", "--target", "10.10.10.4", secret=PW)
+        assert res.returncode == 0, res.stderr
+        assert "(0 Terminals; 1 wechseln an der nächsten lokalen Eingabeaufforderung)" in res.stdout
+        assert _cli(env, "lock").returncode == 0
+        assert _cli(env, "unlock", secret=PW).returncode == 0
+        out = _cli(env, "status").stdout  # Befund F3 (Entscheidtreue): nicht «gesperrt» nach unlock
+        assert "Tresor:   entsperrt" in out and "beta aktiv, nicht geöffnet (weiter mit ariadne start)" in out
+        proc.stdin.close()  # type: ignore[union-attr]
+        proc.wait(timeout=10)
+        # Daemon aus, Projekt aktiv: stop startet ihn und beendet das Projekt wirklich
+        _daemon_down(paths)
+        res = _cli(env, "stop")
+        assert res.returncode == 0 and "Projekt beta beendet und gesperrt" in res.stdout, res.stdout
+        assert read_active(paths.active_file)["stopped"] is True
+        # aktives Projekt gelöscht: start ohne Slug sagt es und bleibt nicht «gesperrt»
+        res = _cli(env, "start", "gamma", "--target", "10.10.10.5", secret=PW)
+        ws = re.search(r"angelegt \(lab\) in (\S+)", res.stdout)
+        assert ws, res.stdout
+        _daemon_down(paths)
+        shutil.rmtree(ws.group(1))
+        res = _cli(env, "start", secret=PW)
+        assert res.returncode == 1 and "Projekt gamma gibt es nicht mehr" in res.stderr, res.stderr
+        assert "None" not in res.stderr
+        out = _cli(env, "status").stdout
+        assert "Projekt:  - " in out and "gesperrt (weiter" not in out, out
+        assert "Projekt gamma gibt es nicht mehr (Ordner fehlt)" in _cli(env, "start").stderr
+    finally:
+        if proc is not None:
+            if proc.stdin and not proc.stdin.closed:
+                proc.stdin.close()
+            proc.wait(timeout=10)
+            if proc.stdout:
+                proc.stdout.close()
+        _daemon_down(paths)

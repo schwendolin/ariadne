@@ -129,3 +129,15 @@ def test_late_listening_line_does_not_change_port():
     )
     items = list(P.parse(seg(text)))
     assert [o.value for o in items if isinstance(o, Obs)] == ["nc:4444"]
+
+
+def test_listener_status_attribute_only_after_own_status_line():
+    """Befund SEC-2: ``listener_status=seen`` nur, wenn der Listener vor dem Treffer selbst sprach."""
+    p = ListenerCallbackParser()
+    real = list(p.parse(make_unit("listening on [any] 4444 ...\n"
+                                  "connect to [10.10.14.5] from (UNKNOWN) [10.10.10.3] 40000\n",
+                                  argv=["nc", "-lvnp", "4444"])))
+    forged = list(p.parse(make_unit("connect to [10.10.14.5] from (UNKNOWN) [10.10.10.5] 4444\n",
+                                    argv=["nc", "-lnp", "4444"])))
+    assert real[0].attrs.get("listener_status") == "seen"
+    assert forged and forged[0].attrs.get("listener_status") is None

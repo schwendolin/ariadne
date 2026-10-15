@@ -245,7 +245,8 @@ def test_pause_toggle_event_drop_and_resume_gap(paths, operator):
         assert outs == b"vorher\r\nnachher\r\n"
         pause = headers(j, "term.pause")
         assert len(pause) == 1 and pause[0]["stream_off"] == 8 and pause[0]["source"] == "hotkey"
-        gap = headers(j, "term.gap")
+        gap = [{k: v for k, v in h.items() if k not in ("t_shim_ns", "mono_ns")}
+               for h in headers(j, "term.gap")]
         assert gap == [{"terminal_id": shim.terminal_id, "stream_off": 8, "reason": "pause",
                         "bytes_lost": 21}]
         await shim.close()
@@ -737,7 +738,9 @@ def test_auto_context_from_ingest_sets_live_stack_not_journal(paths, operator):
                 assert stage.get("host") != "ip:default/10.10.10.3"
         await shim.close()
 
-    run(paths, operator, scenario)
+    # Ohne echte Auswertung: Deren Durchgänge melden die vollständige (hier leere) Liste und
+    # löschten die eingespeisten Auto-Hosts je nach Timing (Befund F7).
+    run(paths, operator, scenario, ingest=False)
 
 
 def test_status_shows_terminal_states(paths, operator):

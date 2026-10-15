@@ -83,7 +83,7 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 
 | ID | Datum | Entscheid | Begründung | Quelle | Status | Bezug |
 |---|---|---|---|---|---|---|
-| E60 | 2026-10-08, ergänzt 2026-10-15 | Web-Oberfläche als Hauptoberfläche, ohne speziellen Zweitbildschirm-Modus. Ein Browser auf dem Mac über die SSH-Weiterleitung ist eine normale Sitzung derselben UI; die UI zeigt nur die Herkunft der Sitzung | so gewünscht | Nutzer | fest | F6.1, F6.2, FZ |
+| E60 | 2026-10-08, ergänzt 2026-10-15 | Web-Oberfläche als Hauptoberfläche, ohne speziellen Zweitbildschirm-Modus. Ein Browser auf dem Mac über die SSH-Weiterleitung ist eine normale Sitzung derselben UI; die UI zeigt nur die Herkunft der Sitzung. Das Dashboard läuft als volles Fenster, der Nutzer wechselt zwischen Webkonsole und Dashboard | so gewünscht | Nutzer | fest | F6.1, F6.2, FZ |
 | E61 | 2026-10-08 | Fragen an die Karte über eine DSL; KI übersetzt Fragen, Ausführung erst nach Klick | so gewünscht; nachprüfbar | Nutzer + KI | fest | F6.3 |
 | E62 | 2026-10-08 | Bericht als Markdown, mit Vorlage nach dem Schema des Moduls Cybersecurity | so gewünscht; Schulabgabe | Nutzer + KI | fest | F6.4, A8.7 |
 | E63 | 2026-10-08 | Notizen, Tags und Status als Entscheide | so gewünscht | Nutzer | fest | F6.5 |

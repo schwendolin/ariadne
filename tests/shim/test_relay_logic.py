@@ -402,3 +402,94 @@ def test_daemon_restart_gap_reason_is_daemon_down():
     shim2._update_capture(0.0)  # vorläufig an, bis der erste STATE kommt
     tt.state_msg(shim2, True, rec="off", daemon_id="aaaa")
     assert shim2._lost_reason == "no_project"
+
+
+def _stdin(shim: Shim, data: bytes, now: float, monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as m:
+        m.setattr("ariadne._shim.relay.os.read", lambda fd, n: data)
+        shim._on_stdin(now)
+
+
+def test_hotkey_goes_to_multiplexer_not_outer_shim(monkeypatch):
+    """F12 r bei tmux im Vordergrund pausiert die Pane (eigener Shim), nicht das äussere Terminal."""
+    shim, t = make_shim()
+    t.state_msg(shim, True, rec="on", project="lame")
+    shim._multiplexer_fg = lambda: True  # type: ignore[method-assign]
+    shim._on_output(b"tmux zeichnet", 0.1)
+    t.events.clear()
+    _stdin(shim, F12, 1.0, monkeypatch)
+    _stdin(shim, b"r", 1.1, monkeypatch)
+    assert bytes(shim._to_child) == F12 + b"r"
+    assert not any(k.startswith("req.pause") for k in t.kinds())
+    assert t.inputs == [] and not shim.input.armed
+    # Präfix vor dem Wechsel angefangen: verfällt, die Taste geht an tmux
+    shim._multiplexer_fg = lambda: False  # type: ignore[method-assign]
+    _stdin(shim, F12, 2.0, monkeypatch)
+    assert shim.input.armed
+    shim._multiplexer_fg = lambda: True  # type: ignore[method-assign]
+    _stdin(shim, b"r", 2.1, monkeypatch)
+    assert not shim.input.armed and bytes(shim._to_child).endswith(b"r")
+    assert not any(k == "req.pause" for k in t.kinds())
+
+
+def test_read_time_reset_after_mini_prompt(monkeypatch):
+    shim, t = make_shim()
+    t.state_msg(shim, True, rec="on", project="lame")
+    _stdin(shim, F12, 1.0, monkeypatch)
+    _stdin(shim, b"h", 1.1, monkeypatch)
+    assert shim.prompt is not None
+    _stdin(shim, b"10.10.10.3\r", 1.2, monkeypatch)
+    assert shim.prompt is None and shim._read_t is None
+    shim._cpr_until = 10.0
+    _stdin(shim, b"\x1b[5;1R", 2.0, monkeypatch)  # verschluckte Cursorantwort
+    assert shim._read_t is None
+
+
+def test_multiplexer_detected_after_exec_in_same_group(monkeypatch):
+    """Zwischen tcsetpgrp und exec heisst die Gruppe noch zsh; danach tmux."""
+    from ariadne._shim import relay
+
+    shim, t = make_shim()
+    comms = iter(["zsh", "tmux: client", "sh", "tmux: client"])
+    pgrp = [5555]
+    monkeypatch.setattr(relay.os, "tcgetpgrp", lambda fd: pgrp[0])
+    monkeypatch.setattr(relay.procutil, "read_comm", lambda pid: next(comms))
+    assert shim._multiplexer_fg() is False  # vor dem exec
+    assert shim._multiplexer_fg() is True  # gleich danach, dieselbe Gruppe
+    # Wrapper, der lange vor dem exec läuft: nach der Frischezeit gedrosselt erneut lesen
+    pgrp[0] = 6666
+    assert shim._multiplexer_fg() is False
+    shim._mux_pgrp_t -= relay.MUX_FRESH_S
+    assert shim._multiplexer_fg() is False  # gedrosselt: kein neuer Blick
+    shim._mux_read_t -= relay.MUX_RECHECK_S
+    assert shim._multiplexer_fg() is True
+
+
+def test_pause_expiring_while_daemon_down_keeps_buffering():
+    shim, t = make_shim()
+    t.state_msg(shim, True, rec="on", project="lame")
+    t.state_msg(shim, False, rec="paused", project="lame", pause_until_ns=time.time_ns() + 50_000_000)
+    assert not shim.capture
+    t.connected = t.ready = False
+    shim._on_disconnect_cb()
+    assert not shim.capture  # Pause läuft noch
+    time.sleep(0.08)
+    shim._tick(time.monotonic())
+    assert shim.capture  # Pause vorbei, Daemon weg: weiter in den Ring
+    gap = [f for k, f in t.events if k == "term.gap"][-1]
+    assert gap["reason"] == "pause"
+
+
+def test_local_pause_ends_by_monotonic_deadline_after_wall_jump(monkeypatch):
+    """Befund F9 im Shim: Springt die Wanduhr zurück, endet die Pause trotzdem nach Frist."""
+    from ariadne._shim import relay
+
+    shim, t = make_shim()
+    t.state_msg(shim, True, rec="on", project="lame")
+    wall0, mono0 = time.time_ns(), time.monotonic_ns()
+    t.state_msg(shim, False, rec="paused", project="lame", pause_until_ns=wall0 + 10 * 60_000_000_000)
+    assert shim._paused_locally()
+    monkeypatch.setattr(relay.time, "time_ns", lambda: wall0 - 2 * 3600 * 10**9 + 11 * 60 * 10**9)
+    monkeypatch.setattr(relay.time, "monotonic_ns", lambda: mono0 + 11 * 60 * 10**9)
+    assert not shim._paused_locally()
+    assert shim._hello()["pause_until_ns"] is None

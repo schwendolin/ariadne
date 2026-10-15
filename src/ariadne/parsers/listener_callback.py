@@ -15,6 +15,12 @@ Beobachtung ``access.callback`` (Subjekt ``Ref.ip(B)``); weitere Treffer sind
 Mentions vom Typ ``callback``. Bei nc-artigen Listenern zählt der erste Treffer
 zudem nur, wenn davor ausschliesslich Statuszeilen des Listeners stehen (sonst
 war die echte Meldung nicht in der Aufnahme, und der Treffer kann vom Ziel sein).
+
+Attribut ``listener_status=seen``: Vor dem Treffer stand in derselben Einheit eine
+Meldung des Listeners selbst (``listening on``, ``Ncat: Listening``, ``bound to``,
+``Started reverse handler``). Nur dann darf die Auswertung den Kontext-Host automatisch
+setzen (E23): Ohne ``-v`` gibt nc gar keine Callback-Zeile aus, die erste solche Zeile
+stammt dann vom Ziel.
 """
 
 from __future__ import annotations
@@ -86,7 +92,7 @@ def _argv_port(rest: Sequence[str]) -> str | None:
 
 class ListenerCallbackParser:
     id: ClassVar[str] = "listener.callback"
-    version: ClassVar[str] = "1"
+    version: ClassVar[str] = "2"
     trust: ClassVar[Trust] = "tool_text"
     auto_eligible: ClassVar[bool] = False
 
@@ -108,6 +114,7 @@ class ListenerCallbackParser:
         lport = _argv_port(rest) if tool in _NC_TOOLS or tool in _PWNCAT else None
         first_done = False
         only_status = True  # bisher nur Statuszeilen des Listeners
+        status_seen = False  # eine Listening-Zeile des Listeners stand vor dem Treffer
         for i, line, text in text_lines(unit):
             stripped = text.strip()
             lm = None
@@ -118,6 +125,8 @@ class ListenerCallbackParser:
                         lport = lm.group(1)
                     break
             hit = self._match(text)
+            if lm is not None and hit is None:
+                status_seen = True
             if hit is None:
                 if stripped and not stripped.startswith(_STATUS_PREFIXES) and lm is None:
                     only_status = False
@@ -134,6 +143,8 @@ class ListenerCallbackParser:
                 attrs["local"] = local if (listener == "msf" or not port) else f"{local}:{port}"
             if session:
                 attrs["session"] = session
+            if status_seen or listener == "pwncat":  # pwncat: vor der Verbindung spricht nur pwncat
+                attrs["listener_status"] = "seen"
             span = Span(i, i, a, b)
             ip = canon_ip(rhost)
             trusted = listener in ("msf", "pwncat") or only_status

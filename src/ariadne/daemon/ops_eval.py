@@ -37,6 +37,13 @@ def _exit(d: Daemon, obj: Any) -> Any:
     return out
 
 
+def _same_project(d: Daemon, p: Any) -> None:
+    """Entscheide nur in das Projekt, in dem die Referenz aufgelöst wurde (E70): Während der
+    Auflösung (``await``) kann ein anderes ``ariadne start`` das Projekt wechseln."""
+    if d.project is not p:
+        raise OpError("project_changed", "Projekt wurde währenddessen gewechselt, nichts gespeichert")
+
+
 async def _resolve(d: Daemon, fn: Callable[[Any], Any]) -> Any:
     ing = await d._sync_ingest()
     try:
@@ -75,8 +82,10 @@ async def op_search(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
 async def op_claim_confirm(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     """Bestätigt einen Claim oder eine Inbox-Gruppe; Sammelbestätigung nur für sichere Werte (E88)."""
     ref = arg_str(args, "ref", max_len=200) or ""
+    p = d._require_project()
     plan: dict[str, Any] = await _resolve(d, lambda c: queries.resolve_confirm(c, ref))
     keys: list[str] = plan["keys"]
+    _same_project(d, p)
     for k in keys:
         d.submit(AppendItem("d.claim.confirm", {"claim_key": k}, origin="cli"))
     ing = await d._sync_ingest()
@@ -88,8 +97,10 @@ async def op_claim_confirm(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
 async def op_claim_reject(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     ref = arg_str(args, "ref", max_len=200) or ""
     reason = arg_str(args, "reason", required=False, max_len=500)
+    p = d._require_project()
     key: str = await _resolve(d, lambda c: queries.resolve_claim(c, ref))
     header = {"claim_key": key, "reason": reason} if reason else {"claim_key": key}
+    _same_project(d, p)
     d.submit(AppendItem("d.claim.reject", header, origin="cli"))
     ing = await d._sync_ingest()
     return _exit(d, {"rejected": 1, "claims": await ing.query(lambda c: queries.claim_snapshot(c, [key]))})
@@ -99,8 +110,10 @@ async def op_unit_distrust(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     """Rückgängig pro Befehl (A2): ``d.unit.distrust`` für die Evidenzgruppe des Befehls."""
     ref = arg_str(args, "ref", max_len=200) or ""
     reason = arg_str(args, "reason", required=False, max_len=500)
+    p = d._require_project()
     cmd_id: str = await _resolve(d, lambda c: queries.resolve_distrust(c, ref))
     header = {"cmd_id": cmd_id, "reason": reason} if reason else {"cmd_id": cmd_id}
+    _same_project(d, p)
     d.submit(AppendItem("d.unit.distrust", header, origin="cli"))
     ing = await d._sync_ingest()
     return _exit(d, await ing.query(lambda c: queries.distrust_result(c, cmd_id)))
