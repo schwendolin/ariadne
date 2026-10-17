@@ -17,7 +17,11 @@ und einzeln. Zwei Quellen sagen, ob eine Eingabe ein Echo hatte:
 Grundsatz: lieber zu viel als zu wenig verdecken. Verdeckt wird auch, wenn die Ausgabe
 fehlt (Lücke, Pause, noch nicht gespeichert) oder das Echo nicht eindeutig ist. Ein
 kurzes Wort (unter :data:`ANYWHERE_MIN` Zeichen) zählt nur, wenn es eine angezeigte
-Zeile beendet; sonst könnte ein vorab getipptes Passwort zufällig im Prompt stehen.
+Zeile beendet oder direkt vor dem Cursor steht, als die Zeile endete (Enter); sonst
+könnte ein vorab getipptes Passwort zufällig im Prompt stehen. Der Cursor zählt, weil
+Zeileneditoren rechts davon noch etwas zeigen können (rechter Prompt ``RPROMPT``,
+Vorschläge von zsh-autosuggestions). Eine Tab-Vervollständigung ist ein Platzhalter: Was
+die Shell ergänzt, kennt nur die Ausgabe.
 
 Alle Funktionen sind rein, bis auf :func:`collect_inputs` und :func:`input_by_seq`,
 die aus einem Journal lesen (``iter_events`` und, falls vorhanden, ``stream_slice``).
@@ -64,6 +68,9 @@ HideReason = Literal["tty_no_echo", "no_echo_seen", "no_output"]
 
 _CSI = re.compile(rb"\x1b\[([0-9;?<=>!]*)([ -/]*)([@-~])")
 _PASTE = (b"\x1b[200~", b"\x1b[201~")
+_TAB = "\t"  # Platzhalter für eine Tab-Vervollständigung (was die Shell ergänzt, ist unbekannt)
+_MAX_TABS = 4  # mehr Platzhalter in einer Zeile: kein Vergleich (dann verdeckt)
+_MATCH_MAX = 4096  # so viel einer angezeigten Zeile prüft der Vergleich mit Platzhaltern
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,15 @@ def typed_lines(data: bytes) -> list[str]:
     letzte Zeichen, Ctrl-U die Zeile, Ctrl-W das letzte Wort. CR und LF trennen Zeilen,
     andere Steuerzeichen (Tab, Ctrl-C) fallen weg.
     """
+    return [ln.replace(_TAB, "") for ln in _typed_tokens(data)]
+
+
+def _typed_tokens(data: bytes) -> list[str]:
+    """Wie :func:`typed_lines`, aber ein Tab bleibt als Platzhalter :data:`_TAB` stehen.
+
+    Backspace direkt nach einem Tab löscht ein unbekanntes, vervollständigtes Zeichen: Der
+    Platzhalter bleibt. Ctrl-W löscht ein Wort samt Platzhaltern darin.
+    """
     for marker in _PASTE:
         data = data.replace(marker, b"")
     text = _strip_escapes(data).decode("utf-8", errors="replace")
@@ -98,8 +114,11 @@ def typed_lines(data: bytes) -> list[str]:
             if cur:
                 lines.append("".join(cur))
             cur = []
+        elif ch == _TAB:
+            if not cur or cur[-1] != _TAB:
+                cur.append(_TAB)
         elif cp in (0x08, 0x7F):
-            if cur:
+            if cur and cur[-1] != _TAB:
                 cur.pop()
         elif cp == 0x15:  # Ctrl-U
             cur = []
@@ -114,7 +133,7 @@ def typed_lines(data: bytes) -> list[str]:
             cur.append(ch)
     if cur:
         lines.append("".join(cur))
-    return [ln for ln in lines if ln.strip()]
+    return [ln for ln in lines if ln.replace(_TAB, "").strip()]
 
 
 def _strip_escapes(data: bytes) -> bytes:
@@ -152,9 +171,17 @@ def render_output(data: bytes) -> list[str]:
     """Kleines Zeilenmodell der Ausgabe: CR, LF, Backspace und die häufigen CSI-Folgen für
     Cursor und Löschen (C, D, G, K, P, @). Andere Folgen fallen weg. Genug für das Echo
     von Shells und Zeileneditoren; ein Bildschirm-Programm (vim) bleibt unverstanden."""
-    lines: list[list[str]] = []
+    return [text.rstrip() for text, _ in _render(data)]
+
+
+def _render(data: bytes) -> list[tuple[str, int]]:
+    """Zeilen wie :func:`render_output` (ohne ``rstrip``), dazu je Zeile die Spalte des Cursors,
+    als sie endete: beim LF bzw. beim ersten CR direkt davor (Shells beenden die Zeile nach
+    Enter mit ``\\r\\r\\n``; der Cursor stand dann hinter dem Getippten)."""
+    lines: list[tuple[str, int]] = []
     cur: list[str] = []
     pos = 0
+    cr_pos: int | None = None  # Cursor beim ersten CR einer Folge vor dem LF
     text_parts: list[tuple[str, Any]] = []
     i, n = 0, len(data)
     plain = bytearray()
@@ -187,6 +214,7 @@ def render_output(data: bytes) -> list[str]:
         if kind == "csi":
             params, final = val
             num = _first_num(params)
+            moved = True
             if final == "C":
                 pos += max(num, 1)
             elif final == "D":
@@ -194,6 +222,7 @@ def render_output(data: bytes) -> list[str]:
             elif final == "G":
                 pos = max(0, max(num, 1) - 1)
             elif final == "K":
+                moved = False
                 if num == 0:
                     del cur[pos:]
                 elif num == 1:
@@ -202,21 +231,31 @@ def render_output(data: bytes) -> list[str]:
                 else:
                     cur = []
             elif final == "P":
+                moved = False
                 del cur[pos:pos + max(num, 1)]
             elif final == "@":
+                moved = False
                 cur[pos:pos] = [" "] * max(num, 1)
+            else:
+                moved = False
+            if moved:
+                cr_pos = None
             continue
         for ch in val:
             if ch == "\n":
-                lines.append(cur)
-                cur, pos = [], 0
+                lines.append(("".join(cur), pos if cr_pos is None else cr_pos))
+                cur, pos, cr_pos = [], 0, None
             elif ch == "\r":
+                if cr_pos is None:
+                    cr_pos = pos
                 pos = 0
             elif ch == "\b":
                 pos = max(0, pos - 1)
+                cr_pos = None
             elif ord(ch) < 0x20 or ord(ch) == 0x7F:
                 continue
             else:
+                cr_pos = None
                 while len(cur) < pos:
                     cur.append(" ")
                 if pos < len(cur):
@@ -224,8 +263,8 @@ def render_output(data: bytes) -> list[str]:
                 else:
                     cur.append(ch)
                 pos += 1
-    lines.append(cur)
-    return ["".join(x).rstrip() for x in lines]
+    lines.append(("".join(cur), pos))
+    return lines
 
 
 def _escape_len(data: bytes, i: int) -> int:
@@ -256,25 +295,46 @@ def echo_seen(typed: bytes, output: bytes) -> bool | None:
 
     Jede getippte Zeile muss der Reihe nach in der gerenderten Ausgabe stehen. Kurze
     Zeilen (unter :data:`ANYWHERE_MIN` Zeichen) zählen nur, wenn sie eine angezeigte Zeile
-    beenden (so endet ein Befehl, wenn Enter kommt); lange auch mitten in einer Zeile.
+    beenden (so endet ein Befehl, wenn Enter kommt) oder direkt vor dem Cursor stehen, als
+    die Zeile endete (rechter Prompt, Vorschläge rechts vom Cursor); lange auch mitten in
+    einer Zeile. Ein Tab ist ein Platzhalter für die Vervollständigung der Shell.
     """
-    want = typed_lines(typed)
+    want = _typed_tokens(typed)
     if not want:
         return None
-    screen = render_output(output)
+    screen = _render(output)
     row = 0
     for line in want:
-        target = line.rstrip()
+        target = line.rstrip(" ")
         found = False
         while row < len(screen):
-            shown = screen[row]
+            shown, cursor = screen[row]
             row += 1
-            if shown.endswith(target) or (len(target) >= ANYWHERE_MIN and target in shown):
+            if _line_shows(target, shown, cursor):
                 found = True
                 break
         if not found:
             return False
     return True
+
+
+def _line_shows(target: str, shown: str, cursor: int) -> bool:
+    """Steht die getippte Zeile ``target`` (mit Platzhaltern :data:`_TAB`) in der angezeigten
+    Zeile ``shown``: am Zeilenende, direkt vor dem Cursor beim Zeilenende, oder (ab
+    :data:`ANYWHERE_MIN` Zeichen) irgendwo?"""
+    plain = target.replace(_TAB, "")
+    before_cursor = shown[:cursor] if 0 <= cursor <= len(shown) else shown
+    if _TAB not in target:
+        return (shown.rstrip().endswith(target) or before_cursor.endswith(target)
+                or (len(target) >= ANYWHERE_MIN and target in shown))
+    if target.count(_TAB) > _MAX_TABS:
+        return False  # zu unklar: verdecken
+    pattern = ".*".join(re.escape(part) for part in target.split(_TAB))
+    rx = re.compile(pattern, re.DOTALL)
+    end = re.compile(f"(?:{pattern})\\Z", re.DOTALL)
+    shown_c, before_c = shown[-_MATCH_MAX:], before_cursor[-_MATCH_MAX:]
+    return (end.search(shown_c.rstrip()) is not None or end.search(before_c) is not None
+            or (len(plain) >= ANYWHERE_MIN and rx.search(shown_c) is not None))
 
 
 def output_window(chunks: Iterable[tuple[int, bytes]], start: int, out_end: int,
