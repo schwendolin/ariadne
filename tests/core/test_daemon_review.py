@@ -507,7 +507,17 @@ def test_keystep_never_stores_auto_host(paths, operator):
         await s.wait_state(rec="on")
         await s.event(1, "term.mark", **mark(10, "C", 1, cmd_typed="nc -lvnp 4444"))
         await s.wait_ack(1)
-        d._on_ingest_update(IngestUpdate(3, (AutoContext(s.terminal_id, 10, "ip:default/10.10.10.5"),)))
+        # Der Auto-Host ist hier eingespielt, nicht aus einem echten Callback. Spätere echte
+        # Durchgänge der Auswertung nennen ihn darum nicht und würden ihn wieder entfernen
+        # (Wettlauf mit keystep.mark). Sie bekommen ihn deshalb mitgeliefert.
+        auto = AutoContext(s.terminal_id, 10, "ip:default/10.10.10.5")
+        real = d._on_ingest_update
+
+        def keep_auto(update: IngestUpdate) -> None:
+            real(IngestUpdate(update.generation, (*update.auto_contexts, auto)))
+
+        d.ingest._listeners[:] = [keep_auto if fn == real else fn for fn in d.ingest._listeners]
+        d._on_ingest_update(IngestUpdate(3, (auto,)))
         await s._wait(lambda: s.state.get("ctx_version") == 1, 3)
         await s.event(2, "req.keystep", step="foothold")
         await s.wait_ack(2)
