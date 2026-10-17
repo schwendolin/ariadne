@@ -1,6 +1,6 @@
 # Entwicklung
 
-> Stand v0.1-Backend (2026-10-14, nach den Korrekturen aus drei Reviews), Erfassung, Bedienung und Auswertung nach den Entscheiden vom 2026-10-15 (E22, E23, E26, E28, E42, E45, E72, E88, E95, E96; Vertrag v0.1-Bedienung), integriert und Ende zu Ende getestet am 2026-10-15. Ergänzt die [Lösungsarchitektur](architektur.md) um das, was man zum Arbeiten am Code braucht: Umgebung, Tests, Landkarte der Module und die bekannten Grenzen.
+> Stand v0.1-Backend (2026-10-14, nach den Korrekturen aus drei Reviews), Erfassung, Bedienung und Auswertung nach den Entscheiden vom 2026-10-15 (E22, E23, E26, E28, E42, E45, E72, E88, E95, E96; Vertrag v0.1-Bedienung), integriert und Ende zu Ende getestet am 2026-10-15. Bau v0.1-Server, Phase 1 (2026-10-15): E101 bis E104, API v2 (`docs/web-api.md`), Erweiterungspunkte im Daemon und Grundgerüste für Web-Server, API, Sicherung und Fernzugriff. Ergänzt die [Lösungsarchitektur](architektur.md) um das, was man zum Arbeiten am Code braucht: Umgebung, Tests, Landkarte der Module und die bekannten Grenzen.
 
 ## Umgebung
 
@@ -32,12 +32,14 @@ Alle Tests laufen ohne Netz, nur in `tmp_path` und mit isolierten `HOME`/`XDG_*`
 | `tests/projection/` | Claims, Zustände, Identität, Konflikte, Inbox, Status, Metasploitable2-Durchlauf; Drei-Spuren-Regel (`test_ausw_lanes.py`), Evidenzgruppen und Arten, eigene Adressen und `undo`, Kontext aus dem Callback, goldene Ziele MS2 und Lame (`test_ausw_golden.py`) | |
 | `tests/integration/` | Daemon mit eingebauter Auswertung: Fake-Shim über echte Sockets, echte Parser in Workern, Begleitdateien, `net.route`, Ansichten, Entscheide, Import, Reparse, Redaktion | |
 | `tests/e2e/` | Flugschreiber komplett (`helpers.py`: isoliertes Lab, Fake-`nmap`, -`nc`, -`ip`, Titel per OSC 2): `test_flight_recorder.py` (setup, init, `F12 h`, CLI-Ansichten, Journal, Canary, Vorlauf über einen Absturz, Pause und Rebind), `test_daily_use.py` (Alltag: `start --passphrase-fd`, zwei parallele Terminals, nmap auf das Fixture-Netz, Karte `auto`, Inbox leer, keine Kali-Adresse als Host, Titel `(auto)` aus dem Callback, verschränkte Zeitstempel, `F12 r` nur in einem Terminal, `ariadne undo`, `ariadne stop`; Vorlauf zweier Terminals mit der Frage und der Passphrase im aufgezeichneten Terminal) | `e2e`, `pty` |
+| `tests/web/server/`, `tests/web/api/`, `tests/backup/`, `tests/remote/` | Bau v0.1-Server (Vertrag v0.1-Server, Tests T1 bis T16 aus dem Konzept Fernzugriff); Tests mit echtem Server auf einem freien Loopback-Port tragen `web`, Tests mit `sshd` tragen `remote` (ohne `sshd` übersprungen). Daemon-Prozesse der Tests laufen mit `ARIADNE_WEB=0` | `web`, `remote` |
 
 Befehle:
 
 ```sh
 python -m pytest                                   # alles (etwa 3,5 min, 1078 Tests)
 python -m pytest -m "not pty and not e2e"          # ohne echte Shells (schnell)
+python -m pytest -m remote                          # nur Tunnel-Tests mit sshd
 python -m pytest tests/e2e -m e2e                  # nur der Flugschreiber
 python -m pytest tests/golden --update-golden      # Golden-Erwartungen neu schreiben, zeigt vorher den Diff
 ARIADNE_TEST_EXTRA_SHELLS=/pfad/zu/bash-5.3 python -m pytest tests/shim   # weitere Shells
@@ -84,6 +86,7 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 | `daemon/writer.py` | Bündeln, Zusammenfassen der Rahmen mit Zeitindex, `append_many`, ACK, Commit- und Mark-Hooks (kein Schwärzen mehr, E72) |
 | `daemon/preroll.py` | Vorlauf ohne Projekt: nur RAM, Fenster und Grenzen, Stapel am Fensteranfang (E95) |
 | `daemon/config.py`, `daemon/active.py` | `[recording]` aus `config.toml`; zuletzt aktives Projekt (`active.json`) |
+| `daemon/extensions.py` | Erweiterungen für `ariadne daemon run` (Web-Server); `ARIADNE_WEB=0` schaltet ihn ab. Erweiterungspunkte in `core.py`: `extensions`, `add_listener` (Ereignisse ohne Zieldaten), `add_ops`, `presentation` |
 | `sources/localaddr.py` | eigene Adressen aus `/proc/net/fib_trie` und `/proc/net/if_inet6` (`net.local_addrs`) |
 | `daemon/ingest.py` | Pipeline in eigenem Thread, entprellt nach Commits, Reparse mit Dateitausch |
 | `daemon/sources.py` | Mark-Hook: Begleitdateien beim D-Marker, `ip route get` beim C-Marker; `ariadne import`; Warteliste |
@@ -106,13 +109,16 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 | `ingest/projection.py`, `ingest/proj_build.py`, `ingest/claims.py`, `ingest/identity.py`, `ingest/schema_claims.py` | Claims, Evidenzgruppen, Konfidenz, Drei-Spuren-Regel, eigene Adressen, `d.unit.distrust`, Kontext aus dem Callback, Identitäten, Konflikte, Inbox, Status, Sichten |
 | `ingest/natures.py` | Arten der Prädikate (E45): `state` mit Verlauf, `version` mit Bereichen, `set` |
 | `ingest/queries.py` | lesende Abfragen für die CLI-Ansichten, Suche, Sammelbestätigung (`resolve_confirm`), `undo` (`resolve_distrust`, `cmd_ref`), Reparse-Diff |
+| `ingest/inputs.py` | Eingaben nach E104: Echo-Vergleich (`echo_seen`, `output_window`), Urteil (`classify`), Anzeige (`display_text`), Leser aus dem Journal (`collect_inputs`, `input_by_seq`) |
 | `daemon/ops_eval.py` | ctl-Operationen der Auswertung (`show`, `search`, `claim.*`, `unit.distrust`, `reparse`), alles durch `redact_json` |
 | `parsers/*` | `nmap.xml`, `nmap.text`, `regex.net`, `listener.callback`, sichere XML- und Regex-Bausteine, Registry |
 | `scope/*` | Normalisierung, `ScopeMatcher`, Ziele aus argv |
 
 **CLI**: `cli/main.py` (Erfassung und Bedienung), `cli/analysis.py` (Befehle der Auswertung: `show`, `search`, `confirm`, `reject`, `undo`, `reparse`), `cli/common.py` (Daemon-Zugang, `read_secret` mit Zeitgrenze), `cli/views.py` (Textansichten), `cli/setup.py` (Installer), `cli/doctor.py`.
 
-**Leer (spätere Versionen)**: `ai/` und `export/` (nur der Hinweis, dass jeder Ausgang `Redactor.redact_for_exit` nutzen muss), `rules/`, `web/` (nur die gebaute SPA unter `web/static/`, ohne API).
+**Im Bau v0.1-Server** (Phase 1 hat Stubs mit festen Signaturen angelegt, Vertrag v0.1-Server): `web/` (Server-Kern, Sicherheit, Sitzungen, SSE; `web/api/` Routen der API v2; die gebaute SPA unter `web/static/` bleibt), `backup/` (Sicherung und Wiederherstellung), `remote/` (`remote check`, `remote serve`), CLI `cli/ui.py`, `cli/backup.py`, `cli/remote.py`. Jedes Stub-Modul trägt `STUB = True`, bis sein Teil steht.
+
+**Leer (spätere Versionen)**: `ai/` und `export/` (nur der Hinweis, dass jeder Ausgang `Redactor.redact_for_exit` nutzen muss), `rules/`.
 
 ## Ablauf eines Befehls
 
@@ -142,7 +148,7 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 
 ## Bekannte Grenzen des v0.1-Backends
 
-- **Keine Web-API und kein Export.** Die Svelte-Oberfläche liegt gebaut unter `web/static/`, die FastAPI-Routen fehlen. Regeln, KI-Denkanstösse, Screenshots und Markdown-Export sind noch nicht gebaut.
+- **Web-API im Bau, kein Export.** Die Svelte-Oberfläche liegt gebaut unter `web/static/` (Mock-Modus); die API v2 ist spezifiziert (`docs/web-api.md`), Server und Routen entstehen im Bau v0.1-Server. Regeln, KI-Denkanstösse, Screenshots und Markdown-Export sind noch nicht gebaut.
 - **Kein Watcher.** Dateien kommen nur als Begleitdateien eines Befehls (`companions`) oder per `ariadne import` ins Projekt. Was ein Tool ohne passende argv-Regel schreibt, bleibt unbemerkt; es gibt keinen Abgleich beim Öffnen.
 - **Warteliste nur zum Lesen.** `ariadne show pending` zeigt Begleitdateien ausserhalb des Arbeitsbereichs und abgelehnte Dateien; übernehmen geht per `ariadne import`, ein Abhaken gibt es nicht.
 - **Auswertung blockiert beim Schliessen kurz.** Projekt schliessen oder wechseln bricht den laufenden Durchgang vor der nächsten Einheit ab, wartet aber auf den gerade laufenden Worker (höchstens 60 s, meist unter 100 ms).
@@ -150,7 +156,9 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 - **Kein Umgang mit Gift-Events.** Wirft die Projektion bei einem Event immer wieder (nicht pro Einheit, sondern z. B. in `rebuild`), rollt jeder Durchgang zurück. Aufnahme und ACKs laufen weiter, `status` und `show` nennen den Fehler; die Auswertung steht, bis der Fehler behoben ist.
 - **Projektion rechnet immer alles neu** (etwa 0,7 s bei 50 Hosts mit je 25 Services).
 - **Eigene Secrets stehen im Journal (E72).** Das Journal, Begleitdateien und Importe speichern alles ungeschwärzt, nur verschlüsselt. Ersetzt wird an den Ausgängen über `Redactor.redact_for_exit`/`redact_json` (Ansichten und Suche der CLI, künftig KI, Export, Bericht). Jeder neue Ausgang muss das tun; vergessene Ausgänge sind das grösste Risiko. Nur exakte Treffer der eigenen Liste; zerlegtes Echo mit Cursorbewegungen oder `\r`-Neuzeichnen trifft der Redaktor nicht.
-- **Eingaben (E26).** Gespeichert wird alles, was ans Programm im PTY geht, auch Passwörter ohne Echo und Antworten des Terminals (Cursorposition, Farben). Nicht dabei: Hotkey-Präfix und -Taste, Mini-Prompt. Die CLI meldet ihr Terminal vor jedem `getpass` an (`pause_terminal`), damit Ariadnes eigene Passphrase weder ins Journal noch in den Vorlauf kommt; andere Programme, die Ariadnes Passphrase abfragen, gibt es nicht. Echo-Vergleich und `remote_cmd`-Einheiten fehlen (v0.2).
+- **Eingaben (E26).** Gespeichert wird alles, was ans Programm im PTY geht, auch Passwörter ohne Echo und Antworten des Terminals (Cursorposition, Farben). Nicht dabei: Hotkey-Präfix und -Taste, Mini-Prompt. Die CLI meldet ihr Terminal vor jedem `getpass` an (`pause_terminal`), damit Ariadnes eigene Passphrase weder ins Journal noch in den Vorlauf kommt; andere Programme, die Ariadnes Passphrase abfragen, gibt es nicht. `remote_cmd`-Einheiten fehlen (v0.2).
+- **Eingaben ohne Echo (E104).** Angezeigt (`ariadne show inputs`, Web-API) werden sie nur verdeckt. Der Shim markiert den Passwortmodus des Kindes (`ECHO` aus, `ICANON` an) beim Lesen der Taste; wer vor dem Umschalten tippt (Type-ahead), bekommt kein Flag, und dann entscheidet der Echo-Vergleich. Der Echo-Vergleich (`ingest/inputs.py`) kennt nur ein einfaches Zeilenmodell (CR, LF, Backspace, CSI C/D/G/K/P/@): Bildschirm-Programme wie vim und Zeilen mit rechtem Prompt (`RPROMPT`) werden zu oft verdeckt; das ist gewollt. Kurze Eingaben (unter 12 Zeichen) zählen nur als Echo, wenn sie eine angezeigte Zeile beenden. Die Liste liest das Journal (`IngestService.query_journal`), nicht `derived.db`; bei sehr vielen Eingaben ist `ariadne show inputs` langsamer.
+- **Entsperren (E101 bis E103).** `ariadne unlock` öffnet ein aktives Projekt wie `ariadne start`; nach einem Absturz übernimmt es den Ausfallpuffer ohne Frage (E102), auch von Terminals ohne Bindung, die nach dem Neustart aufgingen. Die gesperrte Zeit nach einem bewussten `ariadne lock` gilt nicht als Ausfallpuffer: `start`/`unlock` fragen dafür wie beim Vorlauf. Startet der Daemon nach einem `lock` neu, weiss er davon nichts mehr; was danach gepuffert wird, gilt als Ausfallpuffer.
 - **Vorlauf nur im RAM des Daemons.** Ohne Projekt (oder gesperrt) hält der Daemon pro Terminal höchstens `preroll_minutes` (15) und `preroll_terminal_mib` (8 MiB), gesamt `preroll_total_mib` (64 MiB). Ein Absturz oder Neustart des Daemons verliert ihn; Swap kann ihn auslagern (`doctor` prüft verschlüsselten Swap). Kontext-Entscheide im Vorlauf werden als Schnappschuss gehalten, Schlüsselschritte ohne Projekt nicht gespeichert.
 - **Shims vor dem Update (Protokoll 1)** nehmen weiter auf, aber ohne Zeitindex, ohne Eingaben und ohne `req.rebind`: Nach einem Projektwechsel bleiben sie `off`, bis das Terminal neu startet; `F12 r` pausiert sie wie neue Shims.
 - **Kontext nach `F12 h`.** Die Einheiten übernehmen den Host ab dem Zeitpunkt des Entscheids, die Projektion überträgt ihn auf die ganze Stufe, die bei `from_off` lief (Stufen aus `ctx_span`, siehe `events.DCtxSet`).
@@ -193,5 +201,5 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 - **3.8, Haltefrist:** Eine Folge, die länger als 8 KiB oder 100 ms offen bleibt, geht nicht mehr als normale Bytes weiter (fail-closed, siehe Grenzen). Abgebrochene Strings gefilterter Arten werden verworfen. Die Architektur sollte das so festhalten.
 - **5.8, IDNA:** Statt IDNA2003 überall gilt für Namen mit UTS-46-Deviation-Zeichen fail-closed `unknown`.
 - **8.5, Schwärzen:** Eigene Secrets unter 4 Zeichen lehnt `secrets add` ab (die Architektur nennt keine Mindestlänge).
-- **`docs/web-api.md`** beschreibt noch `PUT /api/v1/rec` und die Modi `on`, `waiting`, `offline`. Mit der Web-API wird daraus Pause und Fortsetzen pro Terminal (`term.pause`/`term.resume` mit `source = webui`) und der Zustand pro Terminal aus `status.terminal_states`.
+- **`docs/web-api.md`** ist seit dem 2026-10-15 die API v2 (Pause pro Terminal, Arbeitsliste, Eingaben, Sitzungen mit Peer-Bindung); der Pfad bleibt `/api/v1`.
 - **8.6, Daemon-Start:** Die systemd-Unit startet mit `python -I -m ariadne.daemon` und `WorkingDirectory=/`, ebenso `--detach` (`-I`), damit kein Modul aus dem Arbeitsordner (z. B. Loot im Home) in den Prozess mit allen Schlüsseln lädt.

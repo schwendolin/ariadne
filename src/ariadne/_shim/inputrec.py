@@ -10,6 +10,12 @@ Rahmen mit Paste-Flag (Notbremse: 512 KiB, 2 s ohne Paste-Ende).
 Jedes ``read()`` bringt Wanduhr, monotone Uhr und den Ausgabe-Offset mit; ein neuer
 Zeitindex-Eintrag entsteht frühestens 1 ms nach dem letzten. Die Bytes gehen nie in
 Logs; die Anzeige im Terminal läuft nur über ``term_safe``.
+
+E104: ``feed(..., no_echo=True)`` meldet, dass das Kind beim Tippen im Passwortmodus war
+(``ECHO`` aus, ``ICANON`` an). Ein Bündel ist ``no_echo``, sobald eines seiner Bytes so
+getippt wurde (lieber zu viel als zu wenig verdecken). ``emit`` bekommt das dann als
+Schlüsselwort ``no_echo=True``; ohne Passwortmodus wird es nicht übergeben, ältere
+Rückrufe mit sieben Parametern bleiben gültig.
 """
 
 from __future__ import annotations
@@ -29,8 +35,8 @@ TERMINATORS = b"\r\n\x03\x04"
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 
-# emit(data, stream_off, out_end, wall_ns, mono_ns, tix, paste)
-Emit = Callable[[bytes, int, int, int, int, tuple[tuple[int, int], ...], bool], None]
+# emit(data, stream_off, out_end, wall_ns, mono_ns, tix, paste[, no_echo=True])
+Emit = Callable[..., None]
 
 
 class InputRecorder:
@@ -39,6 +45,7 @@ class InputRecorder:
         self.buf = bytearray()
         self._marks: list[tuple[int, int, int, int]] = []  # (rel, wall, mono, out_off)
         self.paste = False
+        self.no_echo = False  # E104: ein Byte des laufenden Bündels im Passwortmodus getippt
         self._t0 = 0.0
         self._last = 0.0
 
@@ -50,14 +57,17 @@ class InputRecorder:
             return None
         return self._last + PASTE_IDLE_S if self.paste else self._t0 + INPUT_S
 
-    def feed(self, data: bytes, out_off: int, wall: int, mono: int, now: float) -> None:
+    def feed(self, data: bytes, out_off: int, wall: int, mono: int, now: float, *,
+             no_echo: bool = False) -> None:
         if not data:
             return
         if not self.buf:
             self._marks = [(0, wall, mono, out_off)]
             self._t0 = now
+            self.no_echo = False
         elif mono - self._marks[-1][2] >= TIX_MIN_NS:
             self._marks.append((len(self.buf), wall, mono, out_off))
+        self.no_echo = self.no_echo or no_echo
         self.buf += data
         self._last = now
         self._split()
@@ -78,6 +88,7 @@ class InputRecorder:
         self.buf = bytearray()
         self._marks = []
         self.paste = False
+        self.no_echo = False
 
     # ------------------------------------------------------------------ intern
     def _split(self) -> None:
@@ -128,4 +139,11 @@ class InputRecorder:
                 rest.append((m[0] - cut, m[1], m[2], m[3]))
         self.buf[:cut] = b""
         self._marks = [(0, rest_base[1], rest_base[2], rest_base[3]), *rest] if self.buf else []
-        self._emit(data, base[3], out_end, base[1], base[2], tuple(tix[: P.MAX_TIX]), paste)
+        no_echo = self.no_echo
+        if not self.buf:
+            self.no_echo = False  # der Rest eines Bündels behält das Flag (lieber zu viel)
+        args = (data, base[3], out_end, base[1], base[2], tuple(tix[: P.MAX_TIX]), paste)
+        if no_echo:
+            self._emit(*args, no_echo=True)
+        else:
+            self._emit(*args)

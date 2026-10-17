@@ -317,8 +317,8 @@ def test_cli_misc_without_daemon(tmp_path):
     assert res.returncode == 0 and "nichts aktiv" in res.stdout
     res = _cli(env, "lock")
     assert res.returncode == 0
-    res = _cli(env, "ui")
-    assert "Web-UI" in res.stdout
+    res = _cli(env, "ui", "--no-open")  # ohne Daemon: klare Meldung, kein Absturz (Teil «server»)
+    assert res.returncode in (0, 1) and "Traceback" not in res.stderr
     res = _cli(env, "project", "list")
     assert "Keine Projekte" in res.stdout
     res = _cli(env, "doctor")
@@ -364,9 +364,10 @@ def test_cli_start_stop_messages_from_review(tmp_path):
         assert res.returncode == 0, res.stderr
         assert "(0 Terminals; 1 wechseln an der nächsten lokalen Eingabeaufforderung)" in res.stdout
         assert _cli(env, "lock").returncode == 0
-        assert _cli(env, "unlock", secret=PW).returncode == 0
-        out = _cli(env, "status").stdout  # Befund F3 (Entscheidtreue): nicht «gesperrt» nach unlock
-        assert "Tresor:   entsperrt" in out and "beta aktiv, nicht geöffnet (weiter mit ariadne start)" in out
+        res = _cli(env, "unlock", secret=PW)  # E101: öffnet das aktive Projekt wie start
+        assert res.returncode == 0 and "Projekt beta geöffnet (lab)." in res.stdout, res.stdout
+        out = _cli(env, "status").stdout  # Befund F3: weder «gesperrt» noch «nicht geöffnet»
+        assert "Tresor:   entsperrt" in out and "Projekt:  beta (lab), Aufnahme läuft" in out, out
         proc.stdin.close()  # type: ignore[union-attr]
         proc.wait(timeout=10)
         # Daemon aus, Projekt aktiv: stop startet ihn und beendet das Projekt wirklich

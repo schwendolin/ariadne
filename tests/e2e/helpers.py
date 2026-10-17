@@ -82,6 +82,7 @@ class Lab:
             "XDG_CACHE_HOME": str(self.home / ".cache"),
             "XDG_RUNTIME_DIR": str(self.run),
             "ARIADNE_PROJECTS_ROOT": str(self.home / "ariadne"),
+            "ARIADNE_WEB": "0",  # kein Web-Server auf Port 7330 in den E2E-Tests (Vertrag v0.1-Server)
             "PATH": f"{self.bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
             "LANG": "C.UTF-8",
             "TERM": "xterm-256color",

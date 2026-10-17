@@ -271,6 +271,12 @@ class IngestService:
         """Führt ``fn(conn)`` mit der ``derived.db``-Verbindung im Thread der Auswertung aus."""
         return await self._run(self._query, self._snapshot(), fn)
 
+    async def query_journal(self, fn: Callable[[Any, Any], T]) -> T:
+        """Führt ``fn(conn, journal)`` im Thread der Auswertung aus: ``conn`` ist ``derived.db``,
+        ``journal`` der nur lesende :class:`~ariadne.store.journal.JournalReader` (Web-API,
+        Eingaben nach E104, Belegzeilen). Die Verbindungen des Writers bleiben im Loop-Thread."""
+        return await self._run(self._query_journal, self._snapshot(), fn)
+
     async def reparse(self) -> dict[str, Any]:
         return await self._run(self._reparse_job, self._snapshot())
 
@@ -394,6 +400,14 @@ class IngestService:
         st = self._ensure(snap)
         try:
             return fn(st.conn)
+        finally:
+            if st.conn.in_transaction:
+                st.conn.rollback()
+
+    def _query_journal(self, snap: tuple[int, dict[str, Any]], fn: Callable[[Any, Any], T]) -> T:
+        st = self._ensure(snap)
+        try:
+            return fn(st.conn, st.journal)
         finally:
             if st.conn.in_transaction:
                 st.conn.rollback()

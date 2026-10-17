@@ -223,8 +223,9 @@ def test_context_survives_preroll_and_daemon_restart(lab: Lab) -> None:
     * Reverse Shell beginnt ohne Projekt: der Vorlauf wird übernommen, ihre Ausgabe gehört
       nicht zu Kali.
     * SIGKILL des Daemons mitten in der Sitzung: nach dem Neustart ist das Projekt aktiv,
-      aber gesperrt (``locked``); der Shim sendet Unbestätigtes erneut, ``ariadne start``
-      übernimmt es, der Kontext stimmt weiter und der Strom hat keine Lücke.
+      aber gesperrt (``locked``); der Shim sendet Unbestätigtes erneut, ``ariadne unlock``
+      öffnet das Projekt (E101) und übernimmt den Ausfallpuffer ohne Rückfrage (E102), der
+      Kontext stimmt weiter und der Strom hat keine Lücke.
     """
     (lab.home / ".zshrc").write_text(f"PS1='{PROMPT}'\nunset HISTFILE\n")
     lab.cli("setup", "--no-systemd")
@@ -257,8 +258,8 @@ def test_context_survives_preroll_and_daemon_restart(lab: Lab) -> None:
         lab.start_daemon()
         lab.wait_status("lame aktiv, gesperrt")
         c.expect(re.compile(rb"\x1b\]2;\[gesperrt: ariadne start\]"))
-        out = lab.cli("start", "--preroll", "yes", secret=PASSPHRASE)
-        assert "Projekt lame geöffnet" in out and "Vorlauf übernommen" in out, out
+        out = lab.cli("unlock", secret=PASSPHRASE)  # E101: öffnet das aktive Projekt; E102: ohne Frage
+        assert "Projekt lame geöffnet" in out and "Ausfallpuffer übernommen" in out, out
         lab.wait_status("1 nehmen auf")
         c.sendline("id")
         c.expect_exact("uid=33(www-data)")

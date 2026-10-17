@@ -28,6 +28,9 @@ from typing import Any
 
 from ariadne import __version__
 from ariadne.cli import analysis
+from ariadne.cli import backup as backup_cli
+from ariadne.cli import remote as remote_cli
+from ariadne.cli import ui as ui_cli
 from ariadne.cli.common import SECRET_PROMPT_S, CliError, _call, _client, _terminal_id, read_secret, s, say
 from ariadne.crypto.vault import MIN_PASSPHRASE, OperatorVault
 from ariadne.daemon.active import read_active
@@ -97,24 +100,74 @@ def cmd_init(paths: Paths, args: argparse.Namespace) -> int:
     return 0
 
 
+def _preroll_choice(paths: Paths, mode: str) -> tuple[bool, bool]:
+    """Vorlauf übernehmen? Gibt ``(adopt, asked)`` zurück.
+
+    Gefragt wird nur nach dem Vorlauf ohne Projekt und der gesperrten Zeit nach ``ariadne lock``
+    (``ask_*`` aus ``preroll.info``, E95, E103). Den Ausfallpuffer nach einem Neustart des
+    Daemons übernimmt der Daemon ohne Rückfrage (E102).
+    """
+    info = _call(paths, "preroll.info")
+    k = int(info.get("ask_terminals", info.get("terminals")) or 0)
+    secs = int(info.get("ask_seconds", info.get("seconds")) or 0)
+    if not k or not secs:
+        return False, False
+    if mode == "yes":
+        return True, False
+    if mode == "ask" and sys.stdin.isatty():
+        n = math.ceil(secs / 60)
+        return _ask_yes(f"Die letzten {n} Minuten aus {k} Terminals übernehmen? [j/N] "), True
+    return False, False
+
+
+def _say_preroll(pre: dict[str, Any], mode: str, asked: bool) -> None:
+    outage = int(pre.get("outage_terminals") or 0)
+    if outage:
+        say(f"Ausfallpuffer übernommen: {outage} Terminal{'s' if outage != 1 else ''} "
+            f"(der Daemon war neu gestartet, die Aufnahme läuft lückenlos weiter).")
+    if pre.get("adopted") and int(pre.get("terminals") or 0) > outage:
+        say(f"Vorlauf übernommen: {math.ceil(int(pre.get('seconds') or 0) / 60)} min aus "
+            f"{s(int(pre.get('terminals') or 0) - outage)} Terminals.")
+    elif pre.get("discarded_terminals") and mode == "ask" and not asked:
+        say(f"Vorlauf verworfen: {math.ceil(int(pre.get('discarded_seconds') or 0) / 60)} min aus "
+            f"{s(pre.get('discarded_terminals'))} Terminals (ohne Terminal keine Frage; übernehmen mit "
+            f"--preroll yes).")
+
+
 def cmd_unlock(paths: Paths, args: argparse.Namespace) -> int:
+    """Entsperren; ein aktives Projekt öffnet sich dabei wie mit ``ariadne start`` (E101)."""
     if not OperatorVault(paths.operator_dir).exists:
         raise CliError("kein Operator-Tresor (ariadne init)")
     _client(paths)
     _pause_this_terminal(paths)
-    if args.recovery:
-        code = read_secret("Recovery-Code: ", args.passphrase_fd)
-        res = _call(paths, "unlock", recovery_code=code)
-    else:
-        pw = read_secret("Passphrase: ", args.passphrase_fd)
-        res = _call(paths, "unlock", passphrase=pw)
+    st = _call(paths, "status")
+    active = st.get("active") or {}
+    will_open = not st.get("project") and bool(active.get("slug")) and not active.get("stopped")
+    secret = None
+    if not (st.get("operator") or {}).get("unlocked"):
+        secret = read_secret("Recovery-Code: " if args.recovery else "Passphrase: ", args.passphrase_fd)
+    adopt, asked = _preroll_choice(paths, args.preroll) if will_open else (False, False)
+    cred: dict[str, Any] = {}
+    if secret is not None:
+        cred = {"recovery_code": secret} if args.recovery else {"passphrase": secret}
+    res = _call(paths, "unlock", adopt_preroll=adopt, **cred)
     if res.get("already"):
         say("Schon entsperrt.")
     else:
         say(f"Entsperrt ({s(res.get('handle'))}).")
     if args.recovery:
         say("Tipp: Passphrase prüfen, der Recovery-Code ist nur für den Notfall.")
-    say("Weiter mit ariadne start")
+    opened = res.get("reopened")
+    err = res.get("reopen_error")
+    if opened:
+        say(f"Projekt {s(opened.get('slug'))} geöffnet ({s(opened.get('profile'))}).")
+        _say_preroll(opened.get("preroll") or {}, args.preroll, asked)
+        say(f"Aufnahme läuft ({s(opened.get('recording', 0))} Terminals). Pause: F12 r oder ariadne pause. "
+            f"Ende: ariadne stop.")
+    elif err:
+        say(f"Projekt nicht geöffnet: {s(err.get('message'), 300)}")
+    else:
+        say("Kein aktives Projekt. Weiter mit ariadne start <slug> --target <ziel>")
     return 0
 
 
@@ -124,8 +177,8 @@ def cmd_lock(paths: Paths, args: argparse.Namespace) -> int:
     except CliError:
         say("Daemon läuft nicht, nichts entsperrt.")
         return 0
-    say("Gesperrt." + (" Projekt geschlossen." if res.get("closed_project") else ""))
-    say("Weiter mit ariadne start")
+    say("Gesperrt." + (" Projekt geschlossen, es bleibt aktiv." if res.get("closed_project") else ""))
+    say("Weiter mit ariadne start oder ariadne unlock")
     return 0
 
 
@@ -178,9 +231,13 @@ def cmd_status(paths: Paths, args: argparse.Namespace) -> int:
         end_txt = f"Ende nach {int(end) // 3600} h" if end else "kein automatisches Ende"
         say(f"Leerlauf: {secs // 3600} h {secs % 3600 // 60:02d} min, {end_txt}")
     pre = st.get("preroll") or {}
-    if not p and pre.get("terminals"):
-        say(f"Vorlauf:  {math.ceil(int(pre.get('seconds') or 0) / 60)} min aus {s(pre['terminals'])} "
-            f"Terminals (nur im RAM, ariadne start fragt)")
+    if not p and pre.get("outage_terminals"):
+        say(f"Ausfall: {math.ceil(int(pre.get('outage_seconds') or 0) / 60)} min aus "
+            f"{s(pre['outage_terminals'])} Terminals im RAM (ariadne start oder unlock übernimmt sie)")
+    ask = pre.get("ask_terminals", pre.get("terminals"))
+    if not p and ask:
+        say(f"Vorlauf:  {math.ceil(int(pre.get('ask_seconds', pre.get('seconds')) or 0) / 60)} min aus "
+            f"{s(ask)} Terminals (nur im RAM, ariadne start fragt)")
     say(f"Terminals: {st['terminals']} verbunden, {st['recording']} nehmen auf")
     for ts in st.get("terminal_states") or []:
         tid = str(ts.get("terminal_id") or "")
@@ -231,15 +288,7 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     pw = None
     if not st["operator"]["unlocked"]:
         pw = read_secret("Passphrase: ", args.passphrase_fd)
-    adopt = asked = False
-    info = _call(paths, "preroll.info")
-    if info.get("terminals") and info.get("seconds"):
-        n, k = math.ceil(int(info["seconds"]) / 60), int(info["terminals"])
-        if args.preroll == "yes":
-            adopt = True
-        elif args.preroll == "ask" and sys.stdin.isatty():
-            asked = True
-            adopt = _ask_yes(f"Die letzten {n} Minuten aus {k} Terminals übernehmen? [j/N] ")
+    adopt, asked = _preroll_choice(paths, args.preroll)
     try:
         res = _call(paths, "start", passphrase=pw, slug=args.slug, targets=args.target or None,
                     name=args.name, not_customer=args.not_customer, adopt_preroll=adopt)
@@ -270,14 +319,7 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
         say(f"Projekt {s(res['slug'])} geöffnet ({s(res['profile'])}).")
     if res.get("targets_ignored"):
         say("Hinweis: Das Projekt existiert schon, --target wurde nicht übernommen.")
-    pre = res.get("preroll") or {}
-    if pre.get("adopted"):
-        say(f"Vorlauf übernommen: {math.ceil(int(pre.get('seconds') or 0) / 60)} min aus "
-            f"{s(pre.get('terminals'))} Terminals.")
-    elif pre.get("discarded_terminals") and args.preroll == "ask" and not asked:
-        say(f"Vorlauf verworfen: {math.ceil(int(pre.get('discarded_seconds') or 0) / 60)} min aus "
-            f"{s(pre.get('discarded_terminals'))} Terminals (ohne Terminal keine Frage; übernehmen mit "
-            f"--preroll yes).")
+    _say_preroll(res.get("preroll") or {}, args.preroll, asked)
     held = int(res.get("held") or 0)
     switching = f"; {held} wechseln an der nächsten lokalen Eingabeaufforderung" if held else ""
     say(f"Aufnahme läuft ({s(res.get('recording', 0))} Terminals{switching}). Pause: F12 r oder "
@@ -303,6 +345,13 @@ def cmd_stop(paths: Paths, args: argparse.Namespace) -> int:
     head = (f" Kettenkopf: seq {s(res['head_seq'])} {s(res['head_hash'])}"
             if res.get("head_seq") is not None else "")
     say(f"Projekt {s(res.get('slug'))} beendet und gesperrt.{head}")
+    try:  # Hinweis auf die Sicherung (E91); ein Fehler darf stop nie scheitern lassen
+        from ariadne.backup.reminder import after_stop_lines
+
+        for line in after_stop_lines(paths, res):
+            say(s(line, 300))
+    except Exception:  # noqa: BLE001, S110
+        pass
     return 0
 
 
@@ -531,11 +580,6 @@ def cmd_doctor(paths: Paths, args: argparse.Namespace) -> int:
     return worst
 
 
-def cmd_ui(paths: Paths, args: argparse.Namespace) -> int:
-    say("Die Web-Oberfläche kommt mit der Web-UI. Bis dahin: ariadne status, ariadne show, ariadne ctx.")
-    return 0
-
-
 # --------------------------------------------------------------------------- #
 # Parser
 # --------------------------------------------------------------------------- #
@@ -557,9 +601,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--passphrase-fd", type=int, metavar="N", help="Passphrase von Dateideskriptor N lesen")
     sp.set_defaults(fn=cmd_init)
 
-    sp = sub.add_parser("unlock", help="Operator-Tresor entsperren")
+    sp = sub.add_parser("unlock", help="entsperren; ein aktives Projekt öffnet sich wie mit ariadne start")
     sp.add_argument("--recovery", action="store_true", help="mit Recovery-Code statt Passphrase")
     sp.add_argument("--passphrase-fd", type=int, metavar="N", help="Passphrase/Code von Deskriptor N lesen")
+    sp.add_argument("--preroll", choices=["ask", "yes", "no"], default="ask",
+                    help="Vorlauf bzw. gesperrte Zeit übernehmen: fragen, ja, nein (Ausfallpuffer immer)")
     sp.set_defaults(fn=cmd_unlock)
 
     sub.add_parser("lock", help="sperren, offenes Projekt schliessen (bleibt aktiv: ariadne start)"
@@ -664,7 +710,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(fn=cmd_hotkey)
 
     sub.add_parser("doctor", help="Umgebung prüfen").set_defaults(fn=cmd_doctor)
-    sub.add_parser("ui", help="Web-Oberfläche öffnen").set_defaults(fn=cmd_ui)
+    # Teile mit eigenem Besitzer (Vertrag v0.1-Server): Dashboard, Sicherung, Fernzugriff
+    ui_cli.register(sub)
+    backup_cli.register(sub)
+    remote_cli.register(sub)
     return p
 
 

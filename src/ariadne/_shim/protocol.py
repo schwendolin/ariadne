@@ -38,7 +38,10 @@ Shim an Daemon
            das, was der Shim ans Kind schreibt (E26), ohne Hotkey-Folgen und ohne
            Eingaben im Mini-Prompt. ``stream_off``/``out_end``: Ausgabe-Offset beim
            ersten bzw. letzten Byte. ``flags`` Bit 0: Bracketed Paste (ein Paste ist
-           genau ein INPUT). Der Shim bündelt bis Enter (CR, LF), Ctrl-C, Ctrl-D,
+           genau ein INPUT). ``flags`` Bit 1 (E104, additiv): Beim Tippen stand das
+           Kind im Modus ``ECHO`` aus und ``ICANON`` an (``getpass`` von sudo, ssh, su,
+           mysql); gesetzt, sobald ein Byte des Bündels so getippt wurde. Ältere
+           Daemons ignorieren das Bit. Der Shim bündelt bis Enter (CR, LF), Ctrl-C, Ctrl-D,
            Paste-Grenze, 4 KiB oder 1 s nach dem ersten Byte.
     EVENT  JSON  {"seq": int, "kind": <Event-Art aus ariadne.events>, ...Felder}
            Erlaubte Arten: term.mark, term.resize, term.ctx_snapshot, term.gap,
@@ -132,6 +135,8 @@ __all__ = [
     "MAX_TIX",
     "REC_STATES",
     "CAPTURE_STATES",
+    "INPUT_PASTE",
+    "INPUT_NOECHO",
     "HELLO", "OUT", "EVENT", "BYE", "OUTX", "INPUT", "STATE", "ACK",
     "Frame",
     "OutFrame",
@@ -167,6 +172,7 @@ ACK = 11
 REC_STATES = ("on", "paused", "preroll", "locked", "held", "off", "waiting", "offline")
 CAPTURE_STATES = ("on", "preroll", "locked", "waiting")  # in diesen Zuständen sendet der Shim
 INPUT_PASTE = 0x01
+INPUT_NOECHO = 0x02  # E104: getippt mit ECHO aus und ICANON an (Passwortabfrage)
 
 _TYPES = {HELLO, OUT, EVENT, BYE, OUTX, INPUT, STATE, ACK}
 _HDR = struct.Struct(">IB")
@@ -241,6 +247,7 @@ class InputFrame:
     tix: tuple[tuple[int, int], ...]
     paste: bool
     data: bytes
+    no_echo: bool = False  # E104: Flag-Bit 1
 
 
 def _pack_tix(tix: tuple[tuple[int, int], ...] | list[tuple[int, int]], length: int) -> bytes:
@@ -289,11 +296,12 @@ def decode_outx(payload: bytes) -> OutFrame:
 
 def encode_input(seq: int, stream_off: int, out_end: int, t_wall_ns: int, t_mono_ns: int, data: bytes,
                  tix: tuple[tuple[int, int], ...] | list[tuple[int, int]] = (), *,
-                 paste: bool = False) -> bytes:
-    """INPUT-Rahmen (v2): Eingabe ans Kind."""
+                 paste: bool = False, no_echo: bool = False) -> bytes:
+    """INPUT-Rahmen (v2): Eingabe ans Kind. ``no_echo``: Passwortmodus des Kindes (E104)."""
     if out_end < stream_off:
         raise ProtocolError("out_end vor stream_off")
-    head = _INPUT.pack(seq, stream_off, out_end, t_wall_ns, t_mono_ns, len(tix), INPUT_PASTE if paste else 0)
+    flags = (INPUT_PASTE if paste else 0) | (INPUT_NOECHO if no_echo else 0)
+    head = _INPUT.pack(seq, stream_off, out_end, t_wall_ns, t_mono_ns, len(tix), flags)
     return encode_frame(INPUT, head + _pack_tix(tix, len(data)) + data)
 
 
@@ -304,7 +312,8 @@ def decode_input(payload: bytes) -> InputFrame:
     if out_end < off:
         raise ProtocolError("INPUT: out_end vor stream_off")
     tix, pos = _unpack_tix(payload, _INPUT.size, n)
-    return InputFrame(seq, off, out_end, wall, mono, tix, bool(flags & INPUT_PASTE), payload[pos:])
+    return InputFrame(seq, off, out_end, wall, mono, tix, bool(flags & INPUT_PASTE), payload[pos:],
+                      no_echo=bool(flags & INPUT_NOECHO))
 
 
 def frame_seq(ftype: int, payload: bytes) -> int:

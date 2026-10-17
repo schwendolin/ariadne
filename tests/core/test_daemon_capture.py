@@ -388,7 +388,9 @@ def test_preroll_window_and_limits_with_fake_clock(paths, operator):
         await a.outx(2, 5, b"neu\r\n", mono=clock.mono())
         await a.wait_ack(2)
         info = await ctl_ok(paths.ctl_sock, "preroll.info")
-        assert info == {"terminals": 1, "seconds": info["seconds"], "bytes": 5, "window_s": 60}
+        assert info == {"terminals": 1, "seconds": info["seconds"], "bytes": 5, "window_s": 60,
+                        "ask_terminals": 1, "ask_seconds": info["seconds"], "outage_terminals": 0,
+                        "outage_seconds": 0}
         assert info["seconds"] <= 2
         # Grenze pro Terminal: das Älteste wird verdrängt, der Puffer bleibt zusammenhängend
         big = b"x" * (600 << 10)

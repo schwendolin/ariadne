@@ -18,7 +18,7 @@ from typing import Any
 from ariadne.termsafe import term_safe
 
 __all__ = ["render_view", "render_search", "render_reparse", "render_confirm", "render_undo", "quiet_text",
-           "STATE_TEXT", "SCOPE_TEXT"]
+           "render_input_revealed", "STATE_TEXT", "SCOPE_TEXT", "HIDE_TEXT"]
 
 STATE_TEXT = {"candidate": "Kandidat", "auto": "auto", "confirmed": "bestätigt", "rejected": "verworfen"}
 SCOPE_TEXT = {"in": "in Scope", "out": "ausserhalb", "excluded": "ausgeschlossen",
@@ -243,9 +243,47 @@ def _pending(items: list[dict[str, Any]], full: bool) -> list[str]:
     return [f"{_ts(p.get('ts'))}  {s(p.get('reason'), 24):<20} {s(p.get('path'), 200)}" for p in items]
 
 
+HIDE_TEXT = {"tty_no_echo": "Passwortabfrage", "no_echo_seen": "ohne Echo", "no_output": "Echo nicht prüfbar"}
+
+
+def _input_text(e: dict[str, Any]) -> str:
+    """Text einer Eingabe (E104): verdeckt kommt vom Daemon nur ``••••••••``; der Grund steht dabei."""
+    if e.get("redacted"):
+        return "[geschwärzt]"
+    text = s(e.get("text"), 160)
+    if e.get("hidden") and not e.get("revealed"):
+        why = HIDE_TEXT.get(str(e.get("reason")), "verdeckt")
+        return f"{text}  ({why}; aufdecken: ariadne show inputs --reveal {s(e.get('seq'), 12)})"
+    return text or "(nur Enter oder Steuertasten)"
+
+
+def _inputs(items: list[dict[str, Any]], full: bool) -> list[str]:
+    """Eingaben (E26) nach E104: ohne Echo verdeckt, Aufdecken nur ausdrücklich und einzeln."""
+    if not items:
+        return ["Noch keine Eingaben aufgezeichnet."]
+    out = []
+    for e in items:
+        tid = str(e.get("terminal_id") or "")
+        paste = " Paste" if e.get("paste") else ""
+        out.append(f"{_ts(e.get('t_shim_ns'))}  {s(tid[-8:], 8):<8}  #{s(e.get('seq'), 12):<7}{paste} "
+                   f"{_input_text(e)}")
+    return out
+
+
+def render_input_revealed(e: dict[str, Any]) -> list[str]:
+    """Eine ausdrücklich aufgedeckte Eingabe (``ariadne show inputs --reveal``)."""
+    if not e:
+        return ["Keine Eingabe gefunden."]
+    tid = str(e.get("terminal_id") or "")
+    return [f"Eingabe #{s(e.get('seq'), 12)} in Terminal {s(tid[-8:], 8)} um {_ts(e.get('t_shim_ns'))}:",
+            f"    {s(e.get('text'), 400)}",
+            "Achtung: Klartext auf dem Bildschirm (danach clear). Die Aufnahme dieses Terminals ist bis "
+            "zum nächsten Prompt angehalten."]
+
+
 _VIEWS: dict[str, Callable[[list[dict[str, Any]], bool], list[str]]] = {
     "hosts": _hosts, "services": _services, "inbox": _inbox, "timeline": _timeline,
-    "keysteps": _keysteps, "pending": _pending,
+    "keysteps": _keysteps, "pending": _pending, "inputs": _inputs,
 }
 
 

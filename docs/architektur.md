@@ -229,7 +229,9 @@ Fällt der Daemon aus, puffert der Shim im RAM (Ringpuffer, `mmap` mit `MADV_DON
 
 **Zeit (E96).** Massgeblich ist die Zeit, die der Shim beim Lesen misst: direkt nach jedem `read()` von Master und stdin die Wanduhr (`CLOCK_REALTIME`) und die monotone Uhr (`CLOCK_MONOTONIC`) in ns. Jeder `OUTX`- und `INPUT`-Rahmen trägt einen Zeitindex `tix` (Liste von `[rel_off, dt_us]`, ein neuer Eintrag frühestens 1 ms nach dem letzten), jedes `term.*`-Event `t_shim_ns` und `mono_ns`. Der Writer fasst aufeinanderfolgende Rahmen eines Terminals innerhalb eines Commits zusammen (höchstens 256 KiB und 4096 Indexeinträge, nie über ein anderes Event des Terminals hinweg) und verschiebt dabei den Zeitindex, ohne Genauigkeit zu verlieren (`events.body_time` liefert die Zeit jedes Bytes). Weicht die Shim-Zeit mehr als 5 s von der Empfangszeit ab oder läuft die monotone Uhr rückwärts, setzt der Daemon `time_suspect`. Die Empfangszeit (`ts_utc_ns`) bleibt nur Kontrollfeld. Die Auswertung sortiert nach (Systemstart, monotone Uhr, Terminal, Offset) und zeigt die Wanduhr. So stimmt die Reihenfolge über alle Terminals, auch wenn die Wanduhr springt (NTP, Pause der VM). Genauigkeit in der VM etwa 1 ms; gemessen wird, wann die Bytes am Terminal ankommen, nicht wann das Ziel etwas tat.
 
-**Eingaben (E26).** Der Shim zeichnet genau auf, was ans Kind im PTY geht, lokal und in Remote-Shells, auch Passwörter ohne Echo und Antworten des Terminals (Cursorposition, Farben). Er bündelt bis Enter, Ctrl-C, Ctrl-D, 4 KiB oder 1 s; ein Bracketed Paste ist genau ein Rahmen mit Paste-Flag. Jeder `INPUT` nennt das aktuelle Ende des Output-Stroms (`out_end`) als Bezug. Hotkey-Präfix und -Taste und der Mini-Prompt fehlen. Eingaben werden nur aufgenommen, wenn auch die Ausgabe aufgenommen wird. Der Daemon schreibt sie als `term.input`, nie in Logs, an Terminal-Senken nur über `term_safe`. Der Echo-Vergleich und bestätigte Remote-Befehle folgen in v0.2 (5.13).
+**Eingaben (E26).** Der Shim zeichnet genau auf, was ans Kind im PTY geht, lokal und in Remote-Shells, auch Passwörter ohne Echo und Antworten des Terminals (Cursorposition, Farben). Er bündelt bis Enter, Ctrl-C, Ctrl-D, 4 KiB oder 1 s; ein Bracketed Paste ist genau ein Rahmen mit Paste-Flag. Jeder `INPUT` nennt das aktuelle Ende des Output-Stroms (`out_end`) als Bezug. Hotkey-Präfix und -Taste und der Mini-Prompt fehlen. Eingaben werden nur aufgenommen, wenn auch die Ausgabe aufgenommen wird. Der Daemon schreibt sie als `term.input`, nie in Logs, an Terminal-Senken nur über `term_safe`. Bestätigte Remote-Befehle folgen in v0.2 (5.13).
+
+**Eingaben ohne Echo (E104).** Gespeichert wird immer alles, angezeigt werden Eingaben ohne Echo nur verdeckt (`••••••••`), aufgedeckt nur ausdrücklich und einzeln. Lokal prüft der Shim beim Aufzeichnen den Terminalmodus des Kindes (`tcgetattr` auf dem Master): `ECHO` aus und `ICANON` an ist das `getpass`-Muster von sudo, ssh, su und mysql; dann setzt er Flag-Bit 1 am `INPUT`, und `term.input` trägt `no_echo`. Zeileneditoren (ZLE, readline) schalten beides aus und echoen selbst; das ist kein Passwort. In Remote-Shells (lokal Raw-Modus) hilft nur der Echo-Vergleich der Auswertung (`ingest/inputs.py`): Erscheinen die getippten druckbaren Zeichen in der Ausgabe ab dem ersten getippten Byte bis kurz nach dem Enter nicht wieder, oder fehlt diese Ausgabe, gilt die Eingabe als ohne Echo. Kurze Wörter zählen nur, wenn sie eine angezeigte Zeile beenden. Lieber zu viel als zu wenig verdecken. CLI: `ariadne show inputs [--reveal NR]`; Web-API: `GET /p/{pid}/inputs`, `POST /p/{pid}/secrets/reveal`.
 
 ### 3.8 Ausgabefilter im Shim
 
@@ -807,7 +809,7 @@ Alle Pfade liegen unter `/api/v1`, projektbezogene unter `/p/{pid}`. Andere Teil
 
 | Pfad | Zweck |
 |---|---|
-| `GET /status`, Pause pro Terminal | Version, Projekt, Profil, Sperrzustand, Aufnahme-Zustand pro Terminal und Leerlauf-Uhr, LLM-Modus, Präsentationsmodus; Pause und Fortsetzen pro Terminal (ctl `term.pause`/`term.resume` mit `source = webui`). `docs/web-api.md` beschreibt noch `PUT /rec` und wird mit der Web-API nachgeführt |
+| `GET /status`, Pause pro Terminal | Version, Projekt, Profil, Sperrzustand, Aufnahme-Zustand pro Terminal und Leerlauf-Uhr, LLM-Modus, Präsentationsmodus; Pause und Fortsetzen pro Terminal (ctl `term.pause`/`term.resume` mit `source = webui`). Verbindlich ist die API v2 in `docs/web-api.md` (Stand 2026-10-15) |
 | `GET /terminals`, `POST /terminals/{tid}/context` | Terminals; Kontext setzen (schreibt intern `d.ctx.*`) |
 | `GET /p/{pid}/graph?layer=`, `GET /p/{pid}/changes?since=` | Karte nach Ebenen; Änderungen seit einer Generation |
 | `GET /p/{pid}/hosts`, `/services`, `/credentials`, `/cred-matrix`, `/timeline`, `/inbox`, `/suggestions`, `/findings` | Listen |
@@ -942,7 +944,9 @@ Einstellungen des Daemons, die kein Projekt betreffen, stehen in `~/.config/aria
 - `ariadne project new <slug> --target <ziel>` legt Ordner, Schlüssel und Schema an und öffnet (verwirft den Vorlauf).
 - Öffnen: `flock`, Migrationen mit Backup davor, Kettenkopf prüfen, `clock.check`. Genau ein offenes Projekt pro Daemon; ist es offen, nehmen alle Terminals auf.
 - `ariadne stop`: `system.project_end`, Flush, Checkpoint, `wal_checkpoint(TRUNCATE)`, Schlüssel verwerfen, Tresor sperren, `stopped: true`, Kettenkopf ausgeben. Dasselbe nach 12 h Leerlauf.
-- `ariadne lock`: schliessen und sperren, das Projekt bleibt aber aktiv (`locked`, Vorlauf im RAM); weiter mit `ariadne start`. `project close` beendet wie `stop`, ohne zu sperren.
+- `ariadne lock` (E103): schliessen und sperren, das Projekt bleibt aber aktiv (`locked`, Vorlauf im RAM); weiter mit `ariadne start` oder `ariadne unlock`. `project close` beendet wie `stop`, ohne zu sperren.
+- `ariadne unlock` (E101): entsperrt und öffnet ein aktives, nicht gestopptes Projekt wie `ariadne start` ohne Slug; die Aufnahme läuft sofort. Vom Mac aus `ssh -t kali-sl unlock`. Den Ausfallpuffer nach einem Absturz oder Neustart des Daemons bei aktivem Projekt übernehmen `start` und `unlock` ohne Rückfrage (E102); gefragt wird nur nach dem Vorlauf ohne Projekt (E95) und nach der gesperrten Zeit nach `lock`.
+- Beim Schliessen schreibt das Projekt den Kettenkopf nach `.vault/head.json` (Klartext, nur der Hash); Sicherung und Wiederherstellung (8.9) vergleichen ihn, ohne zu entsperren.
 - `archive` und `restore` (v0.3): Abschluss-Event, `VACUUM`, danach nur lesend, optional als Einzeldatei.
 - `purge` (einfach in v0.1, vollständig in v0.3): Slug eintippen, Inventar, Slots überschreiben und löschen, Ordner und bekannte Backups löschen, Löschnachweis als Markdown und JSON. Der Nachweis nennt seine Grenzen (SSD-Restblöcke, fremde Backups, bereits an Cloud-Anbieter gesendete Daten) und listet gefundene Klartext-Orte ausserhalb (`~/.zsh_history`, `~/.msf4`, `~/.nxc`).
 
@@ -1036,10 +1040,13 @@ _ariadne/manifest.json    # Exportzeit, Kettenkopf, Hashes aller Dateien
 | `term.pause`, `term.resume` | `terminal_id` oder `all`, `minutes` (Standard 10) |
 | `status`, `terminals` | Daemon, Tresor, Projekt, aktives Projekt, Leerlauf-Uhr, Vorlauf, Zustand pro Terminal (3.6) |
 | `pause_terminal`, `resume_terminal` | Pause für Schlüsselmaterial bis zum nächsten Prompt, auch vor dem ersten `HELLO`; `seconds` höchstens 3600 |
-| `init`, `unlock`, `lock`, `project.new/open/close/list`, `ctx.show/set/push/pop`, `keystep.mark`, `import`, `verify`, `redact`, `secrets.add/list/remove`, `shutdown` | wie bisher; `unlock` öffnet kein Projekt mehr |
+| `unlock` | entsperrt und öffnet das aktive Projekt wie `start` (E101); `adopt_preroll`, `open_active`; Ergebnis `reopened` oder `reopen_error` |
+| `init`, `lock`, `project.new/open/close/list`, `ctx.show/set/push/pop`, `keystep.mark`, `import`, `verify`, `redact`, `secrets.add/list/remove`, `shutdown` | wie bisher; `ctx.*` und `term.pause`/`term.resume` nehmen `source = webui`, `ctx.set` auch `from_off` (rückwirkend) |
+| `presentation` | Präsentationsmodus setzen oder abfragen (7.8) |
+| `input.reveal` | eine Eingabe ohne Echo aufdecken (E104), nur Profil lab, nicht im Präsentationsmodus |
 | `rec.on`, `rec.status` | nur Kompatibilität (`state` = `on` bei offenem Projekt) |
 | `rec.off`, `rec.toggle` | Fehler `removed`: «REC gibt es nicht mehr: ariadne pause oder ariadne stop» |
-| `show` | `what` = `hosts`, `services`, `inbox`, `timeline`, `keysteps`, `pending`; Inbox mit Summe `quiet` |
+| `show` | `what` = `hosts`, `services`, `inbox`, `timeline`, `keysteps`, `pending`, `inputs` (E104, verdeckt); Inbox mit Summe `quiet` |
 | `search`, `claim.confirm`, `claim.reject`, `reparse` | Suche, Bestätigen (Sammelbestätigung mit `excluded` pro Grund), Verwerfen, Neubau |
 | `unit.distrust` | `ref` (volle `cmd_id` oder Kurzform), `reason?`: schreibt `d.unit.distrust`, Ergebnis `rejected` und `weakened` |
 
@@ -1054,7 +1061,10 @@ Alle Antworten mit Zieldaten gehen durch `redact_json` (8.5).
 | `ariadne show hosts\|services\|inbox\|timeline\|keysteps\|pending` | Textansichten, alle Werte über `term_safe`, `auto` und Zähler der stillen Spur |
 | `ariadne confirm REF`, `reject REF`, `undo REF [--reason TEXT]`, `search TEXT`, `reparse` | Entscheide und Abfragen der Auswertung |
 | `ariadne rec ...` | nur noch ein Hinweis auf `start`, `pause` und `stop`, Exit 1 |
-| `ariadne init`, `unlock`, `lock`, `project`, `ctx`, `mark`, `import`, `verify`, `redact`, `secrets`, `setup`, `doctor`, `daemon`, `hotkey test` | wie bisher |
+| `ariadne unlock [--preroll ask\|yes\|no]` | entsperren und das aktive Projekt öffnen (E101, E102) |
+| `ariadne show inputs [--terminal ID] [--reveal NR]` | Eingaben, ohne Echo verdeckt (E104); `--reveal` meldet das Terminal vorher an |
+| `ariadne ui`, `backup`, `restore`, `remote check\|serve` | Web-Oberfläche, Sicherung, Fernzugriff (Bau v0.1-Server, `docs/web-api.md`, Konzept Fernzugriff) |
+| `ariadne init`, `lock`, `project`, `ctx`, `mark`, `import`, `verify`, `redact`, `secrets`, `setup`, `doctor`, `daemon`, `hotkey test` | wie bisher |
 
 ## 9 Sicherheitsarchitektur
 

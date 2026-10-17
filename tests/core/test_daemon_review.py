@@ -265,7 +265,9 @@ def test_outage_ring_kept_without_window_and_gap_reason(paths, operator):
     assert b"445/tcp open" in state["stream"] and b"danach" in state["stream"]
 
 
-def test_outage_discarded_on_no_names_daemon_down(paths, operator):
+def test_outage_adopted_even_without_adopt_flag_e102(paths, operator):
+    """E102: Den Ausfallpuffer nach einem Neustart übernimmt ``start`` ohne Rückfrage, auch mit
+    ``adopt_preroll=False``; vorher hiess die Lücke daemon_down."""
     state: dict[str, Any] = {}
     tid = "term-crash-00002"
 
@@ -285,13 +287,18 @@ def test_outage_discarded_on_no_names_daemon_down(paths, operator):
         await s.wait_state(rec="locked")
         await s.outx(2, 8, b"im Ring\r\n")
         await s.wait_ack(2)
+        info = await ctl_ok(paths.ctl_sock, "preroll.info")
+        assert info["outage_terminals"] == 1 and info["ask_terminals"] == 0
         res = await ctl_ok(paths.ctl_sock, "start", adopt_preroll=False)
-        assert res["preroll"]["discarded_terminals"] == 1
+        assert res["preroll"]["outage_terminals"] == 1 and res["preroll"]["discarded_terminals"] == 0
         await s.outx(3, 17, b"danach\r\n")
         await s.wait_ack(3)
         d.flush()
-        parts = covered(d.project.journal, tid)
-        assert (8, 9, "daemon_down") in parts
+        j = d.project.journal
+        parts = covered(j, tid)
+        assert not any(p[2] in ("daemon_down", "no_project") for p in parts), parts
+        stream = b"".join(r.body for r in j.iter_events(kinds=["term.out"], terminal_id=tid))
+        assert stream == b"vorher\r\nim Ring\r\ndanach\r\n"
         await s.close()
 
     state["backup"] = backup_of(operator)

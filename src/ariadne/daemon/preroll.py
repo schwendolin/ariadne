@@ -161,12 +161,28 @@ class PrerollStore:
             return 0
         return max(0, math.ceil((now - min(x for x in oldest if x is not None)) / 1e9))
 
+    def outage_terminals(self) -> list[str]:
+        """Terminals mit Ausfallpuffer (mindestens ein Eintrag ``keep``)."""
+        return [tid for tid, b in self.bufs.items() if b.entries and b.outage]
+
     def info(self) -> dict[str, int]:
+        """Gesamt (``terminals``, ``seconds``, ``bytes``) und getrennt nach Art (E102):
+        ``outage_*`` für Ausfallpuffer (``start``/``unlock`` übernehmen sie ohne Rückfrage),
+        ``ask_*`` für den Vorlauf, nach dem ``ariadne start`` fragt (E95)."""
         self.expire()
-        return {"terminals": sum(1 for b in self.bufs.values() if b.entries), "seconds": self.seconds(),
-                "bytes": sum(len(e.data) for b in self.bufs.values() for e in b.entries
-                             if e.data is not None),
-                "window_s": self.window_s}
+        now = self._clock()
+        out: dict[str, int] = {
+            "terminals": sum(1 for b in self.bufs.values() if b.entries), "seconds": self.seconds(),
+            "bytes": sum(len(e.data) for b in self.bufs.values() for e in b.entries if e.data is not None),
+            "window_s": self.window_s,
+        }
+        for prefix, want in (("outage", True), ("ask", False)):
+            bufs = [b for b in self.bufs.values() if b.entries and b.outage is want]
+            oldest = [b.oldest_mono() for b in bufs]
+            known = [x for x in oldest if x is not None]
+            out[f"{prefix}_terminals"] = len(bufs)
+            out[f"{prefix}_seconds"] = max(0, math.ceil((now - min(known)) / 1e9)) if known else 0
+        return out
 
     def take(self, terminal_id: str) -> TermPreroll | None:
         buf = self.bufs.pop(terminal_id, None)

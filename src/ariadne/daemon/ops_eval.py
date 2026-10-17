@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from ariadne.daemon.ops_util import OpError, arg_int, arg_str
 from ariadne.daemon.sources import list_pending
-from ariadne.ingest import queries
+from ariadne.ingest import inputs, queries
 from ariadne.store.api import AppendItem
 
 if TYPE_CHECKING:
@@ -35,6 +35,11 @@ def _exit(d: Daemon, obj: Any) -> Any:
         return obj
     out, _labels = redactor.redact_json(obj)
     return out
+
+
+def _origin(args: dict[str, Any]) -> str:
+    """Herkunft eines Entscheids: ``cli`` (Standard) oder ``webui`` (Web-API, Vertrag v0.1-Server)."""
+    return "webui" if args.get("origin") == "webui" else "cli"
 
 
 def _same_project(d: Daemon, p: Any) -> None:
@@ -58,6 +63,12 @@ async def op_show(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     limit = arg_int(args, "limit", 1, 5000, 200)
     if what == "pending":
         return _exit(d, {"what": what, "items": await asyncio.to_thread(list_pending, p, limit)})
+    if what == "inputs":
+        # Eingaben (E26) mit Verdeckung nach E104: nie aufgedeckt, dafür gibt es input.reveal
+        tid = arg_str(args, "terminal_id", required=False, max_len=64)
+        ing = await d._sync_ingest()
+        items = await ing.query_journal(lambda c, j: inputs.collect_inputs(j, terminal_id=tid, limit=limit))
+        return _exit(d, {"what": what, "items": items})
     views: dict[str, Callable[[Any], Any]] = {
         "hosts": queries.hosts, "services": queries.services, "inbox": queries.inbox,
         "keysteps": queries.keysteps, "timeline": lambda c: queries.timeline(c, limit),
@@ -87,7 +98,7 @@ async def op_claim_confirm(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     keys: list[str] = plan["keys"]
     _same_project(d, p)
     for k in keys:
-        d.submit(AppendItem("d.claim.confirm", {"claim_key": k}, origin="cli"))
+        d.submit(AppendItem("d.claim.confirm", {"claim_key": k}, origin=_origin(args)))
     ing = await d._sync_ingest()
     claims = await ing.query(lambda c: queries.claim_snapshot(c, keys[:50]))
     return _exit(d, {"confirmed": len(keys), "claims": claims, "excluded": plan["excluded"],
@@ -101,7 +112,7 @@ async def op_claim_reject(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     key: str = await _resolve(d, lambda c: queries.resolve_claim(c, ref))
     header = {"claim_key": key, "reason": reason} if reason else {"claim_key": key}
     _same_project(d, p)
-    d.submit(AppendItem("d.claim.reject", header, origin="cli"))
+    d.submit(AppendItem("d.claim.reject", header, origin=_origin(args)))
     ing = await d._sync_ingest()
     return _exit(d, {"rejected": 1, "claims": await ing.query(lambda c: queries.claim_snapshot(c, [key]))})
 
@@ -114,9 +125,27 @@ async def op_unit_distrust(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     cmd_id: str = await _resolve(d, lambda c: queries.resolve_distrust(c, ref))
     header = {"cmd_id": cmd_id, "reason": reason} if reason else {"cmd_id": cmd_id}
     _same_project(d, p)
-    d.submit(AppendItem("d.unit.distrust", header, origin="cli"))
+    d.submit(AppendItem("d.unit.distrust", header, origin=_origin(args)))
     ing = await d._sync_ingest()
     return _exit(d, await ing.query(lambda c: queries.distrust_result(c, cmd_id)))
+
+
+async def op_input_reveal(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
+    """Eine verdeckte Eingabe ausdrücklich aufdecken (E104, E99): nur im Profil lab und nicht
+    im Präsentationsmodus. Eigene Secrets ersetzt der Ausgang trotzdem (E72)."""
+    p = d._require_project()
+    seq = args.get("seq")
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 1:
+        raise OpError("invalid", "seq ungültig")
+    if getattr(p.info, "profile", "lab") != "lab":
+        raise OpError("policy", "Aufdecken nur im Profil lab")
+    if getattr(d, "presentation", False):
+        raise OpError("policy", "Im Präsentationsmodus gesperrt")
+    ing = await d._sync_ingest()
+    item = await ing.query_journal(lambda c, j: inputs.input_by_seq(j, seq, reveal=True))
+    if item is None:
+        raise OpError("not_found", "keine Eingabe mit dieser Nummer")
+    return _exit(d, {"item": item})
 
 
 async def op_reparse(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
@@ -131,4 +160,5 @@ OPS: dict[str, Callable[[Daemon, dict[str, Any]], Any]] = {
     "claim.reject": op_claim_reject,
     "unit.distrust": op_unit_distrust,
     "reparse": op_reparse,
+    "input.reveal": op_input_reveal,
 }

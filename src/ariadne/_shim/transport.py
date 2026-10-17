@@ -206,12 +206,13 @@ class Transport:
             self._out_marks = _rebase(self._out_marks, n)
 
     def add_input(self, data: bytes, stream_off: int, out_end: int, wall_ns: int, mono_ns: int,
-                  tix: tuple[tuple[int, int], ...] = (), *, paste: bool = False) -> int:
-        """INPUT-Rahmen (E26). Vorher geht die gebündelte Ausgabe hinaus."""
+                  tix: tuple[tuple[int, int], ...] = (), *, paste: bool = False,
+                  no_echo: bool = False) -> int:
+        """INPUT-Rahmen (E26). Vorher geht die gebündelte Ausgabe hinaus. ``no_echo``: E104."""
         self.flush_out()
         seq = self._take_seq()
         frame = P.encode_input(seq, stream_off, max(out_end, stream_off), wall_ns, mono_ns, data, tix,
-                               paste=paste)
+                               paste=paste, no_echo=no_echo)
         self._append(seq, frame)
         return seq
 

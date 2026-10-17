@@ -1,0 +1,402 @@
+"""Eingaben ohne Echo erkennen und verdecken (E104, E26, E99).
+
+Ariadne speichert jede Eingabe vollständig (``term.input``, E26). Angezeigt werden
+Eingaben ohne Echo aber nur verdeckt (``••••••••``); aufgedeckt wird nur ausdrücklich
+und einzeln. Zwei Quellen sagen, ob eine Eingabe ein Echo hatte:
+
+1. **Terminalmodus (lokal).** Der Shim prüft beim Aufzeichnen den Modus des Kindes
+   (``tcgetattr`` auf dem Master). ``ECHO`` aus und ``ICANON`` an ist das Muster von
+   ``getpass`` (sudo, ssh, su, mysql); dann trägt ``term.input`` ``no_echo = true``.
+   Zeileneditoren (ZLE, readline) schalten ``ECHO`` und ``ICANON`` beide aus und echoen
+   selbst; das ist kein Passwort.
+2. **Echo-Vergleich (Remote-Shells, lokal im Raw-Modus).** :func:`echo_seen` prüft, ob
+   die getippten druckbaren Zeichen in der Ausgabe ab dem ersten getippten Byte bis kurz
+   nach dem Enter wieder erscheinen (:func:`output_window`). Fehlen sie, gilt die Eingabe
+   als ohne Echo.
+
+Grundsatz: lieber zu viel als zu wenig verdecken. Verdeckt wird auch, wenn die Ausgabe
+fehlt (Lücke, Pause, noch nicht gespeichert) oder das Echo nicht eindeutig ist. Ein
+kurzes Wort (unter :data:`ANYWHERE_MIN` Zeichen) zählt nur, wenn es eine angezeigte
+Zeile beendet; sonst könnte ein vorab getipptes Passwort zufällig im Prompt stehen.
+
+Alle Funktionen sind rein, bis auf :func:`collect_inputs` und :func:`input_by_seq`,
+die aus einem Journal lesen (``iter_events`` und, falls vorhanden, ``stream_slice``).
+Die Texte sind Zieldaten bzw. Secrets: Die Senke kodiert sie (CLI ``term_safe``,
+API JSON-String), und eigene Secrets ersetzt der Ausgang (``Redactor.redact_json``).
+Nie in Logs.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import deque
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from ariadne.termsafe import visible
+
+__all__ = [
+    "MASK",
+    "ANYWHERE_MIN",
+    "TAIL_MAX",
+    "TEXT_MAX",
+    "HideReason",
+    "InputVerdict",
+    "typed_lines",
+    "render_output",
+    "echo_seen",
+    "output_window",
+    "classify",
+    "display_text",
+    "input_view",
+    "collect_inputs",
+    "input_by_seq",
+]
+
+MASK = "••••••••"
+ANYWHERE_MIN = 12  # ab dieser Länge zählt ein Echo auch mitten in einer Zeile
+TAIL_MAX = 8192  # so viel Ausgabe nach dem Enter gehört höchstens zum Echo
+TEXT_MAX = 2000  # Länge des angezeigten Texts einer Eingabe
+SLICE_LOOKBACK = 1 << 20  # term.out-Rahmen sind höchstens so lang (Protokoll MAX_PAYLOAD)
+
+HideReason = Literal["tty_no_echo", "no_echo_seen", "no_output"]
+
+_CSI = re.compile(rb"\x1b\[([0-9;?<=>!]*)([ -/]*)([@-~])")
+_PASTE = (b"\x1b[200~", b"\x1b[201~")
+
+
+@dataclass(frozen=True)
+class InputVerdict:
+    """Ergebnis für eine Eingabe. ``hidden``: nur verdeckt anzeigen. ``reason``: warum
+    (``tty_no_echo`` Terminalmodus, ``no_echo_seen`` kein Echo in der Ausgabe,
+    ``no_output`` Ausgabe fehlt). ``printable``: Zahl der druckbaren getippten Zeichen."""
+
+    hidden: bool
+    reason: HideReason | None
+    printable: int
+
+
+# --------------------------------------------------------------------------- getippt
+
+
+def typed_lines(data: bytes) -> list[str]:
+    """Was die Eingabe wirksam tippt, als Zeilen ohne leere Zeilen.
+
+    Escape-Folgen (Pfeile, Paste-Klammern) fallen weg, Backspace und DEL löschen das
+    letzte Zeichen, Ctrl-U die Zeile, Ctrl-W das letzte Wort. CR und LF trennen Zeilen,
+    andere Steuerzeichen (Tab, Ctrl-C) fallen weg.
+    """
+    for marker in _PASTE:
+        data = data.replace(marker, b"")
+    text = _strip_escapes(data).decode("utf-8", errors="replace")
+    lines: list[str] = []
+    cur: list[str] = []
+    for ch in text:
+        cp = ord(ch)
+        if ch in "\r\n":
+            if cur:
+                lines.append("".join(cur))
+            cur = []
+        elif cp in (0x08, 0x7F):
+            if cur:
+                cur.pop()
+        elif cp == 0x15:  # Ctrl-U
+            cur = []
+        elif cp == 0x17:  # Ctrl-W
+            while cur and cur[-1] == " ":
+                cur.pop()
+            while cur and cur[-1] != " ":
+                cur.pop()
+        elif cp < 0x20 or 0x80 <= cp <= 0x9F:
+            continue
+        else:
+            cur.append(ch)
+    if cur:
+        lines.append("".join(cur))
+    return [ln for ln in lines if ln.strip()]
+
+
+def _strip_escapes(data: bytes) -> bytes:
+    """Entfernt CSI-, SS3- und OSC-Folgen sowie einzelne ESC-Zeichen."""
+    out = bytearray()
+    i, n = 0, len(data)
+    while i < n:
+        b = data[i]
+        if b != 0x1B:
+            out.append(b)
+            i += 1
+            continue
+        if i + 1 >= n:
+            break
+        nxt = data[i + 1]
+        if nxt == 0x5B:  # CSI
+            m = _CSI.match(data, i)
+            i = m.end() if m else i + 2
+        elif nxt == 0x5D:  # OSC bis BEL oder ST
+            j = i + 2
+            while j < n and data[j] != 0x07 and not (data[j] == 0x1B and j + 1 < n and data[j + 1] == 0x5C):
+                j += 1
+            i = j + (1 if j < n and data[j] == 0x07 else 2)
+        elif nxt == 0x4F and i + 2 < n:  # SS3 (Pfeile im Anwendungsmodus)
+            i += 3
+        else:
+            i += 2
+    return bytes(out)
+
+
+# --------------------------------------------------------------------------- Ausgabe
+
+
+def render_output(data: bytes) -> list[str]:
+    """Kleines Zeilenmodell der Ausgabe: CR, LF, Backspace und die häufigen CSI-Folgen für
+    Cursor und Löschen (C, D, G, K, P, @). Andere Folgen fallen weg. Genug für das Echo
+    von Shells und Zeileneditoren; ein Bildschirm-Programm (vim) bleibt unverstanden."""
+    lines: list[list[str]] = []
+    cur: list[str] = []
+    pos = 0
+    text_parts: list[tuple[str, Any]] = []
+    i, n = 0, len(data)
+    plain = bytearray()
+
+    def flush_plain() -> None:
+        if plain:
+            text_parts.append(("t", plain.decode("utf-8", errors="replace")))
+            plain.clear()
+
+    while i < n:
+        b = data[i]
+        if b == 0x1B and i + 1 < n and data[i + 1] == 0x5B:
+            m = _CSI.match(data, i)
+            if m is None:
+                i += 2
+                continue
+            flush_plain()
+            text_parts.append(("csi", (m.group(1).decode("ascii", "replace"), chr(m.group(3)[0]))))
+            i = m.end()
+            continue
+        if b == 0x1B:  # OSC, SS3 und andere Folgen: überspringen
+            flush_plain()
+            i += _escape_len(data, i)
+            continue
+        plain.append(b)
+        i += 1
+    flush_plain()
+
+    for kind, val in text_parts:
+        if kind == "csi":
+            params, final = val
+            num = _first_num(params)
+            if final == "C":
+                pos += max(num, 1)
+            elif final == "D":
+                pos = max(0, pos - max(num, 1))
+            elif final == "G":
+                pos = max(0, max(num, 1) - 1)
+            elif final == "K":
+                if num == 0:
+                    del cur[pos:]
+                elif num == 1:
+                    for k in range(min(pos + 1, len(cur))):
+                        cur[k] = " "
+                else:
+                    cur = []
+            elif final == "P":
+                del cur[pos:pos + max(num, 1)]
+            elif final == "@":
+                cur[pos:pos] = [" "] * max(num, 1)
+            continue
+        for ch in val:
+            if ch == "\n":
+                lines.append(cur)
+                cur, pos = [], 0
+            elif ch == "\r":
+                pos = 0
+            elif ch == "\b":
+                pos = max(0, pos - 1)
+            elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+                continue
+            else:
+                while len(cur) < pos:
+                    cur.append(" ")
+                if pos < len(cur):
+                    cur[pos] = ch
+                else:
+                    cur.append(ch)
+                pos += 1
+    lines.append(cur)
+    return ["".join(x).rstrip() for x in lines]
+
+
+def _escape_len(data: bytes, i: int) -> int:
+    """Länge einer Escape-Folge (nicht CSI) ab ``data[i] == ESC``."""
+    n = len(data)
+    if i + 1 >= n:
+        return 1
+    nxt = data[i + 1]
+    if nxt == 0x5D:
+        j = i + 2
+        while j < n and data[j] != 0x07 and not (data[j] == 0x1B and j + 1 < n and data[j + 1] == 0x5C):
+            j += 1
+        if j >= n:
+            return n - i
+        return j - i + (1 if data[j] == 0x07 else 2)
+    if nxt == 0x4F:
+        return min(3, n - i)
+    return 2
+
+
+def _first_num(params: str) -> int:
+    head = params.split(";", 1)[0].lstrip("?<=>!")
+    return int(head) if head.isdigit() else 0
+
+
+def echo_seen(typed: bytes, output: bytes) -> bool | None:
+    """Erscheinen die getippten Zeilen in ``output`` wieder? ``None``: nichts Druckbares getippt.
+
+    Jede getippte Zeile muss der Reihe nach in der gerenderten Ausgabe stehen. Kurze
+    Zeilen (unter :data:`ANYWHERE_MIN` Zeichen) zählen nur, wenn sie eine angezeigte Zeile
+    beenden (so endet ein Befehl, wenn Enter kommt); lange auch mitten in einer Zeile.
+    """
+    want = typed_lines(typed)
+    if not want:
+        return None
+    screen = render_output(output)
+    row = 0
+    for line in want:
+        target = line.rstrip()
+        found = False
+        while row < len(screen):
+            shown = screen[row]
+            row += 1
+            if shown.endswith(target) or (len(target) >= ANYWHERE_MIN and target in shown):
+                found = True
+                break
+        if not found:
+            return False
+    return True
+
+
+def output_window(chunks: Iterable[tuple[int, bytes]], start: int, out_end: int,
+                  typed: bytes) -> bytes | None:
+    """Ausgabe, in der das Echo einer Eingabe stehen müsste: ab ``start`` (Offset beim ersten
+    getippten Byte) bis ``out_end`` und danach bis zum Zeilenende nach jeder getippten Zeile
+    (höchstens :data:`TAIL_MAX` Bytes). ``chunks`` sind ``(stream_off, bytes)`` aus ``term.out``.
+    ``None``, wenn ein Stück fehlt (Lücke, Pause): dann ist das Echo nicht prüfbar."""
+    lines = max(1, typed.count(b"\r") + typed.count(b"\n") - typed.count(b"\r\n"))
+    limit = out_end + TAIL_MAX
+    buf = bytearray()
+    pos = start
+    for off, data in sorted(chunks, key=lambda c: c[0]):
+        end = off + len(data)
+        if end <= pos:
+            continue
+        if off > pos:
+            break  # Lücke
+        piece = data[pos - off: max(0, min(end, limit) - off)]
+        buf += piece
+        pos += len(piece)
+        if pos >= limit:
+            break
+    if pos < out_end:
+        return None
+    head = bytes(buf[: out_end - start])
+    tail = bytes(buf[out_end - start:])
+    cut = 0
+    for _ in range(lines):
+        k = tail.find(b"\n", cut)
+        if k < 0:
+            cut = len(tail)
+            break
+        cut = k + 1
+    return head + tail[:cut]
+
+
+# --------------------------------------------------------------------------- Urteil, Anzeige
+
+
+def classify(data: bytes, *, tty_no_echo: bool | None, output: bytes | None) -> InputVerdict:
+    """Urteil für eine Eingabe (E104). ``output`` aus :func:`output_window` oder ``None``."""
+    printable = sum(len(x) for x in typed_lines(data))
+    if printable == 0:
+        return InputVerdict(False, None, 0)
+    if tty_no_echo:
+        return InputVerdict(True, "tty_no_echo", printable)
+    if output is None:
+        return InputVerdict(True, "no_output", printable)
+    if echo_seen(data, output) is False:
+        return InputVerdict(True, "no_echo_seen", printable)
+    return InputVerdict(False, None, printable)
+
+
+def display_text(data: bytes, verdict: InputVerdict, *, reveal: bool = False) -> str:
+    """Anzeige einer Eingabe: verdeckt :data:`MASK` (ohne Längenangabe), sonst der Text mit
+    sichtbaren Steuerzeichen (``<ESC>``, ``<TAB>``), ohne das abschliessende Enter."""
+    if verdict.hidden and not reveal:
+        return MASK
+    text = data.decode("utf-8", errors="replace")
+    while text.endswith(("\r", "\n")):
+        text = text[:-1]
+    out = visible(text)
+    return out if len(out) <= TEXT_MAX else out[: TEXT_MAX - 1] + "…"
+
+
+def input_view(rec: Any, output: bytes | None, *, reveal: bool = False) -> dict[str, Any]:
+    """JSON-taugliche Sicht auf ein ``term.input``-Event (``EventRecord``). Mit ``reveal`` steht
+    der Klartext auch bei verdeckten Eingaben drin (``revealed = true``)."""
+    h: Mapping[str, Any] = rec.header
+    data = rec.body or b""
+    verdict = classify(data, tty_no_echo=bool(h.get("no_echo")), output=output)
+    return {
+        "seq": rec.seq, "terminal_id": rec.terminal_id, "stream_off": h.get("stream_off"),
+        "out_end": h.get("out_end"), "t_shim_ns": h.get("t_shim_ns"), "mono_ns": h.get("mono_ns"),
+        "boot_id": rec.boot_id, "length": h.get("length", len(data)), "paste": bool(h.get("paste")),
+        "redacted": rec.body is None, "hidden": verdict.hidden, "reason": verdict.reason,
+        "revealed": bool(reveal and verdict.hidden), "text": display_text(data, verdict, reveal=reveal),
+    }
+
+
+# --------------------------------------------------------------------------- Journal
+
+
+def _chunks(journal: Any, terminal_id: str, start: int, end: int) -> list[tuple[int, bytes]]:
+    sl = getattr(journal, "stream_slice", None)
+    if callable(sl):
+        return list(sl(terminal_id, start, end))
+    out = []
+    for r in journal.iter_events(kinds=["term.out"], terminal_id=terminal_id):
+        if r.body is None or r.stream_off is None:
+            continue
+        if r.stream_off < end and r.stream_off + len(r.body) > start:
+            out.append((int(r.stream_off), r.body))
+    return out
+
+
+def _window_for(journal: Any, rec: Any) -> bytes | None:
+    h = rec.header
+    start, out_end = int(h.get("stream_off", 0)), int(h.get("out_end", 0))
+    if rec.terminal_id is None:
+        return None
+    chunks = _chunks(journal, rec.terminal_id, start, out_end + TAIL_MAX)
+    return output_window(chunks, start, out_end, rec.body or b"")
+
+
+def collect_inputs(journal: Any, *, terminal_id: str | None = None, limit: int = 200,
+                   before_seq: int | None = None) -> list[dict[str, Any]]:
+    """Die neuesten ``limit`` Eingaben (älteste zuerst), verdeckt nach E104. Nie aufgedeckt."""
+    limit = max(1, min(int(limit), 1000))
+    keep: deque[Any] = deque(maxlen=limit)
+    for rec in journal.iter_events(kinds=["term.input"], terminal_id=terminal_id):
+        if before_seq is not None and rec.seq >= before_seq:
+            break
+        keep.append(rec)
+    return [input_view(rec, _window_for(journal, rec)) for rec in keep]
+
+
+def input_by_seq(journal: Any, seq: int, *, reveal: bool = False) -> dict[str, Any] | None:
+    """Eine Eingabe nach ``seq`` (für das ausdrückliche Aufdecken). ``None``, wenn es kein
+    ``term.input`` ist."""
+    rec = journal.get(int(seq))
+    if rec is None or rec.kind != "term.input":
+        return None
+    return input_view(rec, _window_for(journal, rec), reveal=reveal)

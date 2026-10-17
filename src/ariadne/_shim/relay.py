@@ -42,7 +42,7 @@ from ariadne._shim.transport import Transport
 from ariadne.ctxrules import ContextStack, Stage, context_argv
 from ariadne.paths import default_paths
 
-__all__ = ["Shim"]
+__all__ = ["Shim", "password_mode"]
 
 READ_SIZE = 65536
 DISP_HIGH = 256 * 1024
@@ -70,6 +70,18 @@ MUX_RECHECK_S = 0.25  # danach ein «kein Multiplexer» höchstens so oft neu pr
 # --------------------------------------------------------------------------- #
 # Hilfen
 # --------------------------------------------------------------------------- #
+
+
+def password_mode(fd: int) -> bool:
+    """Steht das Kind im Passwortmodus (E104)? ``ECHO`` aus und ``ICANON`` an ist das Muster
+    von ``getpass`` (sudo, ssh, su, mysql). Zeileneditoren (ZLE, readline) schalten beide aus
+    und echoen selbst; das ist kein Passwort. Linux liefert über den Master die Einstellungen
+    der Slave-Seite. Fehler ergeben ``False`` (dann entscheidet der Echo-Vergleich)."""
+    try:
+        lflag = termios.tcgetattr(fd)[3]
+    except (termios.error, OSError, ValueError, TypeError, IndexError):
+        return False
+    return not lflag & termios.ECHO and bool(lflag & termios.ICANON)
 
 
 def _set_nonblock(fd: int, on: bool) -> int:
@@ -723,11 +735,11 @@ class Shim:
         t.add_event(kind, fields)
 
     def _send_input(self, data: bytes, off: int, out_end: int, wall: int, mono: int,
-                    tix: tuple[tuple[int, int], ...], paste: bool) -> None:
+                    tix: tuple[tuple[int, int], ...], paste: bool, no_echo: bool = False) -> None:
         t = self.transport
         if t is None or self._rec_broken or not data:
             return
-        t.add_input(data, off, out_end, wall, mono, tix, paste=paste)
+        t.add_input(data, off, out_end, wall, mono, tix, paste=paste, no_echo=no_echo)
 
     def _record_input(self, data: bytes, now: float) -> None:
         """Eingabe ans Kind aufzeichnen (E26), nur wenn auch die Ausgabe aufgenommen wird."""
@@ -737,7 +749,7 @@ class Shim:
             if self._check_mux(now):
                 return
             wall, mono = self._now_times()
-            self.inputs.feed(data, self._offset(), wall, mono, now)
+            self.inputs.feed(data, self._offset(), wall, mono, now, no_echo=password_mode(self.master))
         except Exception:
             self._broken()
 

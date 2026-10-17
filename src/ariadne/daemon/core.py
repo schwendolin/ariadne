@@ -26,8 +26,15 @@ In ``locked`` und ``preroll`` hält der Daemon Rahmen und Events im Vorlauf und
 bestätigt sie sofort. ``ariadne start`` übernimmt ihn auf Wunsch mit den
 Original-Zeiten (``origin="preroll"``). In ``paused``, ``held`` und ``off`` werden
 Rahmen bestätigt und verworfen. Ausfallpuffer: Ist der Daemon neu gestartet (nicht
-``ariadne lock``) und ein Terminal an das noch aktive Projekt gebunden, gilt für das,
-was es sendet (auch seinen Ring), kein Vorlauf-Fenster, nur das Leerlauf-Ende.
+``ariadne lock``), solange ein Projekt aktiv ist, gilt für das, was ein Terminal sendet
+(auch seinen Ring), kein Vorlauf-Fenster, nur das Leerlauf-Ende, sofern es an dieses
+Projekt oder an keines gebunden ist. ``start`` und ``unlock`` übernehmen den Ausfallpuffer
+ohne Rückfrage (E102); nur der Vorlauf ohne Projekt und die gesperrte Zeit nach
+``ariadne lock`` folgen ``adopt_preroll`` (E95, E103).
+
+**Entsperren (E101).** ``unlock`` öffnet ein aktives, nicht gestopptes Projekt wie
+``start`` ohne Projektnamen; die Aufnahme läuft sofort. ``lock`` sperrt nur, das Projekt
+bleibt aktiv (E103).
 
 Wiederaufnahme im selben Projekt (Pause, ``lock``/``stop`` und ``start``, A -> B -> A)
 beginnt am Offset des Shims; :meth:`Daemon._ensure_open` richtet am gespeicherten
@@ -51,6 +58,7 @@ Shim-Zeit, wenn der Daemon sie am Offset kennt. Leerlauf misst Bootzeit und Wand
 (Suspend zählt), die Pause des Nutzers hat zusätzlich eine monotone Frist.
 
 **Eingaben (E26).** INPUT-Rahmen werden zu ``term.input`` (Body = Bytes). Nie in Logs.
+Das Flag ``no_echo`` des Rahmens (Passwortmodus des Kindes, E104) geht als Feld mit.
 
 **Schwärzen (E72).** Der Daemon schwärzt nichts mehr vor dem Speichern. Eigene
 Secrets ersetzt :attr:`Daemon.redactor` an den Ausgängen
@@ -88,8 +96,8 @@ import logging
 import math
 import os
 import time
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any, Protocol
 
 from ariadne import __version__, events
 from ariadne._shim import protocol as P
@@ -142,12 +150,38 @@ from ariadne.sources.localaddr import read_local_addrs
 from ariadne.sources.safeopen import UnsafeFile
 from ariadne.store.api import AppendItem, EventRecord, JournalError
 
-__all__ = ["Daemon", "OpError", "CommitHook", "MarkHook", "STATES"]
+__all__ = ["Daemon", "OpError", "CommitHook", "MarkHook", "Listener", "DaemonExtension", "NOTIFY_KINDS",
+           "STATES"]
 
 log = logging.getLogger("ariadne.daemon")
 
 CommitHook = Callable[[list[EventRecord]], Any]
 MarkHook = Callable[[EventRecord, MarkContext | None], Any]
+Listener = Callable[[str, dict[str, Any]], Any]
+
+# Ereignisse für :meth:`Daemon.add_listener` (Vertrag v0.1-Server). ``data`` nie mit Zieldaten.
+NOTIFY_KINDS = {
+    "terminal": "terminal_id, change: opened | closed | state | context | command",
+    "project": "project_id | None, slug | None, change: opened | closed, reason (closed: stop, idle, "
+               "switch, lock, shutdown)",
+    "unlocked": "Operator entsperrt",
+    "locked": "ariadne lock (Projekt geschlossen, bleibt aktiv)",
+    "presentation": "on: bool, source",
+    "stopping": "Daemon endet",
+}
+
+
+class DaemonExtension(Protocol):
+    """Erweiterung mit eigenem Lebenszyklus im Loop des Daemons (z. B. der Web-Server).
+
+    ``start`` nach den Sockets (Fehler: Erweiterung bleibt aus, der Daemon läuft weiter),
+    ``stop`` als Erstes beim Beenden (SSE und HTTP vor dem Schliessen des Projekts)."""
+
+    name: str
+
+    async def start(self, daemon: Daemon) -> None: ...
+
+    async def stop(self) -> None: ...
 
 STATES = ("paused", "held", "on", "locked", "preroll", "off")
 TERM_EVENTS = frozenset({
@@ -224,6 +258,7 @@ class Daemon:
         wall_clock: Callable[[], int] | None = None,
         mono_clock: Callable[[], int] | None = None,
         boot_clock: Callable[[], int] | None = None,
+        extensions: Sequence[DaemonExtension] = (),
     ) -> None:
         self.paths = paths
         self.check_peer_comm = check_peer_comm
@@ -276,6 +311,11 @@ class Daemon:
         self.add_commit_hook(self.sources.on_commit)
         self.add_mark_hook(self.sources.on_mark)
         self._update_redactor()
+        # Erweiterungen (Web-Server, Vertrag v0.1-Server): Ereignisse, ctl-Operationen, Start/Stopp
+        self.presentation = False  # Präsentationsmodus (Architektur 7.8), global für alle Sitzungen
+        self.extra_ops: dict[str, Callable[[Daemon, dict[str, Any]], Any]] = {}
+        self._listeners: list[Listener] = []
+        self.extensions: list[DaemonExtension] = list(extensions)
 
     # ================================================================== #
     # Erweiterungspunkte
@@ -285,6 +325,26 @@ class Daemon:
 
     def add_mark_hook(self, fn: MarkHook) -> None:
         self._mark_hooks.append(fn)
+
+    def add_listener(self, fn: Listener) -> None:
+        """``fn(kind, data)`` für Ereignisse des Daemons (Liste in :data:`NOTIFY_KINDS`).
+
+        ``data`` enthält nie Zieldaten oder Secrets, nur Kennungen und feste Werte. Aufruf
+        im Loop-Thread; Fehler werden nur mit ihrer Klasse geloggt. Nutzer: Web-Server
+        (Sitzungen beenden, SSE) und API (Ereignisquellen).
+        """
+        self._listeners.append(fn)
+
+    def _notify(self, kind: str, **data: Any) -> None:
+        for fn in list(self._listeners):
+            self._call_hook(fn, kind, dict(data))
+
+    def add_ops(self, ops: Mapping[str, Callable[[Daemon, dict[str, Any]], Any]]) -> None:
+        """Zusätzliche ctl-Operationen (z. B. ``ui.code``). Eingebaute lassen sich nicht ersetzen."""
+        for name, fn in ops.items():
+            if name in _OPS or name in self.extra_ops:
+                raise ValueError(f"ctl-Operation {name} gibt es schon")
+            self.extra_ops[name] = fn
 
     def _spawn(self, coro: Awaitable[Any]) -> None:
         task = asyncio.ensure_future(coro)
@@ -352,6 +412,14 @@ class Daemon:
         self._servers = [term, ctl]
         self._writer_task = asyncio.ensure_future(self._writer_loop())
         self._started = True
+        for ext in self.extensions:
+            # Ein Fehler einer Erweiterung (z. B. Web-Server mit Nicht-Loopback-Bindung, R1) lässt
+            # sie aus, die Aufnahme läuft weiter (fail-closed für die Erweiterung).
+            try:
+                await ext.start(self)
+            except Exception as exc:
+                log.error("Erweiterung %s nicht gestartet (%s)", getattr(ext, "name", "?"),
+                          type(exc).__name__)
         hardening.sd_notify("READY=1")
         log.info("ariadned %s bereit", __version__)
 
@@ -360,6 +428,13 @@ class Daemon:
             return
         self._started = False
         hardening.sd_notify("STOPPING=1")
+        self._notify("stopping")
+        for ext in reversed(self.extensions):
+            try:
+                await ext.stop()
+            except Exception as exc:
+                log.error("Erweiterung %s nicht sauber beendet (%s)", getattr(ext, "name", "?"),
+                          type(exc).__name__)
         self._stopping = True  # ab hier nichts mehr annehmen: der Shim behält es im Ring
         for srv in self._servers:
             srv.close()
@@ -556,8 +631,11 @@ class Daemon:
     def _send_state(self, t: Terminal, force: bool = False) -> None:
         state = self._state(t)
         if force or state != t.last_state:
+            changed = state != t.last_state
             t.last_state = state
             self._send(t, P.encode_json(P.STATE, state))
+            if changed:
+                self._notify("terminal", terminal_id=t.terminal_id, change="state")
 
     def _flash(self, t: Terminal, text: str, seconds: float = 5.0) -> None:
         """Kurze Rückmeldung im Titel des Terminals."""
@@ -825,6 +903,7 @@ class Daemon:
         self._refresh(t)
         if t.acked_seq:
             self._send(t, P.encode_json(P.ACK, {"seq": t.acked_seq}))
+        self._notify("terminal", terminal_id=tid, change="opened")
         return t
 
     def _on_bye(self, t: Terminal) -> None:
@@ -849,6 +928,7 @@ class Daemon:
             t.conn = None
             self._departed[t.terminal_id] = t  # Vorlauf bleibt übernehmbar
         log.info("Terminal beendet")
+        self._notify("terminal", terminal_id=t.terminal_id, change="closed")
 
     def _on_frame(self, t: Terminal, ftype: int, payload: bytes) -> None:
         if self._stopping:
@@ -890,7 +970,7 @@ class Daemon:
             if t.pause is not None and t.pause.covers(fr.t_mono_ns, fr.t_wall_ns):
                 return  # Schlüsselmaterial: auch Eingaben (Passphrase) verwerfen
             fields = {"out_end": fr.out_end, "wall": fr.t_wall_ns, "mono": fr.t_mono_ns, "tix": fr.tix,
-                      "paste": fr.paste}
+                      "paste": fr.paste, "no_echo": fr.no_echo}
             if t.recording:
                 self._rec_input(t, fr.stream_off, fields, fr.data, recv, "shim", entry)
             elif self.state_of(t) in ("preroll", "locked"):
@@ -971,6 +1051,7 @@ class Daemon:
             "t_shim_ns": f["wall"], "mono_ns": mono, "tix": [list(x) for x in f.get("tix") or ()] or None,
             "paste": True if f.get("paste") else None,
             "time_suspect": True if self._time_suspect(int(f["wall"]), mono, recv) else None,
+            "no_echo": True if f.get("no_echo") else None,  # E104: Passwortmodus beim Tippen
         }
         try:
             header = events.validate_header("term.input", header)
@@ -1000,8 +1081,12 @@ class Daemon:
         self.preroll.add(t.terminal_id, held, stack_before or t.stack)
 
     def _outage(self, t: Terminal) -> bool:
-        return (not self._user_locked and self.project is None and t.bound_project_id is not None
-                and t.bound_project_id == self._active_id())
+        """Ausfallpuffer (E102): Daemon neu gestartet, Projekt aktiv, aber nicht offen und nicht
+        durch ``ariadne lock`` gesperrt; das Terminal gehört zu diesem Projekt oder zu keinem."""
+        if self._user_locked or self.project is not None:
+            return False
+        active = self._active_id()
+        return active is not None and t.bound_project_id in (None, active)
 
     # ---- Events vom Shim --------------------------------------------------- #
     def _process_event(self, t: Terminal, obj: dict[str, Any], entry: AckEntry) -> None:
@@ -1050,6 +1135,8 @@ class Daemon:
                                        t.stack.is_local(), local_before)
             self._store_event(t, kind, header, origin="shim", recv=self._wall(), mark_ctx=mark_ctx)
             entry.need_gen = self.writer.pending_gen
+            if kind == "term.mark" and header.get("mark") in ("C", "D"):
+                self._notify("terminal", terminal_id=t.terminal_id, change="command")
         elif state in ("preroll", "locked"):
             self._hold(t, "event", int(off or 0), self._wall(), header.get("mono_ns"),
                        fields={"kind": kind, **header}, stack_before=stack_before)
@@ -1188,11 +1275,15 @@ class Daemon:
 
     def _ctx_decision(self, t: Terminal, op: str, *, host: Any = None, user: Any = None,
                       stage_kind: Any = None, origin: str, source: str,
-                      shim_off: Any = None) -> dict[str, Any]:
+                      shim_off: Any = None, from_off: Any = None) -> dict[str, Any]:
+        """Kontext-Entscheid. ``from_off`` (nur ``set``): rückwirkend ab diesem Offset (Web-API,
+        Kontext klären); der Live-Stapel ändert sich nur, wenn ``from_off`` in der obersten Stufe liegt."""
         host_n = normalize_host(host) if isinstance(host, str) and host.strip() else None
         user_n = normalize_user(user) if isinstance(user, str) and user.strip() else None
         if stage_kind is not None and (not isinstance(stage_kind, str) or stage_kind not in STAGE_KINDS):
             raise ValueError("ungültige Stufe")
+        if from_off is not None and (op != "set" or type(from_off) is not int or from_off < 0):
+            raise ValueError("from_off nur für set, als Offset ab 0")
         if t.recording:
             self._ensure_open(t)
             off = t.recv_end
@@ -1204,8 +1295,12 @@ class Daemon:
         if op == "set":
             if host_n is None and user_n is None and stage_kind is None:
                 raise ValueError("nichts zu setzen")
-            t.stack.set_top(host=host_n, user=user_n, kind=stage_kind, source=source, offset=off)
-            kind, header = "d.ctx.set", {"terminal_id": tid, "from_off": off, "host": host_n,
+            if from_off is not None and from_off > off:
+                raise ValueError("from_off liegt in der Zukunft")
+            if from_off is None or from_off >= t.stack.top().opened_at:
+                t.stack.set_top(host=host_n, user=user_n, kind=stage_kind, source=source, offset=off)
+            start = off if from_off is None else from_off
+            kind, header = "d.ctx.set", {"terminal_id": tid, "from_off": start, "host": host_n,
                                          "user": user_n, "kind": stage_kind}
         elif op == "push":
             t.stack.push(kind=stage_kind or "unknown", host=host_n, user=user_n, offset=off, source=source)
@@ -1220,6 +1315,7 @@ class Daemon:
             raise ValueError("unbekannte Kontext-Operation")
         header = {k: v for k, v in header.items() if v is not None}
         t.ctx_version += 1
+        self._notify("terminal", terminal_id=tid, change="context")
         stored = self._can_store_decision(t) and t.recording
         if stored:
             self.writer.add_event(AppendItem(kind, header, origin=origin, terminal_id=tid, stream_off=off), t)
@@ -1358,6 +1454,7 @@ class Daemon:
         self._check_local_addrs(force=True)
         self._spawn(self._clock_task(new))
         log.info("Projekt geöffnet")
+        self._notify("project", project_id=new.info.id, slug=new.info.slug, change="opened")
         if refresh:
             self._refresh_all()
         return new
@@ -1390,6 +1487,7 @@ class Daemon:
             head = p.close()
             self._update_redactor()
         log.info("Projekt geschlossen")
+        self._notify("project", project_id=p.info.id, slug=p.info.slug, change="closed", reason=reason)
         return head
 
     def _end_project(self, reason: str, *,
@@ -1404,22 +1502,27 @@ class Daemon:
         self._refresh_all()
         return slug, head
 
-    def _adopt_preroll(self, p: OpenProject) -> dict[str, Any]:
-        """Vorlauf ins offene Projekt schreiben (E95). Gibt Terminals, Sekunden und Bytes zurück."""
+    def _adopt_preroll(self, p: OpenProject, *, outage_only: bool = False) -> dict[str, Any]:
+        """Vorlauf ins offene Projekt schreiben (E95). Gibt Terminals, Sekunden und Bytes zurück.
+
+        ``outage_only``: nur Ausfallpuffer übernehmen (E102), den übrigen Vorlauf verwerfen.
+        ``outage_terminals`` zählt die übernommenen Ausfallpuffer.
+        """
         bufs = []
         for tid in list(self.preroll.terminals()):
             buf = self.preroll.take(tid)
             if buf is not None:
                 bufs.append(buf)
         bufs.sort(key=lambda b: b.oldest_mono() or 0)
-        done = {"terminals": 0, "seconds": 0, "bytes": 0}
+        done = {"terminals": 0, "seconds": 0, "bytes": 0, "outage_terminals": 0}
         now = self._mono()
         for buf in bufs:
             tid = buf.terminal_id
             t = self.terminals.get(tid) or self._departed.get(tid)
             entries = [e for e in buf.entries if e.bound in (None, p.info.id)]
             departed = tid not in self.terminals
-            if (t is None or not entries or t.recording
+            outage = buf.outage
+            if (t is None or not entries or t.recording or (outage_only and not outage)
                     or (not departed and self.state_of(t) != "on")):
                 buf.wipe()
                 continue
@@ -1428,6 +1531,7 @@ class Daemon:
             finally:
                 buf.wipe()
             done["terminals"] += 1
+            done["outage_terminals"] += 1 if outage else 0
             done["bytes"] += n
             done["seconds"] = max(done["seconds"], math.ceil((now - entries[0].mono) / 1e9))
             self._departed.pop(tid, None)
@@ -1520,7 +1624,7 @@ class Daemon:
 
     async def call(self, op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         """Führt eine ctl-Operation aus (auch direkt aus Tests oder der Web-API)."""
-        fn = _OPS.get(op)
+        fn = _OPS.get(op) or self.extra_ops.get(op)
         if fn is None:
             return {"ok": False, "error": {"code": "unknown_op", "message": "unbekannte Operation"}}
         try:
@@ -1627,32 +1731,73 @@ class Daemon:
         return {"recovery_code": code, "operator_id": op.operator_id, "handle": op.handle}
 
     async def op_unlock(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Entsperrt nur; geöffnet wird mit ``start`` (``reopened`` ist immer ``None``)."""
+        """Entsperrt und öffnet ein aktives, nicht gestopptes Projekt wie ``start`` ohne Slug (E101).
+
+        ``open_active`` (Standard ``True``): aktives Projekt öffnen. ``adopt_preroll`` wie bei
+        ``start`` (gilt nur für den Vorlauf und die gesperrte Zeit nach ``lock``; den
+        Ausfallpuffer nach einem Neustart übernimmt ``unlock`` immer, E102). ``reopened`` ist
+        das Ergebnis wie bei ``start`` oder ``None``; scheitert das Öffnen, bleibt der Tresor
+        entsperrt und ``reopen_error`` nennt ``code`` und ``message``.
+        """
         passphrase = _arg_str(args, "passphrase", required=False)
         recovery = _arg_str(args, "recovery_code", required=False, max_len=128)
+        open_active = args.get("open_active", True) is not False
+        adopt = args.get("adopt_preroll") is True
         if self.operator is not None:
-            return {"already": True, "handle": self.operator.handle, "operator_id": self.operator.operator_id,
-                    "reopened": None}
+            res: dict[str, Any] = {"already": True, "handle": self.operator.handle,
+                                   "operator_id": self.operator.operator_id, "reopened": None}
+            return self._reopen_active(res, adopt) if open_active else res
         if (passphrase is None) == (recovery is None):
             raise OpError("invalid", "genau eines: passphrase oder recovery_code")
         op = await asyncio.to_thread(self.vault.unlock, passphrase, recovery_code=recovery)
         if self.operator is not None:  # gleichzeitiges Entsperren
             op.wipe()
-            return {"already": True, "handle": self.operator.handle, "operator_id": self.operator.operator_id,
-                    "reopened": None}
+            res = {"already": True, "handle": self.operator.handle, "operator_id": self.operator.operator_id,
+                   "reopened": None}
+            return self._reopen_active(res, adopt) if open_active else res
         self.operator = op
         self._runtime_secrets = [("ariadne:passphrase", passphrase)] if passphrase else []
         self._update_redactor()
         self._activity()
         log.info("Operator entsperrt")
+        self._notify("unlocked")
+        res = {"already": False, "handle": op.handle, "operator_id": op.operator_id, "reopened": None}
+        if open_active:
+            return self._reopen_active(res, adopt)
         self._refresh_all()
-        return {"already": False, "handle": op.handle, "operator_id": op.operator_id, "reopened": None}
+        return res
+
+    def _active_slug(self) -> str | None:
+        """Slug des aktiven, nicht gestoppten Projekts, das noch nicht offen ist (für ``start``
+        ohne Slug und ``unlock``). Fehlt sein Ordner, gilt es als beendet (Befund F11)."""
+        a = self.active
+        if self.project is not None or a is None or a["stopped"]:
+            return None
+        slug = str(a["slug"])
+        if slug not in {x.slug for x in ProjectService(self.paths).list()}:
+            self._set_active(slug, str(a["project_id"]), stopped=True, end_reason="missing")
+            self._refresh_all()
+            raise OpError("no_active_project", f"Projekt {slug} gibt es nicht mehr. "
+                          "ariadne start <slug> --target <ziel>")
+        return slug
+
+    def _reopen_active(self, res: dict[str, Any], adopt: bool) -> dict[str, Any]:
+        """Nach dem Entsperren: aktives Projekt öffnen (E101). Fehler bleiben im Ergebnis."""
+        try:
+            slug = self._active_slug()
+            if slug is not None:
+                res["reopened"] = self._start_open(slug, None, {}, None, "lab", adopt, not res["already"])
+        except Exception as exc:  # Entsperren gilt trotzdem; der Grund geht an die CLI
+            res["reopen_error"] = _error(exc)
+        self._refresh_all()
+        return res
 
     def op_lock(self, args: dict[str, Any]) -> dict[str, Any]:
         head = self._close_current("lock")
         self._lock_operator()
         self._user_locked = True
         log.info("Operator gesperrt")
+        self._notify("locked")
         self._refresh_all()
         return {"closed_project": head is not None}
 
@@ -1666,25 +1811,18 @@ class Daemon:
         adopt = args.get("adopt_preroll") is True
         self._activity()
         if not slug:
-            a = self.active
-            if a is not None and not a["stopped"]:
-                slug = str(a["slug"])
-                if self.project is None and slug not in {x.slug for x in ProjectService(self.paths).list()}:
-                    # Projektordner gelöscht: nicht ewig «gesperrt» bleiben (Befund F11)
-                    self._set_active(slug, str(a["project_id"]), stopped=True, end_reason="missing")
-                    self._refresh_all()
-                    raise OpError("no_active_project", f"Projekt {slug} gibt es nicht mehr. "
-                                  "ariadne start <slug> --target <ziel>")
-            elif self.project is not None:
+            if self.project is not None:
                 slug = self.project.info.slug
             else:
+                slug = self._active_slug()  # Projektordner gelöscht: Fehler, nicht ewig «gesperrt»
+            if not slug:
                 raise OpError("no_active_project",
                               "Kein aktives Projekt. ariadne start <slug> --target <ziel>")
         unlocked = False
         if self.operator is None:
             if not passphrase:
                 raise OpError("locked", "gesperrt: Passphrase nötig")
-            await self.op_unlock({"passphrase": passphrase})
+            await self.op_unlock({"passphrase": passphrase, "open_active": False})
             unlocked = True
         try:
             return self._start_open(slug, targets, args, name, profile, adopt, unlocked)
@@ -1711,13 +1849,13 @@ class Daemon:
         switched = before if before is not None and before != p.info.slug else None
         for t in outage:
             t.gap_hint = t.gap_hint or "daemon_down"  # was der Ausfallpuffer nicht mehr hat
-        if adopt:
-            pre = self._adopt_preroll(p)
-            pre["adopted"] = pre["terminals"] > 0
-        else:
-            info = self.preroll.info()
-            pre = {"terminals": 0, "seconds": 0, "bytes": 0, "adopted": False,
-                   "discarded_terminals": info["terminals"], "discarded_seconds": info["seconds"]}
+        # Ausfallpuffer immer (E102), den übrigen Vorlauf nur auf Wunsch (E95, E103)
+        info = self.preroll.info()
+        pre = self._adopt_preroll(p, outage_only=not adopt)
+        pre["adopted"] = pre["terminals"] > 0
+        if not adopt:
+            pre["discarded_terminals"] = info["ask_terminals"]
+            pre["discarded_seconds"] = info["ask_seconds"]
             self.preroll.discard()
             self._departed.clear()
         self._refresh_all()
@@ -1766,11 +1904,12 @@ class Daemon:
         return {"paused": out}
 
     def op_term_resume(self, args: dict[str, Any]) -> dict[str, Any]:
+        source = args.get("source") if args.get("source") in ("cli", "webui") else "cli"
         self._activity()
         out = []
         for t in self._pause_targets(args):
             if t.pause_until_ns is not None:
-                self._set_pause(t, 0, "cli")
+                self._set_pause(t, 0, str(source))
                 self._flash(t, "Aufnahme läuft weiter")
                 out.append(t.terminal_id)
         return {"resumed": out}
@@ -1833,12 +1972,44 @@ class Daemon:
         return {"terminal_id": t.terminal_id, "stack": t.stack.snapshot(), "label": t.stack.label()}
 
     def _op_ctx(self, op: str, args: dict[str, Any]) -> dict[str, Any]:
+        """``ctx.set``/``push``/``pop``. ``source``: ``cli`` (Standard) oder ``webui`` (Web-API).
+
+        ``from_off`` (nur ``set``) setzt rückwirkend ab diesem Offset. Ist das Terminal nicht mehr
+        verbunden, geht ein rückwirkendes ``set`` direkt als ``d.ctx.set`` ins offene Projekt."""
+        source = "webui" if args.get("source") == "webui" else "cli"
+        from_off = args.get("from_off")
+        tid = _arg_str(args, "terminal_id", max_len=64)
+        if op == "set" and from_off is not None and str(tid) not in self.terminals:
+            return self._ctx_retro(str(tid), args, from_off, source)
         t = self._terminal(args)
         try:
             return self._ctx_decision(t, op, host=args.get("host"), user=args.get("user"),
-                                      stage_kind=args.get("kind"), origin="cli", source="cli")
+                                      stage_kind=args.get("kind"), origin=_origin(source), source=source,
+                                      from_off=from_off)
         except ValueError as exc:
             raise OpError("invalid", str(exc)) from None
+
+    def _ctx_retro(self, tid: str, args: dict[str, Any], from_off: Any, source: str) -> dict[str, Any]:
+        """Rückwirkendes ``d.ctx.set`` für ein Terminal, das nicht mehr verbunden ist."""
+        self._require_project()
+        if type(from_off) is not int or from_off < 0:
+            raise OpError("invalid", "from_off ungültig")
+        host, user, kind = args.get("host"), args.get("user"), args.get("kind")
+        try:
+            host_n = normalize_host(host) if isinstance(host, str) and host.strip() else None
+            user_n = normalize_user(user) if isinstance(user, str) and user.strip() else None
+        except ValueError as exc:
+            raise OpError("invalid", str(exc)) from None
+        if kind is not None and (not isinstance(kind, str) or kind not in STAGE_KINDS):
+            raise OpError("invalid", "ungültige Stufe")
+        if host_n is None and user_n is None and kind is None:
+            raise OpError("invalid", "nichts zu setzen")
+        header = {k: v for k, v in {"terminal_id": tid, "from_off": from_off, "host": host_n, "user": user_n,
+                                     "kind": kind}.items() if v is not None}
+        self.submit(AppendItem("d.ctx.set", header, origin=_origin(source), terminal_id=tid,
+                               stream_off=from_off))
+        self.writer.flush_now()
+        return {"stack": None, "stored": True}
 
     def op_ctx_set(self, args: dict[str, Any]) -> dict[str, Any]:
         return self._op_ctx("set", args)
@@ -2032,6 +2203,19 @@ class Daemon:
         log.info("Datei importiert")
         return res
 
+    def op_presentation(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Präsentationsmodus (Architektur 7.8): ``on`` setzen oder ohne ``on`` abfragen.
+        Maskiert wird auf dem Server (Web-API); Ereignis ``presentation`` an alle Sitzungen."""
+        on = args.get("on")
+        if on is not None:
+            if not isinstance(on, bool):
+                raise OpError("invalid", "on muss true oder false sein")
+            source = args.get("source") if args.get("source") in ("cli", "webui", "hotkey") else "cli"
+            if on != self.presentation:
+                self.presentation = on
+                self._notify("presentation", on=on, source=source)
+        return {"on": self.presentation}
+
     def op_shutdown(self, args: dict[str, Any]) -> dict[str, Any]:
         asyncio.get_running_loop().call_soon(self._stop.set)
         return {"stopping": True}
@@ -2128,6 +2312,7 @@ _OPS: dict[str, Callable[[Daemon, dict[str, Any]], Any]] = {
     "keystep.mark": Daemon.op_keystep_mark,
     "import": Daemon.op_import,
     "shutdown": Daemon.op_shutdown,
+    "presentation": Daemon.op_presentation,
 }
 # Operationen der Auswertung (Ansichten, Suche, Claims, Reparse) liegen in ops_eval.
 _OPS.update(ops_eval.OPS)

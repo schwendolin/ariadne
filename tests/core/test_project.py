@@ -192,3 +192,17 @@ def test_head_check_and_readonly_journal(paths, operator):
     p2 = svc.open("kette")
     assert not p2.head_ok and not p2.journal.verify().ok
     p2.close()
+
+
+def test_close_writes_chain_head_without_secrets(paths, operator):
+    """Sicherung (E91, Vertrag v0.1-Server 3.5): Der Kettenkopf liegt nach dem Schliessen lesbar in
+    ``.vault/head.json`` (0600), ohne dass jemand das Projekt entsperren muss."""
+    svc = ProjectService(paths, operator)
+    info = svc.create("kopf", ["10.10.10.3"])
+    p = svc.open("kopf")
+    seq, head = p.close()
+    f = info.vault / "head.json"
+    data = json.loads(f.read_text())
+    assert data["head_seq"] == seq and data["head_hash"] == head and data["project_id"] == info.id
+    assert data["format"] == "ariadne.chain-head/1"
+    assert stat.S_IMODE(os.stat(f).st_mode) == 0o600

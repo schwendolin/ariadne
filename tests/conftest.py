@@ -27,6 +27,11 @@ def pytest_configure(config: pytest.Config) -> None:
     # Der Normalizer-Test liest die Umgebungsvariable beim Import.
     if config.getoption("--update-golden"):
         os.environ["ARIADNE_UPDATE_GOLDEN"] = "1"
+    # pyproject.toml bleibt unverändert; Marker, die neue Teile brauchen, stehen hier.
+    config.addinivalue_line("markers", "remote: braucht sshd (Tunnel-Tests), wird ohne sshd übersprungen")
+    config.addinivalue_line("markers", "web: startet den Web-Server auf einem freien Loopback-Port")
+    # Daemons, die Tests als Prozess starten, belegen nie den echten Port 7330.
+    os.environ.setdefault("ARIADNE_WEB", "0")
 
 
 @pytest.fixture

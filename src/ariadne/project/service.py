@@ -6,6 +6,7 @@ Layout::
       scans/ loot/ imports/ screenshots/ exports/
       .vault/                         0700
         manifest.json                 Klartext, ohne Kundendaten
+        head.json                     Kettenkopf beim letzten Schliessen (Klartext, nur Hash)
         slots/operator.age            Projektschlüssel, versiegelt an den Operator
         journal.db derived.db state.db
         blobs/
@@ -62,6 +63,7 @@ _DERIVED_RE = re.compile(r"^derived(\.[a-z0-9-]{1,32})?\.db$")
 WORKSPACE_DIRS = ("scans", "loot", "imports", "screenshots", "exports")
 MANIFEST_FORMAT = "ariadne.project-manifest/1"
 SLOT_FORMAT = "ariadne.project-slot/1"
+HEAD_FORMAT = "ariadne.chain-head/1"  # .vault/head.json, beim Schliessen geschrieben
 
 
 class ProjectError(RuntimeError):
@@ -176,6 +178,14 @@ class OpenProject:
         self.settings_version = int(last.header["version"])
         return self.settings
 
+    def _write_head(self, seq: int, head_hash: str) -> None:
+        """Kettenkopf beim Schliessen nach ``.vault/head.json`` (0600, ohne Geheimnisse): Sicherung
+        und Wiederherstellung (E91) vergleichen ihn, ohne das Projekt zu entsperren."""
+        data = {"format": HEAD_FORMAT, "project_id": self.info.id, "head_seq": int(seq),
+                "head_hash": head_hash, "closed_utc": _now_utc()}
+        with contextlib.suppress(OSError):
+            write_private(self.info.vault / "head.json", json.dumps(data, sort_keys=True).encode() + b"\n")
+
     def close(self, reason: str = "close") -> tuple[int, str]:
         """Checkpoint-Event, WAL kürzen, Schlüssel verwerfen, flock lösen. Gibt den Kettenkopf zurück."""
         if self.closed:
@@ -187,6 +197,7 @@ class OpenProject:
                                 {"reason": reason, "head_seq": head_seq, "head_hash": head_hash.hex()})
             final = self.journal.head()
             self.journal.checkpoint()
+            self._write_head(final[0], final[1].hex())
         finally:
             self.journal.close()
             self.blobs.close()

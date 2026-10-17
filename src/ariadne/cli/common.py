@@ -21,7 +21,7 @@ from ariadne.paths import Paths
 from ariadne.termsafe import term_safe
 
 __all__ = ["CliError", "s", "say", "read_line_fd", "read_secret", "_client", "_call", "_terminal_id",
-           "SECRET_PROMPT_S"]
+           "SECRET_PROMPT_S", "pause_this_terminal"]
 
 # Höchstdauer einer interaktiven Secret-Abfrage. Die CLI meldet ihr Terminal vorher etwas
 # länger per ``pause_terminal`` an; so endet die Pause nie, während getpass noch wartet.
@@ -116,3 +116,14 @@ def _terminal_id(args: argparse.Namespace) -> str:
     if not tid:
         raise CliError("kein Terminal: ARIADNE_TERMINAL_ID fehlt (läuft der Shim?) oder --terminal angeben")
     return tid
+
+
+def pause_this_terminal(paths: Paths) -> None:
+    """Meldet dieses Terminal an, bevor die CLI Schlüsselmaterial oder ein aufgedecktes Secret
+    zeigt (``pause_terminal``, Lücke ``sensitive_output`` bis zum nächsten Prompt, E26)."""
+    from ariadne.daemon.client import CtlError, DaemonUnavailable
+
+    tid = os.environ.get("ARIADNE_TERMINAL_ID")
+    if tid:
+        with contextlib.suppress(CtlError, DaemonUnavailable, CliError):
+            _call(paths, "pause_terminal", terminal_id=tid, seconds=SECRET_PROMPT_S + 60)

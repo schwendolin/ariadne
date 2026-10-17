@@ -10,16 +10,27 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from ariadne.cli.common import _call, s, say
+from ariadne.cli.common import CliError, _call, pause_this_terminal, s, say
 from ariadne.paths import Paths
 
 __all__ = ["register"]
 
 
 def cmd_show(paths: Paths, args: argparse.Namespace) -> int:
-    from ariadne.cli.views import render_view
+    from ariadne.cli.views import render_input_revealed, render_view
 
-    res = _call(paths, "show", what=args.what, limit=args.limit)
+    if args.reveal is not None:
+        if args.what != "inputs":
+            raise CliError("--reveal gibt es nur für ariadne show inputs")
+        # Klartext erscheint gleich im Terminal: Terminal vorher anmelden, damit er weder ins
+        # Journal noch in den Vorlauf kommt (wie bei Recovery-Codes, E26, E104).
+        pause_this_terminal(paths)
+        res = _call(paths, "input.reveal", seq=args.reveal)
+        for line in render_input_revealed(res.get("item") or {}):
+            say(line)
+        return 0
+    extra = {"terminal_id": args.terminal} if args.what == "inputs" and args.terminal else {}
+    res = _call(paths, "show", what=args.what, limit=args.limit, **extra)
     for line in render_view(args.what, res.get("items") or [], full=args.all, quiet=res.get("quiet")):
         say(line)
     ing = res.get("ingest") or {}
@@ -70,10 +81,15 @@ def cmd_reparse(paths: Paths, args: argparse.Namespace) -> int:
 
 def register(sub: Any) -> None:
     """Hängt die Befehle der Auswertung an den Subparser von ``ariadne``."""
-    sp = sub.add_parser("show", help="Textansicht: hosts, services, inbox, timeline, keysteps, pending")
-    sp.add_argument("what", choices=["hosts", "services", "inbox", "timeline", "keysteps", "pending"])
+    sp = sub.add_parser("show", help="Textansicht: hosts, services, inbox, timeline, keysteps, pending, "
+                                     "inputs")
+    sp.add_argument("what", choices=["hosts", "services", "inbox", "timeline", "keysteps", "pending",
+                                     "inputs"])
     sp.add_argument("--all", action="store_true", help="alle Einträge statt der ersten 25 pro Gruppe")
     sp.add_argument("--limit", type=int, default=200, help="höchstens so viele Einträge (Zeitachse)")
+    sp.add_argument("--terminal", help="nur Eingaben dieses Terminals (volle terminal_id)")
+    sp.add_argument("--reveal", type=int, metavar="NR",
+                    help="eine verdeckte Eingabe ausdrücklich im Klartext zeigen (Nummer aus show inputs)")
     sp.set_defaults(fn=cmd_show)
 
     sp = sub.add_parser("search", help="Volltextsuche in der aufgenommenen Ausgabe")

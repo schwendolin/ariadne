@@ -332,6 +332,19 @@ class SqlCipherJournal:
                 end = max(end, int(off) + int(json.loads(header).get("bytes_lost", 0) or 0))
         return end
 
+    def stream_slice(self, terminal_id: str, start: int, end: int,
+                     max_chunk: int = 1 << 20) -> list[tuple[int, bytes]]:
+        """``term.out``-Stücke ``(stream_off, body)``, die ``[start, end)`` berühren, nach Offset.
+
+        Für den Echo-Vergleich (E104) und Belegzeilen. Ein Rahmen ist höchstens ``max_chunk``
+        lang; geschwärzte Bodys fehlen (dann sieht der Aufrufer eine Lücke)."""
+        rows = self.conn.execute(
+            "SELECT stream_off, body FROM event WHERE kind = 'term.out' AND terminal_id = ? "
+            "AND stream_off >= ? AND stream_off < ? ORDER BY stream_off",
+            (terminal_id, max(0, int(start) - int(max_chunk)), int(end))).fetchall()
+        return [(int(off), bytes(body)) for off, body in rows
+                if body is not None and int(off) + len(body) > int(start)]
+
     def recent_events(self, terminal_id: str, limit: int = 256) -> list[EventRecord]:
         """Die letzten ``limit`` Events eines Terminals (neueste zuletzt)."""
         rows = self.conn.execute(
@@ -448,6 +461,7 @@ class JournalReader:
     iter_events = SqlCipherJournal.iter_events
     get = SqlCipherJournal.get
     stream_end = SqlCipherJournal.stream_end
+    stream_slice = SqlCipherJournal.stream_slice
 
     def close(self) -> None:
         try:

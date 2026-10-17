@@ -34,6 +34,7 @@ def make_env(base: Path) -> dict[str, str]:
         "XDG_CACHE_HOME": str(home / ".cache"),
         "XDG_RUNTIME_DIR": str(run),
         "ARIADNE_PROJECTS_ROOT": str(home / "ariadne"),
+        "ARIADNE_WEB": "0",  # Daemon-Prozesse der Tests belegen nie Port 7330 (Vertrag v0.1-Server)
     }
 
 

@@ -154,6 +154,17 @@ class MemoryJournal:
     def recent_events(self, terminal_id: str, limit: int = 256) -> list[EventRecord]:
         return [row.rec for row in self._rows if row.rec.terminal_id == terminal_id][-limit:]
 
+    def stream_slice(self, terminal_id: str, start: int, end: int,
+                     max_chunk: int = 1 << 20) -> list[tuple[int, bytes]]:
+        """Wie ``SqlCipherJournal.stream_slice``."""
+        out = []
+        for row in self._rows:
+            r = row.rec
+            if (r.kind == "term.out" and r.terminal_id == terminal_id and r.stream_off is not None
+                    and r.body is not None and r.stream_off < end and r.stream_off + len(r.body) > start):
+                out.append((int(r.stream_off), bytes(r.body)))
+        return sorted(out)
+
     def verify_head(self) -> bool:
         if not self._rows:
             return True

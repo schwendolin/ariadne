@@ -185,6 +185,9 @@ class TermInput(_M):
 
     ``stream_off`` ist der Ausgabe-Offset beim ersten Byte, ``out_end`` der beim
     letzten (Bezug zum Output). ``paste``: der ganze Inhalt kam als Bracketed Paste.
+    ``no_echo`` (E104, additiv): Der Shim sah beim Tippen den Passwortmodus des Kindes
+    (``ECHO`` aus, ``ICANON`` an). Nur eine Markierung: gespeichert wird immer alles,
+    angezeigt nur verdeckt (:mod:`ariadne.ingest.inputs`).
     Nie in Logs; an Terminal-Senken nur über ``term_safe``.
     """
 
@@ -197,6 +200,7 @@ class TermInput(_M):
     tix: tuple[tuple[int, int], ...] | None = None
     paste: bool | None = None
     time_suspect: bool | None = None
+    no_echo: bool | None = None
 
     @model_validator(mode="after")
     def _ok(self) -> TermInput:

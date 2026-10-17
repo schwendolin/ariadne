@@ -36,9 +36,9 @@ class StubTransport:
         self.outs.append((data, off))
         self.out_times.append((wall, mono))
 
-    def add_input(self, data, off, out_end, wall, mono, tix=(), *, paste=False):
+    def add_input(self, data, off, out_end, wall, mono, tix=(), *, paste=False, no_echo=False):
         self.inputs.append({"data": data, "off": off, "out_end": out_end, "wall": wall, "mono": mono,
-                            "tix": tix, "paste": paste})
+                            "tix": tix, "paste": paste, "no_echo": no_echo})
         return len(self.inputs)
 
     def flush_out(self):

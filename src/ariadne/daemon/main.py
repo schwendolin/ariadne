@@ -13,6 +13,7 @@ import time
 
 from ariadne.daemon.client import CtlClient
 from ariadne.daemon.core import Daemon
+from ariadne.daemon.extensions import default_extensions
 from ariadne.daemon.hardening import AlreadyRunning, harden_process
 from ariadne.paths import Paths, default_paths, ensure_private_dir
 
@@ -29,7 +30,7 @@ def run_foreground(paths: Paths | None = None) -> int:
     harden_process()
     _setup_logging()
     paths = paths or default_paths()
-    daemon = Daemon(paths)
+    daemon = Daemon(paths, extensions=default_extensions(paths))
 
     async def main() -> None:
         loop = asyncio.get_running_loop()
