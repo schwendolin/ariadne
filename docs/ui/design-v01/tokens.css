@@ -1,0 +1,43 @@
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 12px; --fs-s: 12.5px; --fs-m: 13.5px; --fs-l: 15px; --fs-xl: 20px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --r-badge: 4px; --r-btn: 6px; --r-card: 10px; --r-dialog: 12px; --r-pill: 999px;
+  --lw-1: 1px; --lw-node: 1.5px; --lw-focus: 2px; --lw-thread: 3px;
+  --header-h: 52px;
+  --column-w: 27%; --column-min: 320px; --column-max: 480px;
+  --panel-w: 52%; --panel-min: 620px; --panel-max: 860px;
+  --t-fade: 180ms ease-out; --t-panel: 160ms ease-out; --t-pulse: 900ms ease-out;
+
+  --bg: #f4f5f7; --map: #eef0f3; --surface: #ffffff; --surface-2: #f0f2f5; --surface-3: #e6e9ed; --log-bg: #f6f7f9;
+  --fg: #1a1e24; --fg-2: #3a414b; --muted: #5a6370; --faint: #6b7480;
+  --line: #dde1e7; --line-strong: #c4cad2; --focus: #1f5fbf; --log-mark: #e3ecfa;
+  --access-user: #0b7fa3; --access-root: #6a45c9; --access-root-bg: #efeafc;
+  --thread: #b42318; --attention: #a15c00; --error: #c0264b;
+  --fog: #9aa3ae; --out-of-scope: #e3e7ec; --shadow: 0 16px 40px rgba(16,24,40,0.12);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --map: #121519; --surface: #15191e; --surface-2: #1d2228; --surface-3: #1f242b; --log-bg: #0f1215;
+    --fg: #e5e8ec; --fg-2: #c4cad2; --muted: #9aa3ae; --faint: #6b7480;
+    --line: #2a3038; --line-strong: #3a414b; --focus: #7aa7ff; --log-mark: #1d2633;
+    --access-user: #6cc3e0; --access-root: #b59cf5; --access-root-bg: #241e33;
+    --thread: #f0675c; --attention: #e8b14a; --error: #ef7d95;
+    --fog: #5a6370; --out-of-scope: #191d23; --shadow: 0 16px 40px rgba(0,0,0,0.45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --map: #121519; --surface: #15191e; --surface-2: #1d2228; --surface-3: #1f242b; --log-bg: #0f1215;
+  --fg: #e5e8ec; --fg-2: #c4cad2; --muted: #9aa3ae; --faint: #6b7480;
+  --line: #2a3038; --line-strong: #3a414b; --focus: #7aa7ff; --log-mark: #1d2633;
+  --access-user: #6cc3e0; --access-root: #b59cf5; --access-root-bg: #241e33;
+  --thread: #f0675c; --attention: #e8b14a; --error: #ef7d95;
+  --fog: #5a6370; --out-of-scope: #191d23; --shadow: 0 16px 40px rgba(0,0,0,0.45);
+  color-scheme: dark;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fade: 0ms; --t-panel: 0ms; --t-pulse: 0ms; }
+}

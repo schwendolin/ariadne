@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div ref="{{ rootRef }}" style="position:relative;width:100%;height:100%;background:#121519;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;color:#e5e8ec">
+  <div style="position:absolute;left:20px;top:16px;display:flex;align-items:center;gap:12px;font-size:13px;color:#9aa3ae;z-index:2">
+    <span>Stand 16:54 · 3 Hosts, 1 im Nebel · 1 mit Zugriff</span>
+    <sc-if value="{{ showNew }}" hint-placeholder-val="{{ true }}">
+      <span style="display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid #3a414b;color:#e5e8ec;cursor:pointer" style-hover="border-color:#9aa3ae">+3 seit 16:40</span>
+    </sc-if>
+  </div>
+  <div style="position:absolute;left:50%;top:50%;width:860px;height:600px;margin-left:-450px;margin-top:-290px;transform:scale({{ scale }});transform-origin:50% 50%">
+    <div style="position:absolute;left:190px;top:40px;width:560px;height:500px;border:1.5px dashed #343b45;border-radius:16px"></div>
+    <span style="position:absolute;left:206px;top:52px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#6b7480">192.168.56.0/24</span>
+    <svg width="860" height="600" style="position:absolute;left:0;top:0;overflow:visible">
+      <line x1="140" y1="300" x2="470" y2="393" stroke="#2a3038" stroke-width="1.5"></line>
+      <line x1="140" y1="284" x2="520" y2="148" stroke="#2a3038" stroke-width="1.5" stroke-dasharray="2 5"></line>
+      <path d="M140 292 C 195 292, 185 143, 240 143" fill="none" stroke="#f0675c" stroke-width="3"></path>
+      <path d="M318 110 C 318 64, 382 64, 382 110" fill="none" stroke="#f0675c" stroke-width="3"></path>
+    </svg>
+    <span style="position:absolute;left:180px;top:206px;width:22px;height:22px;border-radius:50%;background:#f0675c;color:#111418;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">1</span>
+    <span style="position:absolute;left:339px;top:63px;width:22px;height:22px;border-radius:50%;background:#f0675c;color:#111418;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">2</span>
+    <div style="position:absolute;left:20px;top:260px;width:120px;height:64px;border-radius:10px;background:#1d2228;border:1.5px solid #4a525d;display:flex;flex-direction:column;justify-content:center;padding:0 14px;box-sizing:border-box;gap:2px">
+      <span style="font-weight:600;font-size:14px">Kali</span>
+      <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px;color:#9aa3ae">192.168.56.102</span>
+    </div>
+    <div tabindex="0" style="position:absolute;left:240px;top:110px;width:214px;height:66px;border-radius:10px;background:#241e33;border:1.5px solid #b59cf5;display:flex;align-items:center;gap:12px;padding:0 12px;box-sizing:border-box;cursor:pointer;outline:none" style-hover="background:#2b2440">
+      <span style="width:30px;height:30px;border-radius:7px;background:#b59cf5;color:#111418;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;flex:none">#</span>
+      <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13.5px;font-weight:600">192.168.56.101</span>
+        <span style="font-size:12px;color:#c9bdf0">23 Services</span>
+      </span>
+    </div>
+    <sc-if value="{{ linked101 }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:233px;top:103px;width:228px;height:80px;border-radius:14px;border:2px dashed #e8b14a;box-sizing:border-box;pointer-events:none"></div>
+      <span style="position:absolute;left:400px;top:178px;font-size:11.5px;color:#e8b14a;background:#121519;padding:0 4px">K2</span>
+    </sc-if>
+    <sc-if value="{{ sel101 }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:234px;top:104px;width:226px;height:78px;border-radius:13px;border:2px solid #7aa7ff;box-sizing:border-box;pointer-events:none"></div>
+    </sc-if>
+    <sc-if value="{{ pulse101 }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:228px;top:98px;width:238px;height:90px;border-radius:16px;box-shadow:0 0 0 6px rgba(181,156,245,0.14),0 0 0 14px rgba(181,156,245,0.06);pointer-events:none"></div>
+    </sc-if>
+    <div tabindex="0" style="position:absolute;left:520px;top:120px;width:190px;height:56px;border-radius:10px;border:1.5px dotted #5a6370;display:flex;flex-direction:column;justify-content:center;padding:0 14px;box-sizing:border-box;gap:2px;cursor:pointer" style-hover="border-color:#9aa3ae">
+      <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;color:#9aa3ae">192.168.56.103</span>
+      <span style="font-size:12px;color:#6b7480">im Nebel</span>
+    </div>
+    <sc-if value="{{ sel103 }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:514px;top:114px;width:202px;height:68px;border-radius:13px;border:2px solid #7aa7ff;box-sizing:border-box;pointer-events:none"></div>
+    </sc-if>
+    <div tabindex="0" style="position:absolute;left:470px;top:360px;width:214px;height:66px;border-radius:10px;background:#1b2026;border:1.5px solid #3a414b;display:flex;align-items:center;gap:12px;padding:0 12px;box-sizing:border-box;cursor:pointer" style-hover="border-color:#5a6370">
+      <span style="width:30px;height:30px;border-radius:7px;border:1.5px solid #4a525d;color:#9aa3ae;font-size:15px;display:flex;align-items:center;justify-content:center;flex:none;box-sizing:border-box">⊘</span>
+      <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13.5px;color:#c4cad2">192.168.56.104</span>
+        <span style="font-size:12px;color:#9aa3ae">Sackgasse · nur RDP</span>
+      </span>
+    </div>
+  </div>
+  <div style="position:absolute;right:0;top:0;bottom:0;width:38px;border-left:1px solid #2a3038;background:repeating-linear-gradient(135deg,#191d23 0 5px,#121519 5px 11px);display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:#1d2228">
+    <span style="writing-mode:vertical-rl;transform:rotate(180deg);font-size:12.5px;color:#9aa3ae;letter-spacing:0.02em;background:#121519;padding:8px 2px">Out of Scope · 4</span>
+  </div>
+  <div style="position:absolute;left:16px;bottom:14px;display:flex;gap:8px">
+    <span style="padding:5px 10px;border-radius:6px;border:1px solid #2a3038;background:#171b20;font-size:12.5px;color:#9aa3ae;cursor:pointer" style-hover="color:#e5e8ec">Ebenen und Legende</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1040,&quot;height&quot;:848},&quot;selected&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;101&quot;,&quot;103&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;linked&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;101&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;showNew&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;pulse&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { scale: 1 };
+  rootRef = React.createRef();
+  componentDidMount() {
+    const el = this.rootRef.current; if (!el) return;
+    const fit = () => {
+      const w = el.clientWidth - 70, h = el.clientHeight - 60;
+      const s = Math.max(0.5, Math.min(1.4, w / 900, h / 620));
+      if (Math.abs(s - this.state.scale) > 0.005) this.setState({ scale: +s.toFixed(3) });
+    };
+    this.ro = new ResizeObserver(fit); this.ro.observe(el); fit();
+  }
+  componentWillUnmount() { this.ro && this.ro.disconnect(); }
+  renderVals() {
+    const s = this.props.selected ?? '';
+    return {
+      rootRef: this.rootRef, scale: this.state.scale,
+      showNew: this.props.showNew ?? true,
+      sel101: s === '101', sel103: s === '103',
+      linked101: this.props.linked === '101',
+      pulse101: !!this.props.pulse
+    };
+  }
+}
+</script>
+</body>
+</html>

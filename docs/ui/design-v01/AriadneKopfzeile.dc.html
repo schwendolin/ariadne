@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div ref="{{ rootRef }}" style="height:52px;display:flex;align-items:center;gap:16px;padding:0 16px;background:#111418;border-bottom:1px solid #2a3038;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif;font-size:13.5px;color:#e5e8ec;box-sizing:border-box;width:100%">
+  <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 auto">
+    <svg width="20" height="20" viewBox="0 0 32 32" fill="none" stroke="#e5e8ec" stroke-width="3" stroke-linecap="round" style="flex:none;display:block" aria-label="ARIADNE"><path d="M16 6.5 L5 25.55 M16 6.5 L27 25.55 M27 25.55 L10.5 16.03"></path><circle cx="16" cy="6.5" r="3.6" fill="#e5e8ec" stroke="none"></circle><circle cx="5" cy="25.55" r="3.6" fill="#e5e8ec" stroke="none"></circle><circle cx="27" cy="25.55" r="3.6" fill="#e5e8ec" stroke="none"></circle></svg>
+    <span style="width:1px;height:18px;background:#2a3038"></span>
+    <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:600;font-size:14px;letter-spacing:0.01em">{{ slug }}</span>
+    <sc-if value="{{ isLocked }}" hint-placeholder-val="{{ false }}">
+      <span style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;border:1px solid #e8b14a;color:#e8b14a">Gesperrt · im Terminal <code style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12.5px">ariadne start</code></span>
+      <span style="color:#9aa3ae">Aufnahme puffert im Arbeitsspeicher</span>
+    </sc-if>
+    <sc-if value="{{ isNoProject }}" hint-placeholder-val="{{ false }}">
+      <span style="color:#9aa3ae">Vorlauf: 3 Terminals, 15 Minuten im Arbeitsspeicher</span>
+    </sc-if>
+    <sc-if value="{{ isOffline }}" hint-placeholder-val="{{ false }}">
+      <span style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;border:1px solid #e8b14a;color:#e8b14a;white-space:nowrap">Keine Verbindung · Stand 16:54 · verbindet neu …</span>
+    </sc-if>
+    <sc-if value="{{ notLocked }}" hint-placeholder-val="{{ true }}">
+      <button style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;border:1px solid #2a3038;background:{{ recBg }};color:#e5e8ec;font:inherit;cursor:pointer" style-hover="border-color:#4a525d">
+        <span style="width:7px;height:7px;border-radius:50%;background:#e5e8ec;box-shadow:0 0 0 3px rgba(229,232,236,0.14)"></span>
+        <span>{{ recText }}</span>
+        <span style="color:#9aa3ae;font-size:10px">▾</span>
+      </button>
+      <sc-if value="{{ isPause }}" hint-placeholder-val="{{ false }}">
+        <span style="display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:6px;border:1px solid #e8b14a;color:#e8b14a;white-space:nowrap"><span style="font-weight:700;letter-spacing:-1px">‖</span>{{ pauseText }}</span>
+      </sc-if>
+      <sc-if value="{{ isHeld }}" hint-placeholder-val="{{ false }}">
+        <span style="display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:6px;border:1px solid #e8b14a;color:#e8b14a;white-space:nowrap"><span style="font-weight:700">!</span>T2: Remote-Sitzung bei <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12.5px">lame</span>, nicht gespeichert</span>
+      </sc-if>
+      <sc-if value="{{ isPresent }}" hint-placeholder-val="{{ false }}">
+        <span style="padding:5px 10px;border-radius:6px;background:#e5e8ec;color:#111418;font-weight:600;white-space:nowrap">Präsentation</span>
+      </sc-if>
+    </sc-if>
+    <span style="color:#9aa3ae;white-space:nowrap">{{ origin }}</span>
+  </div>
+  <nav style="display:flex;align-items:stretch;gap:2px;height:52px">
+    <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+      <sc-if value="{{ t.active }}">
+        <span style="display:flex;align-items:center;padding:0 12px;color:#e5e8ec;font-weight:600;box-shadow:inset 0 -2px 0 #e5e8ec">{{ t.label }}</span>
+      </sc-if>
+      <sc-if value="{{ t.idle }}">
+        <span style="display:flex;align-items:center;padding:0 12px;color:#9aa3ae;cursor:pointer" style-hover="color:#e5e8ec">{{ t.label }}</span>
+      </sc-if>
+    </sc-for>
+  </nav>
+  <div style="display:flex;align-items:center;gap:8px;flex:1 1 auto;justify-content:flex-end">
+    <sc-if value="{{ compact }}" hint-placeholder-val="{{ false }}">
+      <span style="display:flex;align-items:center;padding:5px 6px;border-radius:6px;border:1px solid #2a3038"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px;padding:2px 5px;border-radius:4px;background:#1f242b;color:#9aa3ae">⌘K</span></span>
+    </sc-if>
+    <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}">
+    <span style="display:flex;align-items:center;gap:24px;padding:5px 6px 5px 10px;border-radius:6px;border:1px solid #2a3038;color:#9aa3ae;min-width:180px;justify-content:space-between">Suchen <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px;padding:2px 5px;border-radius:4px;background:#1f242b;color:#9aa3ae">⌘K</span></span>
+    </sc-if>
+    <span style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#9aa3ae;font-size:16px;cursor:pointer" style-hover="background:#1f242b;color:#e5e8ec">⋯</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:52},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;pause&quot;,&quot;waiting&quot;,&quot;held&quot;,&quot;locked&quot;,&quot;noproject&quot;,&quot;offline&quot;],&quot;default&quot;:&quot;pause&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;tab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;karte&quot;,&quot;terminals&quot;,&quot;zeitachse&quot;,&quot;findings&quot;],&quot;default&quot;:&quot;karte&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;origin&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;über sshd&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;recOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;present&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { w: 1440 };
+  rootRef = React.createRef();
+  componentDidMount() {
+    const el = this.rootRef.current; if (!el) return;
+    this.ro = new ResizeObserver(() => { const w = el.clientWidth; if (Math.abs(w - this.state.w) > 4) this.setState({ w }); });
+    this.ro.observe(el);
+  }
+  componentWillUnmount() { this.ro && this.ro.disconnect(); }
+  renderVals() {
+    const compact = this.state.w < 1280;
+    const v = this.props.variant ?? 'pause';
+    const tab = this.props.tab ?? 'karte';
+    const rec = { normal: '3 von 3 Terminals nehmen auf', pause: '2 von 3 Terminals nehmen auf', waiting: '2 von 3 Terminals nehmen auf', held: '2 von 3 Terminals nehmen auf' };
+    const tabs = [['karte','Karte'],['terminals','Terminals'],['zeitachse','Zeitachse'],['findings','Findings']].map(([k,l]) => ({ label: l, active: k === tab, idle: k !== tab }));
+    return {
+      slug: v === 'noproject' ? 'kein Projekt' : 'ms2',
+      isLocked: v === 'locked', notLocked: !['locked','noproject','offline'].includes(v),
+      isNoProject: v === 'noproject', isOffline: v === 'offline',
+      isPause: v === 'pause' || v === 'waiting', isHeld: v === 'held', isPresent: !!this.props.present,
+      pauseText: v === 'waiting' ? 'T1 Pause · wartet auf Bestätigung' : 'T1 Pause bis 17:00',
+      recText: compact ? (v === 'normal' ? '3 von 3 nehmen auf' : '2 von 3 nehmen auf') : (rec[v] || rec.pause),
+      rootRef: this.rootRef, compact, wide: !compact,
+      recBg: this.props.recOpen ? '#1f242b' : '#171b20',
+      origin: this.props.origin ?? 'über sshd',
+      tabs
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>body{margin:0;background:#0b0d10;color:#e5e8ec;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif}a{color:#e5e8ec;text-decoration-color:#9aa3ae;text-underline-offset:3px}a:hover{color:#ffffff}</style>
+</helmet>
+<section data-screen-label="Logo Runde 2" style="padding:64px 64px 0;display:flex;flex-direction:column;gap:32px;background:#0b0d10;width:max-content">
+  <header style="display:flex;flex-direction:column;gap:12px;width:1100px">
+    <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12.5px;letter-spacing:0.08em;text-transform:uppercase;color:#9aa3ae">Runde 2 · nach deiner Skizze</span>
+    <h1 style="margin:0;font-size:32px;line-height:1.15;font-weight:700">Graph-A: gleichseitiges Dreieck, Faden zurück zum linken Schenkel</h1>
+    <p style="margin:0;color:#9aa3ae;font-size:15px;line-height:1.55;max-width:820px;text-wrap:pretty">Drei Knoten, alle Seiten gleich lang (60°), die Basis bleibt offen. Vom Knoten unten rechts läuft eine Diagonale zur Mitte des linken Schenkels. Lesbar als A und als kleiner Angriffsweg mit Rückkehr.</p>
+  </header>
+  <div style="display:flex;flex-wrap:wrap;gap:40px;width:1780px">
+    <sc-for list="{{ options2 }}" as="o" hint-placeholder-count="6">
+      <div id="{{ o.id }}" style="width:560px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;font-weight:600;padding:3px 8px;border-radius:5px;background:#e5e8ec;color:#111418">{{ o.id }}</span><span style="font-size:20px;font-weight:700">{{ o.name }}</span></div>
+        <span style="color:#9aa3ae;font-size:14px;line-height:1.5;min-height:42px">{{ o.why }}</span>
+        <div style="border:1px solid #2a3038;border-radius:12px;background:#111418;height:260px;display:flex;align-items:center;justify-content:center;gap:56px">
+          {{ o.markLg }}
+          <div style="display:flex;flex-direction:column;gap:6px;position:relative">
+            <span style="font-family:{{ o.font }};font-size:44px;font-weight:{{ o.weight }};letter-spacing:{{ o.track }};text-transform:uppercase;line-height:1"><span style="color:{{ o.ariColor }}">ari</span>adne</span>
+            <sc-if value="{{ o.thread }}"><span style="display:flex;align-items:center"><span style="width:9px;height:9px;border-radius:50%;border:2px solid #e5e8ec;box-sizing:border-box;flex:none"></span><span style="flex:1;height:2px;background:#e5e8ec"></span><span style="width:10px;height:10px;border-radius:50%;background:#e5e8ec;flex:none"></span></span></sc-if>
+          </div>
+        </div>
+        <div style="height:52px;border:1px solid #2a3038;border-radius:8px;background:#111418;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:13.5px">
+          {{ o.markSm }}
+          <span style="font-family:{{ o.font }};font-weight:{{ o.weight }};font-size:15px;letter-spacing:{{ o.track }};text-transform:uppercase"><span style="color:{{ o.ariColor }}">ari</span>adne</span>
+          <span style="width:1px;height:18px;background:#2a3038;margin:0 4px"></span>
+          <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:600;font-size:14px">ms2</span>
+          <span style="color:#9aa3ae">2 von 3 Terminals nehmen auf</span>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
+          <div style="border-radius:8px;background:#1d2228;display:flex;flex-direction:column;gap:2px;padding:6px 6px 0">
+            <div style="display:flex;gap:2px">
+              <span style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px 7px 0 0;background:#111418;font-size:12px;flex:1;min-width:0">{{ o.fav16 }}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ms2 · ARIADNE</span></span>
+              <span style="display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12px;color:#9aa3ae;flex:1;min-width:0">{{ o.fav16dot }}<span style="white-space:nowrap;overflow:hidden">ms2 · 2 zu klären</span></span>
+            </div>
+          </div>
+          <div style="border-radius:8px;border:1px solid #2a3038;display:flex;align-items:center;justify-content:center;gap:18px;padding:8px">{{ o.fav32 }}{{ o.fav32dot }}<span style="color:#6b7480;font-size:12px">32 px</span></div>
+        </div>
+        <div style="border-radius:10px;background:#f4f5f7;color:#1a1e24;padding:18px 20px;display:flex;align-items:center;gap:12px">
+          {{ o.markLight }}
+          <span style="font-family:{{ o.font }};font-weight:{{ o.weight }};font-size:20px;letter-spacing:{{ o.track }};text-transform:uppercase"><span style="color:{{ o.ariLight }}">ari</span>adne</span>
+          <span style="margin-left:auto;color:#5a6370;font-size:12.5px">Bericht ms2 · 2026-10-08</span>
+        </div>
+        <div style="border-radius:10px;background:#0f1215;border:1px solid #2a3038;padding:12px 16px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12.5px;line-height:1.7;color:#c4cad2;white-space:pre">{{ o.cli }}</div>
+      </div>
+    </sc-for>
+  </div>
+</section>
+<section data-screen-label="Logo Runde 1" style="padding:64px;display:flex;flex-direction:column;gap:48px;background:#0b0d10;width:max-content;min-height:100vh">
+  <header style="display:flex;flex-direction:column;gap:12px;width:1100px">
+    <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12.5px;letter-spacing:0.08em;text-transform:uppercase;color:#9aa3ae">Ariadne · Zeichen und Schriftzug · Runde 1</span>
+    <h1 style="margin:0;font-size:40px;line-height:1.1;font-weight:700;letter-spacing:-0.01em">Sechs Richtungen, einfarbig, nüchtern</h1>
+    <p style="margin:0;color:#9aa3ae;font-size:16px;line-height:1.55;max-width:820px;text-wrap:pretty">Jede Richtung zeigt das Zeichen gross, mit Schriftzug, in der Kopfzeile, als Favicon mit Zustand, hell im Bericht und als Banner in der CLI. Schriftzug in Versalien und Systemschrift, damit alles offline bleibt. Der Punkt am Favicon ist UI-Zustand, nicht Teil des Logos.</p>
+  </header>
+  <div style="display:flex;flex-wrap:wrap;gap:40px;width:1780px">
+    <sc-for list="{{ options }}" as="o" hint-placeholder-count="6">
+      <div id="{{ o.id }}" style="width:560px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;font-weight:600;padding:3px 8px;border-radius:5px;background:#e5e8ec;color:#111418">{{ o.id }}</span><span style="font-size:20px;font-weight:700">{{ o.name }}</span></div>
+        <span style="color:#9aa3ae;font-size:14px;line-height:1.5;min-height:42px">{{ o.why }}</span>
+        <div style="border:1px solid #2a3038;border-radius:12px;background:#111418;height:260px;display:flex;align-items:center;justify-content:center;gap:56px">
+          {{ o.markLg }}
+          <div style="display:flex;flex-direction:column;gap:6px;position:relative">
+            <span style="font-family:{{ o.font }};font-size:44px;font-weight:{{ o.weight }};letter-spacing:{{ o.track }};text-transform:uppercase;line-height:1"><span style="color:{{ o.ariColor }}">ari</span>adne</span>
+            <sc-if value="{{ o.thread }}"><span style="display:flex;align-items:center"><span style="width:9px;height:9px;border-radius:50%;border:2px solid #e5e8ec;box-sizing:border-box;flex:none"></span><span style="flex:1;height:2px;background:#e5e8ec"></span><span style="width:10px;height:10px;border-radius:50%;background:#e5e8ec;flex:none"></span></span></sc-if>
+          </div>
+        </div>
+        <div style="height:52px;border:1px solid #2a3038;border-radius:8px;background:#111418;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:13.5px">
+          {{ o.markSm }}
+          <span style="font-family:{{ o.font }};font-weight:{{ o.weight }};font-size:15px;letter-spacing:{{ o.track }};text-transform:uppercase"><span style="color:{{ o.ariColor }}">ari</span>adne</span>
+          <span style="width:1px;height:18px;background:#2a3038;margin:0 4px"></span>
+          <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-weight:600;font-size:14px">ms2</span>
+          <span style="color:#9aa3ae">2 von 3 Terminals nehmen auf</span>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
+          <div style="border-radius:8px;background:#1d2228;display:flex;flex-direction:column;gap:2px;padding:6px 6px 0">
+            <div style="display:flex;gap:2px">
+              <span style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px 7px 0 0;background:#111418;font-size:12px;flex:1;min-width:0">{{ o.fav16 }}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ms2 · ARIADNE</span></span>
+              <span style="display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12px;color:#9aa3ae;flex:1;min-width:0">{{ o.fav16dot }}<span style="white-space:nowrap;overflow:hidden">ms2 · 2 zu klären</span></span>
+            </div>
+          </div>
+          <div style="border-radius:8px;border:1px solid #2a3038;display:flex;align-items:center;justify-content:center;gap:18px;padding:8px">{{ o.fav32 }}{{ o.fav32dot }}<span style="color:#6b7480;font-size:12px">32 px</span></div>
+        </div>
+        <div style="border-radius:10px;background:#f4f5f7;color:#1a1e24;padding:18px 20px;display:flex;align-items:center;gap:12px">
+          {{ o.markLight }}
+          <span style="font-family:{{ o.font }};font-weight:{{ o.weight }};font-size:20px;letter-spacing:{{ o.track }};text-transform:uppercase"><span style="color:{{ o.ariLight }}">ari</span>adne</span>
+          <span style="margin-left:auto;color:#5a6370;font-size:12.5px">Bericht ms2 · 2026-10-08</span>
+        </div>
+        <div style="border-radius:10px;background:#0f1215;border:1px solid #2a3038;padding:12px 16px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12.5px;line-height:1.7;color:#c4cad2;white-space:pre">{{ o.cli }}</div>
+      </div>
+    </sc-for>
+  </div>
+  <p style="margin:0;width:1100px;color:#c4cad2;font-size:15px;line-height:1.55">Meine Empfehlung: <a href="#1a">1a</a>. Der Ring ist Kali, der Punkt der erreichte Host, dazwischen der Faden. Das Zeichen bleibt bei 16 px lesbar, sieht aus wie ein Messgerät und funktioniert in der CLI als <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace">o──●</span>. Als zweite Wahl <a href="#1d">1d</a>, falls das Zeichen mehr wie ein Buchstabe wirken soll.</p>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const e = React.createElement;
+    const mono = "ui-monospace,'SF Mono',Menlo,monospace";
+    const sans = "-apple-system,BlinkMacSystemFont,'SF Pro Display',system-ui,sans-serif";
+    const parts = {
+      thread: c => [e('circle', { key: 1, cx: 6, cy: 16, r: 3.4 }), e('path', { key: 2, d: 'M9.4 16 H22' }), e('circle', { key: 3, cx: 25.6, cy: 16, r: 3.8, fill: c, stroke: 'none' })],
+      mono: c => [e('path', { key: 1, d: 'M6 28 L15 5 L24 28' }), e('path', { key: 2, d: 'M9.5 19 H26' }), e('circle', { key: 3, cx: 28, cy: 19, r: 2.8, fill: c, stroke: 'none' })],
+      fog: c => [e('path', { key: 1, d: 'M16 5 H10 Q5 5 5 10 V22 Q5 27 10 27 H16', strokeDasharray: '0.1 4.2' }), e('path', { key: 2, d: 'M16 5 H22 Q27 5 27 10 V22 Q27 27 22 27 H16' }), e('rect', { key: 3, x: 16, y: 10, width: 6.5, height: 12, rx: 1.5, fill: c, stroke: 'none' })],
+      graph: c => [e('path', { key: 1, d: 'M7 26 L16 6.5 L25 26' }), e('circle', { key: 2, cx: 16, cy: 6.5, r: 3.6, fill: c, stroke: 'none' }), e('circle', { key: 3, cx: 7, cy: 26, r: 3.6, fill: c, stroke: 'none' }), e('circle', { key: 4, cx: 25, cy: 26, r: 3.6, fill: c, stroke: 'none' })],
+      maze: c => [e('path', { key: 1, d: 'M5 28 V13 H10 V5 H22 V13 H27 V28' }), e('path', { key: 2, d: 'M11 28 V19 H21 V28' })],
+      tri: c => [e('circle', { key: 1, cx: 16, cy: 6.5, r: 3 }), e('circle', { key: 2, cx: 5, cy: 25.55, r: 3 }), e('circle', { key: 3, cx: 27, cy: 25.55, r: 3 }), e('path', { key: 4, d: 'M14.5 9.1 L6.5 22.95 M17.5 9.1 L25.5 22.95 M24.4 24.05 L10.5 16.03' })],
+      triFill: c => [e('circle', { key: 1, cx: 16, cy: 6.5, r: 3 }), e('circle', { key: 2, cx: 5, cy: 25.55, r: 3 }), e('path', { key: 4, d: 'M14.5 9.1 L6.5 22.95 M17.5 9.1 L26 24 M26 24.5 L10.5 16.03' }), e('circle', { key: 3, cx: 27, cy: 25.55, r: 3.4, fill: c, stroke: 'none' })],
+      triAll: c => [e('path', { key: 4, d: 'M16 6.5 L5 25.55 M16 6.5 L27 25.55 M27 25.55 L10.5 16.03' }), e('circle', { key: 1, cx: 16, cy: 6.5, r: 3.4, fill: c, stroke: 'none' }), e('circle', { key: 2, cx: 5, cy: 25.55, r: 3.4, fill: c, stroke: 'none' }), e('circle', { key: 3, cx: 27, cy: 25.55, r: 3.4, fill: c, stroke: 'none' })],
+      term: c => [e('rect', { key: 1, x: 4, y: 4, width: 24, height: 24, rx: 5.5 }), e('text', { key: 2, x: 8.6, y: 20.6, fontFamily: mono, fontSize: 14, fontWeight: 600, fill: c, stroke: 'none' }, 'a'), e('rect', { key: 3, x: 18, y: 18.2, width: 5.5, height: 2.6, fill: c, stroke: 'none' })]
+    };
+    const mark = (k, size, c, sw, dot) => {
+      const svg = e('svg', { width: size, height: size, viewBox: '0 0 32 32', fill: 'none', stroke: c, strokeWidth: sw, strokeLinecap: 'round', strokeLinejoin: 'round', style: { display: 'block', flex: 'none' } }, parts[k](c));
+      if (!dot) return svg;
+      const d = Math.max(6, size * 0.34);
+      return e('span', { style: { position: 'relative', display: 'inline-block', width: size, height: size, flex: 'none' } }, svg,
+        e('span', { style: { position: 'absolute', right: -d * 0.35, top: -d * 0.35, width: d, height: d, borderRadius: '50%', background: '#e8b14a', boxShadow: '0 0 0 2px #1d2228' } }));
+    };
+    const fg = '#e5e8ec';
+    const defs = [
+      ['1a', 'thread', 'Faden mit Knoten', 'Ring ist Kali, der Punkt der erreichte Host. Der Schriftzug trägt denselben Faden darunter.', sans, 650, '0.08em', fg, '#1a1e24', true, '  o────●  ARIADNE 0.1\n  ms2 · 2 von 3 Terminals nehmen auf'],
+      ['1b', 'mono', 'Monogramm A', 'Der Querbalken ist der Faden. Er tritt rechts aus dem Buchstaben aus und endet im Knoten.', sans, 650, '0.08em', fg, '#1a1e24', false, '  /\\\n /──\\──●  ARIADNE 0.1\n  ms2 · 2 von 3 Terminals nehmen auf'],
+      ['1c', 'fog', 'Nebel zu Farbe', 'Ein Host-Rahmen, links noch gepunktet, rechts ausgemalt. Im Schriftzug ist «ARI» gedämpft.', sans, 650, '0.08em', '#5a6370', '#9aa3ae', false, '  ░▓  ARIADNE 0.1\n  ms2 · 2 von 3 Terminals nehmen auf'],
+      ['1d', 'graph', 'Graph-A', 'Drei Knoten, zwei Kanten. Liest sich als A und als kleines Stück Karte.', sans, 650, '0.08em', fg, '#1a1e24', false, '  ∴  ARIADNE 0.1\n  ms2 · 2 von 3 Terminals nehmen auf'],
+      ['1e', 'maze', 'Labyrinth-A', 'Rechtwinklige Gänge mit offenem Eingang unten. Am stärksten beim Mythos, bei 16 px am schwächsten.', sans, 650, '0.08em', fg, '#1a1e24', false, '  ┏┻┓  ARIADNE 0.1\n  ms2 · 2 von 3 Terminals nehmen auf'],
+      ['1f', 'term', 'Terminal-nah', 'Kleines «a» mit Cursor, Schriftzug in Mono. Fügt sich in Kali ein, ist aber am wenigsten eigen.', mono, 600, '0.04em', fg, '#1a1e24', false, '  [a_]  ARIADNE 0.1\n  ms2 · 2 von 3 Terminals nehmen auf']
+    ];
+    const defs2 = [
+      ['2a', 'tri', 'Drei Ringe', 'Genau nach Skizze. Alle Knoten offen, gleich gewichtet.', sans, 650, '0.08em', fg, '#1a1e24', false, '  /\\\n /‾‾\\  ARIADNE 0.1\n o  o  ms2 · 2 von 3 Terminals nehmen auf'],
+      ['2b', 'triFill', 'Ziel gefüllt', 'Wie 2a, der Knoten unten rechts ist gefüllt: der erreichte Host. Hält bei 16 px besser.', sans, 650, '0.08em', fg, '#1a1e24', false, '  /\\\n /‾‾\\  ARIADNE 0.1\n o  ●  ms2 · 2 von 3 Terminals nehmen auf']
+,
+      ['2c', 'triAll', 'Alle gefüllt', 'Drei gefüllte Knoten. Am kräftigsten und bei 16 px am klarsten, wirkt am meisten wie ein Zeichen.', sans, 650, '0.08em', fg, '#1a1e24', false, '  ●\n / \\  ARIADNE 0.1\n●   ●  ms2 · 2 von 3 Terminals nehmen auf']
+    ];
+    const build = d => d.map(([id, k, name, why, font, weight, track, ariColor, ariLight, thread, cli]) => ({
+      id, name, why, font, weight, track, ariColor, ariLight, thread, cli,
+      markLg: mark(k, 120, fg, 2), markSm: mark(k, 20, fg, 2.8), markLight: mark(k, 28, '#1a1e24', 2.6),
+      fav16: mark(k, 16, fg, 3), fav16dot: mark(k, 16, '#9aa3ae', 3, true),
+      fav32: mark(k, 32, fg, 2.6), fav32dot: mark(k, 32, fg, 2.6, true)
+    }));
+    const options2 = build(defs2);
+    const options = defs.map(([id, k, name, why, font, weight, track, ariColor, ariLight, thread, cli]) => ({
+      id, name, why, font, weight, track, ariColor, ariLight, thread, cli,
+      markLg: mark(k, 120, fg, 2), markSm: mark(k, 20, fg, 2.8), markLight: mark(k, 28, '#1a1e24', 2.6),
+      fav16: mark(k, 16, fg, 3), fav16dot: mark(k, 16, '#9aa3ae', 3, true),
+      fav32: mark(k, 32, fg, 2.6), fav32dot: mark(k, 32, fg, 2.6, true)
+    }));
+    return { options, options2 };
+  }
+}
+</script>
+</body>
+</html>
