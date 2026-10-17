@@ -231,7 +231,7 @@ Fällt der Daemon aus, puffert der Shim im RAM (Ringpuffer, `mmap` mit `MADV_DON
 
 **Eingaben (E26).** Der Shim zeichnet genau auf, was ans Kind im PTY geht, lokal und in Remote-Shells, auch Passwörter ohne Echo und Antworten des Terminals (Cursorposition, Farben). Er bündelt bis Enter, Ctrl-C, Ctrl-D, 4 KiB oder 1 s; ein Bracketed Paste ist genau ein Rahmen mit Paste-Flag. Jeder `INPUT` nennt das aktuelle Ende des Output-Stroms (`out_end`) als Bezug. Hotkey-Präfix und -Taste und der Mini-Prompt fehlen. Eingaben werden nur aufgenommen, wenn auch die Ausgabe aufgenommen wird. Der Daemon schreibt sie als `term.input`, nie in Logs, an Terminal-Senken nur über `term_safe`. Bestätigte Remote-Befehle folgen in v0.2 (5.13).
 
-**Eingaben ohne Echo (E104).** Gespeichert wird immer alles, angezeigt werden Eingaben ohne Echo nur verdeckt (`••••••••`), aufgedeckt nur ausdrücklich und einzeln. Lokal prüft der Shim beim Aufzeichnen den Terminalmodus des Kindes (`tcgetattr` auf dem Master): `ECHO` aus und `ICANON` an ist das `getpass`-Muster von sudo, ssh, su und mysql; dann setzt er Flag-Bit 1 am `INPUT`, und `term.input` trägt `no_echo`. Zeileneditoren (ZLE, readline) schalten beides aus und echoen selbst; das ist kein Passwort. In Remote-Shells (lokal Raw-Modus) hilft nur der Echo-Vergleich der Auswertung (`ingest/inputs.py`): Erscheinen die getippten druckbaren Zeichen in der Ausgabe ab dem ersten getippten Byte bis kurz nach dem Enter nicht wieder, oder fehlt diese Ausgabe, gilt die Eingabe als ohne Echo. Kurze Wörter zählen nur, wenn sie eine angezeigte Zeile beenden. Lieber zu viel als zu wenig verdecken. CLI: `ariadne show inputs [--reveal NR]`; Web-API: `GET /p/{pid}/inputs`, `POST /p/{pid}/secrets/reveal`.
+**Eingaben ohne Echo (E104).** Gespeichert wird immer alles, angezeigt werden Eingaben ohne Echo nur verdeckt (`••••••••`), aufgedeckt nur ausdrücklich und einzeln. Lokal prüft der Shim beim Aufzeichnen den Terminalmodus des Kindes (`tcgetattr` auf dem Master): `ECHO` aus und `ICANON` an ist das `getpass`-Muster von sudo, ssh, su und mysql; dann setzt er Flag-Bit 1 am `INPUT`, und `term.input` trägt `no_echo`. Zeileneditoren (ZLE, readline) schalten beides aus und echoen selbst; das ist kein Passwort. In Remote-Shells (lokal Raw-Modus) hilft nur der Echo-Vergleich der Auswertung (`ingest/inputs.py`): Erscheinen die getippten druckbaren Zeichen in der Ausgabe ab dem ersten getippten Byte bis kurz nach dem Enter nicht wieder, oder fehlt diese Ausgabe, gilt die Eingabe als ohne Echo. Kurze Wörter zählen nur, wenn sie eine angezeigte Zeile beenden oder direkt vor dem Cursor stehen, als die Zeile endete (rechter Prompt, Vorschläge von zsh-autosuggestions); ein Tab ist ein Platzhalter für ein vervollständigtes Wort. Der Vergleich ist linear und ohne reguläre Ausdrücke, weil die Ausgabe vom Ziel kommt. Lieber zu viel als zu wenig verdecken. CLI: `ariadne show inputs [--reveal NR]`; Web-API: `GET /p/{pid}/inputs`, `POST /p/{pid}/secrets/reveal`.
 
 ### 3.8 Ausgabefilter im Shim
 
@@ -795,7 +795,7 @@ Die Web-UI ist das Cockpit: Aufnahme-Zustand und Pause pro Terminal, Kontext pro
 
 «Nur 127.0.0.1» ist keine Authentisierung: Jeder lokale Prozess erreicht den Port, und Tunnel-Server wie `chisel server` ohne `--authfile` öffnen Loopback für das Ziel.
 
-1. **Bindung** an `127.0.0.1:7330` (konfigurierbar). Vor dem Öffnen prüft `ariadne ui`, ob der lauschende Socket wirklich dem Daemon gehört. Bei jeder neuen Verbindung prüft der Daemon die UID des Clients und lehnt fremde ab.
+1. **Bindung** an `127.0.0.1:7330` (konfigurierbar). Vor dem Öffnen prüft `ariadne ui`, ob der lauschende Socket wirklich dem Daemon gehört. Bei jeder neuen Verbindung prüft der Daemon die UID des Clients und lehnt fremde ab. Jedes Token ist an einen Prozess gebunden: lokal an den Browser-Prozess hinter der Verbindung, vom Mac an den sshd-Prozess der SSH-Verbindung, die mit `ariadne remote serve code` den Code geholt hat und zugleich den Tunnel trägt. Dieser sshd-Prozess ist für den Benutzer nicht lesbar (nach dem Rechtewechsel nicht «dumpable»); darum muss eine Verbindung mit lesbarem Prozess genau der gebundene sein (`docs/web-api.md` 1.1).
 2. **Anmeldung ohne Cookies.** `ariadne ui` holt über `ctl.sock` einen Einmalcode (128 Bit, 60 s, einmal gültig), schreibt eine Startdatei mit Rechten 0600 nach `$XDG_RUNTIME_DIR/ariadne/` und öffnet sie per `file://`. Der Code steht nie in argv. Die SPA tauscht ihn gegen ein 256-Bit-Token in `sessionStorage`, höchstens 12 h gültig. Jeder Aufruf trägt `Authorization: Bearer`. Ohne Cookies gibt es kein CSRF. Tippcodes (`ariadne ui --code`) haben mindestens 40 Bit, nach 5 Fehlversuchen pro Minute werden alle Codes ungültig.
 3. **Middleware vor jeder Route:** `Host` exakt `127.0.0.1:7330` (gegen DNS-Rebinding), `Sec-Fetch-Site` nur `same-origin` oder `none`, `cross-site` ergibt auch für statische Assets 403, `Origin` bei schreibenden Methoden nur der eigene, kein CORS, Tokenvergleich mit `hmac.compare_digest`.
 4. **Header:** strenge CSP (`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`), `nosniff`, `no-referrer`, CORP und COOP `same-origin`, `Cache-Control: no-store`. Jede Antwort ausser der SPA-Shell bekommt `Content-Security-Policy: default-src 'none'; sandbox`. Ob Svelte 5 und Cytoscape ohne `'unsafe-inline'` für Styles auskommen, ist zu verifizieren. Eine Lockerung gilt nur für Styles, nie für Skripte.
@@ -809,7 +809,7 @@ Alle Pfade liegen unter `/api/v1`, projektbezogene unter `/p/{pid}`. Andere Teil
 
 | Pfad | Zweck |
 |---|---|
-| `GET /status`, Pause pro Terminal | Version, Projekt, Profil, Sperrzustand, Aufnahme-Zustand pro Terminal und Leerlauf-Uhr, LLM-Modus, Präsentationsmodus; Pause und Fortsetzen pro Terminal (ctl `term.pause`/`term.resume` mit `source = webui`). Verbindlich ist die API v2 in `docs/web-api.md` (Stand 2026-10-15) |
+| `GET /status`, Pause pro Terminal | Version, Projekt, Profil, Sperrzustand, Aufnahme-Zustand pro Terminal und Leerlauf-Uhr, LLM-Modus, Präsentationsmodus; Pause und Fortsetzen pro Terminal (ctl `term.pause`/`term.resume` mit `source = webui`). Verbindlich ist die API v2 in `docs/web-api.md` (Stand 2026-10-17) |
 | `GET /terminals`, `POST /terminals/{tid}/context` | Terminals; Kontext setzen (schreibt intern `d.ctx.*`) |
 | `GET /p/{pid}/graph?layer=`, `GET /p/{pid}/changes?since=` | Karte nach Ebenen; Änderungen seit einer Generation |
 | `GET /p/{pid}/hosts`, `/services`, `/credentials`, `/cred-matrix`, `/timeline`, `/inbox`, `/suggestions`, `/findings` | Listen |
@@ -819,9 +819,9 @@ Alle Pfade liegen unter `/api/v1`, projektbezogene unter `/p/{pid}`. Andere Teil
 | `POST /p/{pid}/ai/denkanstoss`, `/ai/frage`, ... | KI-Funktionen |
 | `POST /p/{pid}/screenshots`, `/webshots`, `/exports` | Auslöser |
 | `GET /p/{pid}/files/pending` | Warteliste des Watchers |
-| `GET /p/{pid}/events` | SSE |
+| `GET /events` | SSE, ein globaler Strom für alle Tabs einer Sitzung (API v2) |
 
-SSE-Ereignisse: `changes`, `rec`, `terminal`, `inbox`, `suggestion`, `progress`, `presentation`, `project`, `reset`, Herzschlag alle 15 s. Der Server bündelt in 250-ms-Fenstern. Weil `EventSource` keine Header setzen kann, liest ein eigener `fetch`-Client den Strom. Bei `project` verwirft der Client alle Stores, damit sich Projekte im Browser nie mischen.
+SSE-Ereignisse: `changes`, `terminal`, `inbox`, `suggestion`, `progress`, `presentation`, `project`, `reset`, Herzschlag alle 15 s (`rec` ist seit E22 überholt). Der Server bündelt in 250-ms-Fenstern. Weil `EventSource` keine Header setzen kann, liest ein eigener `fetch`-Client den Strom. Bei `project` verwirft der Client alle Stores, damit sich Projekte im Browser nie mischen.
 
 ### 7.4 Ansichten
 
@@ -1048,7 +1048,9 @@ _ariadne/manifest.json    # Exportzeit, Kettenkopf, Hashes aller Dateien
 | `rec.off`, `rec.toggle` | Fehler `removed`: «REC gibt es nicht mehr: ariadne pause oder ariadne stop» |
 | `show` | `what` = `hosts`, `services`, `inbox`, `timeline`, `keysteps`, `pending`, `inputs` (E104, verdeckt); Inbox mit Summe `quiet` |
 | `search`, `claim.confirm`, `claim.reject`, `reparse` | Suche, Bestätigen (Sammelbestätigung mit `excluded` pro Grund), Verwerfen, Neubau |
-| `unit.distrust` | `ref` (volle `cmd_id` oder Kurzform), `reason?`: schreibt `d.unit.distrust`, Ergebnis `rejected` und `weakened` |
+| `unit.distrust` | `ref` (volle `cmd_id` oder Kurzform), `reason?`: schreibt `d.unit.distrust`, Ergebnis `rejected`, `weakened` und `decision_id` (zum Aufheben); Befehl ohne Werte: Fehler `conflict` |
+| `stop` (Ergänzung) | Ergebnis zusätzlich `since_utc`, der Beginn der beendeten Session (Hinweis auf die Sicherung) |
+| Erweiterungen | `Daemon(extensions=…)`, `add_listener`/`remove_listener` (Ereignisse `terminal`, `project`, `unlocked`, `locked`, `presentation`, `stopping`, `job`), `add_ops`, `core.ctl_peer_pid()` für ctl-Operationen des Web-Servers (`ui.code`, `ui.sessions`, `ui.revoke`, `ui.status`) |
 
 Alle Antworten mit Zieldaten gehen durch `redact_json` (8.5).
 

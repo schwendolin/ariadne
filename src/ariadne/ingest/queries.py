@@ -28,6 +28,7 @@ from ariadne.ingest.schema_claims import MASK
 
 __all__ = [
     "RefError",
+    "NothingToUndo",
     "group_ref",
     "cmd_ref",
     "hosts",
@@ -64,6 +65,10 @@ MIN_CONFIRM_CONFIDENCE = 0.5
 
 class RefError(LookupError):
     """Verweis auf Claim, Gruppe oder Befehl ist unbekannt oder nicht eindeutig."""
+
+
+class NothingToUndo(RefError):
+    """Befehl bekannt, aber aus ihm stammen keine Werte (``ariadne undo``, Web-API 409)."""
 
 
 def group_ref(group_key: str) -> str:
@@ -399,7 +404,7 @@ def resolve_distrust(conn: Any, ref: str) -> str:
     """``cmd_id`` für ``ariadne undo``: nur Befehle, aus denen Werte stammen."""
     cmd_id = resolve_cmd(conn, ref)
     if conn.execute("SELECT 1 FROM claim_source WHERE group_key = ? LIMIT 1", (cmd_id,)).fetchone() is None:
-        raise RefError("aus diesem Befehl stammen keine Werte, nichts rückgängig zu machen")
+        raise NothingToUndo("aus diesem Befehl stammen keine Werte, nichts rückgängig zu machen")
     return cmd_id
 
 
@@ -415,10 +420,12 @@ def claim_snapshot(conn: Any, keys: Iterable[str]) -> list[dict[str, Any]]:
 
 
 def distrust_result(conn: Any, cmd_id: str) -> dict[str, Any]:
-    """Wirkung von ``d.unit.distrust`` (aus der letzten Projektion)."""
-    r = conn.execute("SELECT rejected, weakened FROM unit_distrust WHERE cmd_id = ?", (cmd_id,)).fetchone()
+    """Wirkung von ``d.unit.distrust`` (aus der letzten Projektion), mit ``decision_id`` zum
+    Aufheben (``d.revoke``)."""
+    r = conn.execute("SELECT rejected, weakened, decision_id FROM unit_distrust WHERE cmd_id = ?",
+                     (cmd_id,)).fetchone()
     return {"cmd_id": cmd_id, "cmd_ref": cmd_ref(cmd_id), "rejected": int(r[0]) if r else 0,
-            "weakened": int(r[1]) if r else 0}
+            "weakened": int(r[1]) if r else 0, "decision_id": str(r[2]) if r and r[2] else None}
 
 
 # --------------------------------------------------------------------------- Zeitachse

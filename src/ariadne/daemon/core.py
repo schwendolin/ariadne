@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import hashlib
 import inspect
 import json
@@ -151,13 +152,24 @@ from ariadne.sources.safeopen import UnsafeFile
 from ariadne.store.api import AppendItem, EventRecord, JournalError
 
 __all__ = ["Daemon", "OpError", "CommitHook", "MarkHook", "Listener", "DaemonExtension", "NOTIFY_KINDS",
-           "STATES"]
+           "STATES", "ctl_peer_pid"]
 
 log = logging.getLogger("ariadne.daemon")
 
 CommitHook = Callable[[list[EventRecord]], Any]
 MarkHook = Callable[[EventRecord, MarkContext | None], Any]
 Listener = Callable[[str, dict[str, Any]], Any]
+
+# PID des Prozesses hinter der ctl-Verbindung (``SO_PEERCRED``), gesetzt nur während einer
+# Operation, die über ``ctl.sock`` kam; bei ``Daemon.call`` aus dem Daemon selbst (Web-API,
+# Tests) ``None``. Nutzer: ``ui.code`` bindet einen Code an den sshd-Prozess des Aufrufers.
+CTL_PEER_PID: contextvars.ContextVar[int | None] = contextvars.ContextVar("ariadne_ctl_peer_pid",
+                                                                          default=None)
+
+
+def ctl_peer_pid() -> int | None:
+    """PID des ctl-Aufrufers der laufenden Operation (Vertrag v0.1-Server 3.4) oder ``None``."""
+    return CTL_PEER_PID.get()
 
 # Ereignisse für :meth:`Daemon.add_listener` (Vertrag v0.1-Server). ``data`` nie mit Zieldaten.
 NOTIFY_KINDS = {
@@ -168,6 +180,7 @@ NOTIFY_KINDS = {
     "locked": "ariadne lock (Projekt geschlossen, bleibt aktiv)",
     "presentation": "on: bool, source",
     "stopping": "Daemon endet",
+    "job": "job_id, kind: reparse, status: running | done | failed",
 }
 
 
@@ -335,7 +348,12 @@ class Daemon:
         """
         self._listeners.append(fn)
 
-    def _notify(self, kind: str, **data: Any) -> None:
+    def remove_listener(self, fn: Listener) -> None:
+        """Meldet ``fn`` ab (Web-Server beim Stopp). Unbekannte ``fn`` werden ignoriert."""
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(fn)
+
+    def _notify(self, kind: str, /, **data: Any) -> None:
         for fn in list(self._listeners):
             self._call_hook(fn, kind, dict(data))
 
@@ -1594,7 +1612,8 @@ class Daemon:
     # ctl.sock
     # ================================================================== #
     async def _handle_ctl(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        if self._peer_ok(writer, shim=False) is None:
+        pid = self._peer_ok(writer, shim=False)
+        if pid is None:
             writer.close()
             return
         try:
@@ -1602,7 +1621,11 @@ class Daemon:
                 line = await reader.readline()
                 if not line:
                     break
-                resp = await self._dispatch_line(line)
+                token = CTL_PEER_PID.set(pid)  # nur für diese Operation (ctl_peer_pid)
+                try:
+                    resp = await self._dispatch_line(line)
+                finally:
+                    CTL_PEER_PID.reset(token)
                 writer.write(json.dumps(resp, ensure_ascii=False).encode() + b"\n")
                 await writer.drain()
         except (ConnectionError, ValueError, asyncio.LimitOverrunError, asyncio.IncompleteReadError):
@@ -1877,9 +1900,10 @@ class Daemon:
         """``ariadne stop``: Projekt beenden und sperren (``stopped: true``)."""
         a = self.active
         was = self.project is not None or (a is not None and not a["stopped"])
+        since = a.get("since_utc") if a is not None and was else None  # Beginn der Session (E91-Hinweis)
         slug, head = self._end_project("stop")
         res: dict[str, Any] = {"stopped": was, "slug": slug if was else None, "head_seq": None,
-                               "head_hash": None}
+                               "head_hash": None, "since_utc": since}
         if head is not None:
             res["head_seq"], res["head_hash"] = head
         return res

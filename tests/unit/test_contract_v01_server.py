@@ -35,7 +35,11 @@ def test_daemon_extension_points():
     assert _params(core.Daemon.add_listener) == ["self", "fn"]
     assert _params(core.Daemon.add_ops) == ["self", "ops"]
     assert "extensions" in _params(core.Daemon.__init__)
-    assert set(core.NOTIFY_KINDS) == {"terminal", "project", "unlocked", "locked", "presentation", "stopping"}
+    assert set(core.NOTIFY_KINDS) == {"terminal", "project", "unlocked", "locked", "presentation", "stopping",
+                                      "job"}
+    assert _params(core.Daemon.remove_listener) == ["self", "fn"]
+    assert _params(IngestService.remove_listener) == ["self", "fn"]
+    assert core.ctl_peer_pid() is None  # ausserhalb einer ctl-Operation
     for op in ("presentation", "unlock", "lock", "status", "terminals", "term.pause", "term.resume",
                "ctx.set", "ctx.push", "ctx.pop", "keystep.mark", "preroll.info", "stop"):
         assert op in core._OPS
@@ -78,6 +82,8 @@ def test_cli_commands_are_registered_by_their_owners():
     assert args.revoke == "all"
     args = parser.parse_args(["backup", "--to-file", "x.age"])
     assert args.to_file == "x.age"
+    args = parser.parse_args(["restore", "--from-file", "x", "--no-verify"])
+    assert args.from_file == "x" and args.no_verify is True
     args = parser.parse_args(["remote", "serve"])
     assert args.rcmd == "serve"
     assert parser.parse_args(["show", "inputs", "--reveal", "12"]).reveal == 12
@@ -89,3 +95,54 @@ def test_e104_fields():
     assert events.validate_header("term.input", h)["no_echo"] is True
     assert inputs.MASK == "••••••••"
     assert _params(inputs.collect_inputs)[:1] == ["journal"]
+
+
+def test_server_part_interfaces():
+    """Teil «server» (additiv): kein Stub mehr, Schnittstellen aus Vertrag 3.1 bis 3.4."""
+    from ariadne.web import app as web_app
+    from ariadne.web import integration, sse
+    from ariadne.web.sessions import SessionStore
+
+    assert integration.STUB is False
+    assert _params(web_app.build_app)[:3] == ["ctx", "sessions", "bus"]
+    assert callable(sse.EventBus().publish)
+    assert {"exchange", "authenticate", "revoke", "listing", "issue_code"} <= set(dir(SessionStore))
+    assert _params(ui_cli.cmd_ui) == ["paths", "args"]
+    ns = cli_main.build_parser().parse_args(["ui", "--revoke", "ab12cd34"])
+    assert ns.revoke == "ab12cd34" and ns.fn is ui_cli.cmd_ui
+
+
+def test_api_part_routes_and_schema():
+    """Teil «api» (additiv): kein Stub mehr; alle Routen [v0.1] und [501] aus docs/web-api.md sind
+    angemeldet, nur unter ``/api/v1``, ohne die Routen des Servers; das Schema lässt sich erzeugen."""
+    from fastapi import FastAPI
+
+    from ariadne.web.api.common import ALLOWED_OPS
+
+    assert web_api.STUB is False
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    web_api.register(app, web_ctx.WebContext(object(), None))
+    paths = {p: {m.upper() for m in ops} for p, ops in app.openapi()["paths"].items()}
+    want = {
+        "/status": {"GET"}, "/terminals": {"GET"}, "/terminals/{tid}/pause": {"POST"},
+        "/terminals/{tid}/resume": {"POST"}, "/terminals/{tid}/context": {"POST"}, "/presentation": {"PUT"},
+        "/p/{pid}/project": {"GET"}, "/p/{pid}/graph": {"GET"}, "/p/{pid}/changes": {"GET"},
+        "/p/{pid}/ui/positions": {"GET", "PUT"}, "/p/{pid}/hosts": {"GET"},
+        "/p/{pid}/hosts/{host_id}": {"GET"},
+        "/p/{pid}/services": {"GET"}, "/p/{pid}/next": {"GET"}, "/p/{pid}/timeline": {"GET"},
+        "/p/{pid}/inputs": {"GET"}, "/p/{pid}/facts/{claim_key}/sources": {"GET"},
+        "/p/{pid}/units/{unit_id}": {"GET"}, "/p/{pid}/units/{unit_id}/lines": {"GET"},
+        "/p/{pid}/units/{unit_id}/log.txt": {"GET"}, "/p/{pid}/decisions": {"POST"},
+        "/p/{pid}/decisions/confirm-group": {"POST"}, "/p/{pid}/search": {"GET"},
+        "/p/{pid}/files/pending": {"GET"}, "/p/{pid}/secrets/reveal": {"POST"},
+        "/p/{pid}/ai/denkanstoss": {"POST"}, "/p/{pid}/credentials": {"GET"}, "/p/{pid}/cred-matrix": {"GET"},
+        "/p/{pid}/blobs/{blob_id}": {"GET"}, "/p/{pid}/exports": {"GET", "POST"},
+        "/p/{pid}/findings": {"GET"},
+    }
+    for path, methods in want.items():
+        assert methods <= paths.get("/api/v1" + path, set()), path
+    assert all(p.startswith("/api/v1/") for p in paths)
+    assert "/api/v1/session" not in paths and "/api/v1/events" not in paths
+    assert not ALLOWED_OPS & {"unlock", "start", "init", "lock", "stop", "shutdown", "redact", "import",
+                              "reparse", "verify", "secrets.add", "project.open", "ui.code"}
+    assert callable(web_api.attach_sources)

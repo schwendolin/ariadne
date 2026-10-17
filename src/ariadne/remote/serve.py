@@ -8,8 +8,13 @@ andere, auch ``scp -t``, ``sftp`` bzw. ``internal-sftp``, Shell-Metazeichen, zus
 und leere Befehle, endet mit einer klaren deutschen Meldung auf stderr und Exit 2.
 
 * ``code``: Schnellprüfung (:func:`ariadne.remote.check.quick_ok`), dann ``ctl ui.code`` mit
-  ``typed`` = stdin ist ein Terminal (``ssh -t``: kurzer Tippcode; ohne Terminal: 128 Bit
-  für den Mac-Helfer). Der Code geht nur auf stdout dieses SSH-Kanals.
+  ``via = "sshd"`` und ``typed`` = stdin ist ein Terminal (``ssh -t``: kurzer Tippcode; ohne
+  Terminal: 128 Bit für den Mac-Helfer). Der Daemon bindet den Code an den sshd-Prozess dieser
+  SSH-Verbindung (Eltern dieses Prozesses, Vertrag 3.4). Ohne Terminal steht auf stdout genau
+  eine Zeile ``<code>``, danach nichts mehr. Dann **hält** ``code`` die Verbindung (sie trägt
+  auch den Tunnel ``-L 127.0.0.1:7330:127.0.0.1:7330``), bis sie endet: Eltern-sshd weg,
+  SIGHUP, SIGTERM, SIGINT (Ctrl-C bei ``ssh -t``) oder SIGPIPE; stdin wird dabei nicht gelesen
+  (der Helfer startet ``ssh -n``). Endet die Verbindung, endet die Anmeldung mit ihr (R6).
 * ``unlock``: nur mit Terminal (``ssh -t``), sonst Ablehnung; dann wie ``ariadne unlock``
   (E101: öffnet das aktive Projekt, E102: Ausfallpuffer ohne Frage).
 * ``lock``, ``revoke``: ctl ``lock`` bzw. ``ui.revoke`` (alle Sitzungen).

@@ -70,7 +70,7 @@ _CSI = re.compile(rb"\x1b\[([0-9;?<=>!]*)([ -/]*)([@-~])")
 _PASTE = (b"\x1b[200~", b"\x1b[201~")
 _TAB = "\t"  # Platzhalter für eine Tab-Vervollständigung (was die Shell ergänzt, ist unbekannt)
 _MAX_TABS = 4  # mehr Platzhalter in einer Zeile: kein Vergleich (dann verdeckt)
-_MATCH_MAX = 4096  # so viel einer angezeigten Zeile prüft der Vergleich mit Platzhaltern
+_MATCH_MAX = 4096  # so viel (vom Ende her) einer angezeigten Zeile prüft der Vergleich
 
 
 @dataclass(frozen=True)
@@ -322,19 +322,64 @@ def _line_shows(target: str, shown: str, cursor: int) -> bool:
     """Steht die getippte Zeile ``target`` (mit Platzhaltern :data:`_TAB`) in der angezeigten
     Zeile ``shown``: am Zeilenende, direkt vor dem Cursor beim Zeilenende, oder (ab
     :data:`ANYWHERE_MIN` Zeichen) irgendwo?"""
-    plain = target.replace(_TAB, "")
-    before_cursor = shown[:cursor] if 0 <= cursor <= len(shown) else shown
-    if _TAB not in target:
-        return (shown.rstrip().endswith(target) or before_cursor.endswith(target)
-                or (len(target) >= ANYWHERE_MIN and target in shown))
     if target.count(_TAB) > _MAX_TABS:
         return False  # zu unklar: verdecken
-    pattern = ".*".join(re.escape(part) for part in target.split(_TAB))
-    rx = re.compile(pattern, re.DOTALL)
-    end = re.compile(f"(?:{pattern})\\Z", re.DOTALL)
-    shown_c, before_c = shown[-_MATCH_MAX:], before_cursor[-_MATCH_MAX:]
-    return (end.search(shown_c.rstrip()) is not None or end.search(before_c) is not None
-            or (len(plain) >= ANYWHERE_MIN and rx.search(shown_c) is not None))
+    parts = target.split(_TAB)
+    before_cursor = shown[:cursor] if 0 <= cursor <= len(shown) else shown
+    shown, before_cursor = shown[-_MATCH_MAX:], before_cursor[-_MATCH_MAX:]
+    if _ends_at(parts, shown.rstrip(), len(shown.rstrip())):
+        return True
+    if _ends_at(parts, before_cursor, len(before_cursor)):
+        return True
+    if len(target.replace(_TAB, "")) < ANYWHERE_MIN:
+        return False
+    return any(_ends_at(parts, shown, end) for end in _candidate_ends(parts, shown))
+
+
+def _ends_at(parts: list[str], text: str, end: int) -> bool:
+    """Endet die getippte Zeile genau bei ``end`` in ``text``? ``parts`` sind die getippten
+    Stücke, zwischen zwei Stücken stand ein Tab. Ein Platzhalter steht für eine Ergänzung
+    ohne Leerzeichen (ein vervollständigtes Wort); am Zeilenende darf ein Leerzeichen folgen
+    (zsh nach einem Dateinamen). Von rechts nach links, jedes Stück so weit rechts wie
+    möglich: linear, ohne reguläre Ausdrücke, denn die Zeile kommt vom Ziel."""
+    limit = end
+    last = parts[-1]
+    if last:
+        start = limit - len(last)
+        if start < 0 or text[start:limit] != last:
+            return False
+        limit = start
+    else:
+        while limit > 0 and text[limit - 1] == " ":
+            limit -= 1
+    for part in reversed(parts[:-1]):
+        if not part:
+            continue  # Zeile begann mit einem Tab: links ist alles offen
+        i = text.rfind(part, 0, limit)
+        if i < 0 or " " in text[i + len(part):limit]:
+            return False
+        limit = i
+    return True
+
+
+def _candidate_ends(parts: list[str], text: str, cap: int = 512) -> list[int]:
+    """Mögliche Enden für den Vergleich «irgendwo in der Zeile» (lange Eingaben): hinter jedem
+    Vorkommen des letzten Stücks bzw. am Ende jedes Worts, wenn die Zeile mit einem Tab
+    endete. Höchstens ``cap`` Stellen; mehr heisst verdecken (lieber zu viel)."""
+    out: list[int] = []
+    last = parts[-1]
+    if last:
+        i = text.find(last)
+        while i >= 0 and len(out) < cap:
+            out.append(i + len(last))
+            i = text.find(last, i + 1)
+    else:
+        for k in range(1, len(text) + 1):
+            if text[k - 1] != " " and (k == len(text) or text[k] == " "):
+                out.append(k)
+                if len(out) >= cap:
+                    break
+    return out
 
 
 def output_window(chunks: Iterable[tuple[int, bytes]], start: int, out_end: int,

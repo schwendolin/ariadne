@@ -123,7 +123,7 @@ def test_distrust_rejects_only_values_from_that_command():
     assert (os_["state"], os_["confidence"]) == ("auto", 0.85)
     assert rows(conn, "SELECT cmd_id, rejected, weakened FROM unit_distrust") == [(CMD_A, 2, 1)]
     assert queries.distrust_result(conn, CMD_A) == {"cmd_id": CMD_A, "cmd_ref": "00000001@100",
-                                                    "rejected": 2, "weakened": 1}
+                                                    "rejected": 2, "weakened": 1, "decision_id": "dec-50"}
     dis = rows(conn, "SELECT group_key, distrusted FROM claim_source WHERE claim_key = ? ORDER BY 1",
                os_["claim_key"])
     assert dis == [(CMD_A, 1), (CMD_B, 0)]
@@ -186,7 +186,7 @@ def test_resolve_cmd_short_and_full():
     assert queries.resolve_cmd(conn, "0199a2b3@5000").endswith("@5000")
     try:
         queries.resolve_distrust(conn, "0199a2b3@5000")  # Befehl ohne Werte
-    except queries.RefError:
+    except queries.NothingToUndo:  # eigener Fall (ctl conflict, Web-API 409), weiter ein RefError
         pass
     else:
         raise AssertionError("ohne Werte darf undo nichts schreiben")

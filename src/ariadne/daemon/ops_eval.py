@@ -14,6 +14,7 @@ Secrets stehen ungeschwärzt im Journal und werden erst hier ersetzt.
 from __future__ import annotations
 
 import asyncio
+import itertools
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,9 @@ def _exit(d: Daemon, obj: Any) -> Any:
     return out
 
 
+_JOBS = itertools.count(1)  # Nummern für Ereignisse ``job`` (pro Daemon-Lauf)
+
+
 def _origin(args: dict[str, Any]) -> str:
     """Herkunft eines Entscheids: ``cli`` (Standard) oder ``webui`` (Web-API, Vertrag v0.1-Server)."""
     return "webui" if args.get("origin") == "webui" else "cli"
@@ -53,6 +57,8 @@ async def _resolve(d: Daemon, fn: Callable[[Any], Any]) -> Any:
     ing = await d._sync_ingest()
     try:
         return await ing.query(fn)
+    except queries.NothingToUndo as exc:  # Befehl bekannt, aber ohne Werte (Web-API 409)
+        raise OpError("conflict", str(exc)) from None
     except queries.RefError as exc:
         raise OpError("not_found", str(exc)) from None
 
@@ -149,8 +155,18 @@ async def op_input_reveal(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def op_reparse(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
+    """Neubau der Auswertung. Meldet Beginn und Ende als Ereignis ``job`` (Vertrag v0.1-Server:
+    die Web-API macht daraus ``progress`` und danach ``reset``)."""
     ing = await d._sync_ingest()
-    return _exit(d, await ing.reparse())
+    job_id = f"reparse-{next(_JOBS)}"
+    d._notify("job", job_id=job_id, kind="reparse", status="running")
+    status = "failed"
+    try:
+        res = await ing.reparse()
+        status = "done"
+    finally:
+        d._notify("job", job_id=job_id, kind="reparse", status=status)
+    return _exit(d, res)
 
 
 OPS: dict[str, Callable[[Daemon, dict[str, Any]], Any]] = {

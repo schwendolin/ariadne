@@ -122,3 +122,48 @@ def test_context_from_web_is_retroactive_and_marked_webui(paths, operator):
         await s.close()
 
     run(paths, operator, scenario)
+
+
+def test_ctl_peer_pid_only_during_ctl_operation(paths, operator):
+    """``ui.code`` bindet einen Code an den sshd-Prozess des Aufrufers (Vertrag 3.4): Dafür kennt eine
+    Operation über ``ctl.sock`` die PID des Aufrufers; aus dem Daemon selbst (Web-API) ist sie ``None``."""
+    import os
+
+    from ariadne.daemon.core import ctl_peer_pid
+
+    async def scenario(d) -> None:
+        d.add_ops({"ui.peer": lambda daemon, args: {"pid": ctl_peer_pid()}})
+        assert await ctl_ok(paths.ctl_sock, "ui.peer") == {"pid": os.getpid()}  # Test und Daemon: ein Prozess
+        assert (await d.call("ui.peer"))["result"] == {"pid": None}
+        assert ctl_peer_pid() is None
+
+    run(paths, operator, scenario)
+
+
+def test_remove_listener_and_reparse_job_events(paths, operator):
+    seen: list[tuple[str, dict[str, Any]]] = []
+    gone: list[str] = []
+
+    async def scenario(d) -> None:
+        def keep(kind: str, data: dict[str, Any]) -> None:
+            seen.append((kind, data))
+
+        def drop(kind: str, data: dict[str, Any]) -> None:
+            gone.append(kind)
+
+        d.add_listener(keep)
+        d.add_listener(drop)
+        d.remove_listener(drop)
+        d.remove_listener(drop)  # zweimal: kein Fehler
+        ing_calls: list[Any] = []
+        d.ingest.add_listener(ing_calls.append)
+        d.ingest.remove_listener(ing_calls.append)
+        await ctl_ok(paths.ctl_sock, "start", slug="lame", targets=["10.10.10.3"])
+        await ctl_ok(paths.ctl_sock, "reparse")
+        assert ing_calls == []
+
+    run(paths, operator, scenario)
+    assert gone == []
+    jobs = [d for k, d in seen if k == "job"]
+    assert [(j["kind"], j["status"]) for j in jobs] == [("reparse", "running"), ("reparse", "done")]
+    assert jobs[0]["job_id"] == jobs[1]["job_id"]

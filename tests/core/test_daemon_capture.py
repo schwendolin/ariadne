@@ -162,8 +162,10 @@ def test_start_open_create_switch_stop_and_errors(paths, operator):
         assert [r.header for r in ends] == [{"reason": "switch"}]
         lame_tail = [r.kind for r in seen if r.seq >= ends[0].seq and r.ts_utc_ns >= ends[0].ts_utc_ns]
         assert lame_tail[0] == "system.project_end" and d.project.info.id != lame_id
+        since = json.loads(paths.active_file.read_text())["since_utc"]
         res = await ctl_ok(paths.ctl_sock, "stop")
         assert res["stopped"] and res["slug"] == "beta" and res["head_seq"] > 0
+        assert res["since_utc"] == since  # Beginn der Session für den Sicherungshinweis (E91)
         assert json.loads(paths.active_file.read_text())["stopped"] is True
         assert d.operator is None and d.project is None
         resp = await ctl(paths.ctl_sock, "start")
@@ -172,7 +174,7 @@ def test_start_open_create_switch_stop_and_errors(paths, operator):
         assert resp["error"]["code"] == "locked"
         d.operator = backup
         res = await ctl_ok(paths.ctl_sock, "stop")
-        assert res["stopped"] is False
+        assert res["stopped"] is False and res["since_utc"] is None
         await shim.close()
 
     run(paths, operator, scenario)

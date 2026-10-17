@@ -189,6 +189,7 @@ def test_nmap_flow_companions_routes_views_and_decisions(paths, operator, fake_i
         assert diff["added"] == 0 and diff["removed"] == 0 and diff["changed"] == 0, diff
         dis = next(d.project.journal.iter_events(kinds=["d.unit.distrust"]))
         assert dis.header == {"cmd_id": nmap_row["cmd_id"], "reason": "falsches Ziel"}
+        assert res["decision_id"] == dis.id  # zum Aufheben mit d.revoke (Web-API)
         bad = await ctl(paths.ctl_sock, "unit.distrust", ref="ffffffff@1")
         assert not bad["ok"] and bad["error"]["code"] == "not_found"
         await shim.close()

@@ -188,6 +188,11 @@ class IngestService:
         """``fn(update)`` nach jedem erfolgreichen Durchgang, im Loop-Thread aufgerufen."""
         self._listeners.append(fn)
 
+    def remove_listener(self, fn: Listener) -> None:
+        """Meldet ``fn`` ab (Ereignisquellen der Web-API beim Stopp). Unbekannte ``fn``: nichts."""
+        if fn in self._listeners:
+            self._listeners.remove(fn)
+
     def _publish(self, update: IngestUpdate) -> None:
         """Aus dem Thread der Auswertung: Listener im Loop-Thread aufrufen."""
         loop = self._loop

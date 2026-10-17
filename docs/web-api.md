@@ -1,6 +1,6 @@
 # Ariadne: HTTP-API der Web-Oberfläche (v2)
 
-> **Verbindlich für den Bau v0.1-Server.** Stand 2026-10-15. Ersetzt den Entwurf vom 2026-10-09 (v1). Grundlage sind die Entscheide vom 2026-10-15 (E22, E23, E26, E42, E45, E60, E72, E74, E86 bis E104), das [Konzept Fernzugriff](konzept-fernzugriff.md) (Regeln R1 bis R14, Tests T1 bis T16), die [Lösungsarchitektur](architektur.md) (7, 8.5, 8.6, 9.2), die Funktionsbeschreibung des Dashboards ([dashboard-funktionen.md](ui/dashboard-funktionen.md), Anhang B.4 und B.5) und der echte Datenbestand: `ingest/queries.py`, `ingest/schema_claims.py`, `ingest/schema_units.py`, `ingest/inputs.py`, `cli/views.py` und die ctl-Operationen in `daemon/core.py` und `daemon/ops_eval.py`.
+> **Verbindlich für den Bau v0.1-Server.** Stand 2026-10-17 (Phase 1, nach Prüfung überarbeitet: Peer-Bindung bei Weg B, `d.unit.distrust` über `/decisions`, Ereignisquellen). Ersetzt den Entwurf vom 2026-10-09 (v1). Grundlage sind die Entscheide vom 2026-10-15 (E22, E23, E26, E42, E45, E60, E72, E74, E86 bis E104), das [Konzept Fernzugriff](konzept-fernzugriff.md) (Regeln R1 bis R14, Tests T1 bis T16), die [Lösungsarchitektur](architektur.md) (7, 8.5, 8.6, 9.2), die Funktionsbeschreibung des Dashboards ([dashboard-funktionen.md](ui/dashboard-funktionen.md), Anhang B.4 und B.5) und der echte Datenbestand: `ingest/queries.py`, `ingest/schema_claims.py`, `ingest/schema_units.py`, `ingest/inputs.py`, `cli/views.py` und die ctl-Operationen in `daemon/core.py` und `daemon/ops_eval.py`.
 >
 > Das Dokument heisst «v2», weil sich das Modell gegenüber v1 grundlegend geändert hat (Daueraufnahme statt REC, Arbeitsliste «Als Nächstes» statt Inbox, Eingaben, Sitzungen mit Peer-Bindung). Der Pfad bleibt `/api/v1`; `GET /status` meldet `api_version: 2`. Später ist das OpenAPI-Schema der FastAPI-App der verbindliche Vertrag, und die UI erzeugt ihre Typen daraus (`openapi-typescript`). Die Svelte-Oberfläche (`webui/`) ändert sich in diesem Bau nicht; ihre Typen folgen dem Design des Nutzers.
 
@@ -40,7 +40,7 @@ Die Regeln R1 bis R3, R5 bis R8 und R12 aus dem Konzept Fernzugriff (5.4) und Ar
 | Thema | Regel | Regel-Nr. |
 |---|---|---|
 | Bindung | nur `127.0.0.1` oder `::1`, Standardport 7330 (`[ui] port` in `config.toml`, `0` nur für Tests). Jede andere Adresse lehnt die Konfiguration ab, der HTTP-Teil startet dann nicht (fail-closed), die Aufnahme läuft weiter. Nach dem Start prüft der Server `getsockname()`. Nur HTTP/1.1, kein TLS | R1, E89 |
-| Peer | Jede TCP-Verbindung muss einem Prozess desselben Benutzers gehören (UID über `/proc/net/tcp` bzw. `tcp6`), sonst wird sie ohne Antwort geschlossen. Beim Tausch Code gegen Token merkt sich der Server PID und Startzeit des Peer-Prozesses (bei Weg B der sshd-Prozess der Sitzung); das Token gilt nur von dort | R2 |
+| Peer | Jede TCP-Verbindung muss einem Socket desselben Benutzers gehören (UID über `/proc/net/tcp` bzw. `tcp6`), sonst wird sie ohne Antwort geschlossen. Jedes Token ist an einen Prozess gebunden (PID und Startzeit) und gilt nur, solange dieser lebt. **lokal** (Weg E): der Prozess hinter der Verbindung beim Tausch Code gegen Token (Browser in der Kali, gefunden über den Socket in `/proc/<pid>/fd`); jede spätere Verbindung muss zu genau diesem Prozess gehören. **über sshd** (Weg B): der sshd-Prozess der SSH-Verbindung, über die `ariadne remote serve code` den Code geholt hat; diese Verbindung trägt auch den Tunnel. Der sshd-Prozess ist nach dem Rechtewechsel nicht lesbar («nicht dumpable»), darum gilt: Eine Verbindung, deren Prozess lesbar ist, muss der gebundene sein; eine Verbindung ohne lesbaren Prozess wird nur bei einer sshd-Sitzung angenommen | R2 |
 | Host | `Host` exakt `127.0.0.1:PORT`, `localhost:PORT` oder `[::1]:PORT`, sonst 421. Keine Ausnahme für `*.ts.net`, Tunnel-Dienste oder Lab-IPs | R3 |
 | Fetch-Metadaten | `Sec-Fetch-Site` nur `same-origin` oder `none` (oder fehlend, etwa bei `curl`), sonst 403, auch für statische Dateien und `/api/v1/session` | R12 |
 | Origin | bei `POST`, `PUT`, `PATCH`, `DELETE` Pflicht und genau der eigene (`http://127.0.0.1:PORT`, bzw. der Wert passend zum `Host`), sonst 403 | R12 |
@@ -136,7 +136,7 @@ type ApiErrorCode =
   | 'internal';         // 500
 ```
 
-Die UI übersetzt nur über `code`. Für jede Route unter `/api/v1/p/{pid}` gelten zusätzlich 401, 409 `no_project`/`project_mismatch` und 423 `locked`; sie stehen unten nicht jedes Mal dabei. Codes der ctl-Operationen bildet der Server so ab: `locked` → 423, `no_project` → 409, `not_found`/`unknown_terminal` → 404, `invalid` → 422, `policy` → 403, `project_changed` → 409 `conflict`, `no_ingest` → 503, alles andere → 500 `internal`.
+Die UI übersetzt nur über `code`. Für jede Route unter `/api/v1/p/{pid}` gelten zusätzlich 401, 409 `no_project`/`project_mismatch` und 423 `locked`; sie stehen unten nicht jedes Mal dabei. Codes der ctl-Operationen bildet der Server so ab: `locked` → 423, `no_project` → 409, `not_found`/`unknown_terminal` → 404, `invalid` → 422, `policy` → 403, `conflict` und `project_changed` → 409 `conflict`, `no_ingest` → 503, alles andere → 500 `internal`. Die Meldung der ctl-Operation geht nie an den Browser (sie kann Zieldaten enthalten); es gilt der feste Text des Codes.
 
 ### 1.6 Paginierung und Grenzen
 
@@ -213,9 +213,11 @@ interface QuietCounts {               // stille Spur als Zähler (E42)
 Der Code kommt nie aus dem Browser. Er entsteht im Daemon (ctl-Operation `ui.code`) und erreicht den Browser auf einem von zwei Wegen:
 
 - **Weg E (Browser in der Kali):** `ariadne ui` schreibt eine Startdatei mit Rechten 0600 nach `$XDG_RUNTIME_DIR/ariadne/`, die auf `http://127.0.0.1:7330/#c=<code>` weiterleitet, öffnet sie und löscht sie nach 10 s. `ariadne ui --code` zeigt einen kurzen Tippcode im Terminal (vorher `pause_terminal`, damit er nicht in die Aufnahme kommt).
-- **Weg B (Mac über Tailscale und SSH):** `ariadne-mac start` holt den Code über `ssh kali-sl code` (Forced Command `ariadne remote serve`, ohne Terminal: 128 Bit), schreibt die Startdatei (0600) in `$TMPDIR` des Macs, öffnet sie im normalen Standardbrowser (E93) und löscht sie nach 10 s. Von Hand: `ssh -t kali-sl code` zeigt einen Tippcode.
+- **Weg B (Mac über Tailscale und SSH):** `ariadne-mac start` öffnet **eine** SSH-Verbindung für Tunnel und Code: `ssh -n -o ExitOnForwardFailure=yes -L 127.0.0.1:7330:127.0.0.1:7330 kali-sl code` (Forced Command `ariadne remote serve`, ohne Terminal: 128 Bit). `remote serve code` gibt den Code aus und hält die Verbindung offen, bis sie endet; der Code und das Token daraus sind an den sshd-Prozess genau dieser Verbindung gebunden (R2). Der Helfer schreibt die Startdatei (0600) in `$TMPDIR` des Macs, öffnet sie im normalen Standardbrowser (E93) und löscht sie nach 10 s. Von Hand: `ssh -t -L 127.0.0.1:7330:127.0.0.1:7330 kali-sl code` zeigt einen Tippcode und hält den Tunnel, bis Ctrl-C.
 
 Das Fragment `#c=` geht nie an den Server. Die SPA liest es, entfernt es sofort per `history.replaceState` und tauscht den Code gegen ein Token, das nur in `sessionStorage` liegt.
+
+Ein Code gilt nur auf seinem Weg: Ein lokaler Code (`ariadne ui`) nur von einem lesbaren Prozess der Kali (dem Browser), ein Code aus `remote serve code` nur über SSH (eine Verbindung, deren Prozess nicht lesbar ist oder der gebundene sshd-Prozess selbst), und das Token daraus nur, solange die SSH-Verbindung lebt, die den Code geholt hat. Ein Code auf dem falschen Weg ergibt 401 und zählt als Fehlversuch.
 
 | Code | Form | Gültigkeit |
 |---|---|---|
@@ -255,7 +257,7 @@ Abmelden: widerruft das eigene Token. Antwort 204 mit `Clear-Site-Data: "cache",
 
 ### Ende einer Sitzung
 
-Ein Token gilt höchstens 12 h und endet zusätzlich bei `ariadne lock`, `ariadne stop`, `ariadne project close`, dem Leerlauf-Ende, einem Neustart des Daemons (Tokens liegen nur im Speicher, nur als SHA-256), `ariadne ui --revoke` bzw. `ssh kali-sl revoke`, `DELETE /session` und wenn der gebundene Prozess endet (Tunnel zu, Mac zugeklappt; der Server prüft das alle 2 s). Ein Projektwechsel mit `ariadne start <anderes>` beendet die Sitzung **nicht**; der Strom meldet `project`, und die UI verwirft alle Daten. Offene SSE-Ströme enden in allen Fällen innerhalb 1 s; die nächste REST-Anfrage ergibt 401. Die UI zeigt dann die Anmeldung ohne Grund (dashboard-funktionen 4.1).
+Ein Token gilt höchstens 12 h und endet zusätzlich bei `ariadne lock`, `ariadne stop`, `ariadne project close`, dem Leerlauf-Ende, einem Neustart des Daemons (Tokens liegen nur im Speicher, nur als SHA-256), `ariadne ui --revoke` bzw. `ssh kali-sl revoke`, `DELETE /session` und wenn der gebundene Prozess endet (lokal: der Browser-Prozess; über sshd: die SSH-Verbindung mit Tunnel und Code, also Tunnel zu oder Mac zugeklappt; der Server prüft das alle 2 s). Ein Projektwechsel mit `ariadne start <anderes>` beendet die Sitzung **nicht**; der Strom meldet `project`, und die UI verwirft alle Daten. Offene SSE-Ströme enden in allen Fällen innerhalb 1 s; die nächste REST-Anfrage ergibt 401. Die UI zeigt dann die Anmeldung ohne Grund (dashboard-funktionen 4.1).
 
 `ariadne ui --sessions` zeigt jede Sitzung mit Herkunft (lokal oder über sshd), Prozess, Beginn, letzter Nutzung und Ablauf, nie das Token (R7).
 
@@ -291,6 +293,9 @@ interface Status {
   generation: number | null;          // Projektionsgeneration (für /changes)
   ingest: { active: boolean; last_error: string | null } | null;
   disk_low: boolean;                  // v0.1 immer false (Speicher-Wächter folgt)
+  scope_warning: {                    // jüngster Befehl mit Ziel ausserhalb des Scopes (E67, Briefing 4.5);
+    cmd_id: string; cmd_ref: string; terminal_id: string; ts: string;   // Kennzeichen bis zum Quittieren,
+  } | null;                           // quittiert wird nur in der UI (bis ein neuerer kommt); null ohne Projekt
 }
 interface ProjectBrief {
   id: string; slug: string; name: string; profile: Profile; chain_head_ok: boolean;
@@ -657,7 +662,7 @@ interface InputView {
 ### 10.3 Eingaben ohne Echo (E104)
 
 - **Gespeichert wird immer alles** (`term.input`, verschlüsselt).
-- **Verdeckt** wird eine Eingabe, wenn der Shim beim Tippen den Passwortmodus des Kindes sah (`ECHO` aus, `ICANON` an, Feld `no_echo` am Event), wenn die getippten druckbaren Zeichen in der Ausgabe ab dem ersten getippten Byte bis kurz nach dem Enter nicht wieder erscheinen (Remote-Shells), oder wenn diese Ausgabe fehlt (Lücke). Kurze Wörter zählen nur als Echo, wenn sie eine angezeigte Zeile beenden. Lieber zu viel als zu wenig verdecken.
+- **Verdeckt** wird eine Eingabe, wenn der Shim beim Tippen den Passwortmodus des Kindes sah (`ECHO` aus, `ICANON` an, Feld `no_echo` am Event), wenn die getippten druckbaren Zeichen in der Ausgabe ab dem ersten getippten Byte bis kurz nach dem Enter nicht wieder erscheinen (Remote-Shells), oder wenn diese Ausgabe fehlt (Lücke). Kurze Wörter zählen nur als Echo, wenn sie eine angezeigte Zeile beenden oder direkt vor dem Cursor stehen, als die Zeile endete (rechter Prompt, Vorschläge rechts vom Cursor); ein Tab gilt als Platzhalter für die Vervollständigung (ein Wort ohne Leerzeichen). Lieber zu viel als zu wenig verdecken.
 - **Aufdecken** nur ausdrücklich und einzeln (13.3). Die CLI hat dasselbe: `ariadne show inputs` und `ariadne show inputs --reveal NR`.
 
 ## 11 Belege
@@ -723,10 +728,11 @@ Bilder (Screenshots). Nur `image/png`, `image/jpeg`, `image/webp` nach Neukodier
 interface DecisionRequest { decisions: DecisionInput[] }      // 1 bis 500
 interface DecisionInput { kind: DecisionKind; payload: object; client_ref?: string }   // client_ref: UUID der UI
 // Antwort 201
-interface DecisionResponse { results: { decision_id: string | null; seq: number | null; client_ref: string | null }[] }
+interface DecisionResponse { results: { decision_id: string | null; seq: number | null; client_ref: string | null;
+                                       effect: { rejected: number; weakened: number } | null }[] }   // effect nur bei d.unit.distrust
 ```
 
-`client_ref` macht Wiederholungen idempotent (derselbe Wert innerhalb von 10 Minuten liefert das frühere Ergebnis). Auf jeden erfolgreichen Entscheid folgen die SSE-Ereignisse `changes` und, bei Wirkung auf die Arbeitsliste, `inbox`; die UI aktualisiert sich über sie, nicht über die Antwort.
+`client_ref` macht Wiederholungen idempotent (derselbe Wert innerhalb von 10 Minuten liefert das frühere Ergebnis). «Alle oder keiner»: Der Server prüft zuerst jede Nutzlast (`events.validate_header`) und jeden Bezug (Claim, Konflikt, Entscheid, Befehl) gegen den Stand der Auswertung und reiht erst danach alle Entscheide ein; sie gehen in einem Commit ins Journal. Unmittelbar vor dem Einreihen prüft er noch einmal, dass `pid` das offene Projekt ist (E70). Auf jeden erfolgreichen Entscheid folgen die SSE-Ereignisse `changes` und, bei Wirkung auf die Arbeitsliste, `inbox`; die UI aktualisiert sich über sie, nicht über die Antwort.
 
 | `kind` | Nutzlast (events.py) | UI-Aktion | Stand |
 |---|---|---|---|
@@ -741,7 +747,7 @@ interface DecisionResponse { results: { decision_id: string | null; seq: number 
 | `d.terminal.label` | `{ terminal_id, label }` (bis 64 Zeichen) | Terminal umbenennen | [v0.1] |
 | `d.keystep.mark` | `{ step, host?, note? }` (ohne Terminal-Offset) | Schlüsselschritt im Host-Detail | [v0.1] |
 | `d.revoke` | `{ decision_id, reason? }` | Rückgängig eines Entscheids, auch Aufheben von «Rückgängig pro Befehl» | [v0.1] |
-| `d.unit.distrust` | nur über `POST /commands/{cmd_id}/distrust` | Rückgängig pro Befehl | [v0.1] |
+| `d.unit.distrust` | `{ cmd_id, reason? }`; `cmd_id` voll oder als `cmd_ref`; **allein** in der Anfrage | Rückgängig pro Befehl (E42); Ergebnis mit `effect` | [v0.1] |
 | `d.ctx.*` | nur über `POST /terminals/{tid}/context` | Kontext | [v0.1], hier 422 |
 | `d.scope.update`, `d.lab.not_customer` | | kritisch: in v0.1 nur im Terminal | 403 `policy` |
 | `d.automode.set` | | nur Profil customer | [v0.3] |
@@ -763,9 +769,9 @@ interface ConfirmGroupResult {
 
 Im Profil lab ist «Bestätigen» leer; die Route gibt es trotzdem. Fehler: 404 (Gruppe unbekannt).
 
-### POST /api/v1/p/{pid}/commands/{cmd_id}/distrust [v0.1]
+### Rückgängig pro Befehl [v0.1]
 
-Rückgängig pro Befehl (E42, `d.unit.distrust`, ctl `unit.distrust` mit Herkunft `webui`). Request `{ reason?: string }` (bis 500 Zeichen). Antwort 201 `{ cmd_id, cmd_ref, rejected, weakened, decision_id }` («18 verworfen, 0 geschwächt»). Aufheben mit `d.revoke` auf `decision_id`. Fehler: 404 (Befehl unbekannt), 409 `conflict` (aus diesem Befehl stammen keine Werte).
+`d.unit.distrust` geht wie jeder Entscheid über `POST /decisions`, aber allein in der Anfrage (sonst 422). Der Server löst `cmd_id` bzw. `cmd_ref` über die ctl-Operation `unit.distrust` mit Herkunft `webui` auf und schreibt damit den Entscheid; `effect` nennt «18 verworfen, 0 geschwächt». Aufheben mit `d.revoke` auf `decision_id`. Fehler: 404 (Befehl unbekannt), 409 `conflict` (aus diesem Befehl stammen keine Werte).
 
 ## 13 Suche, Warteliste, Aufdecken
 
@@ -830,7 +836,7 @@ data: {"project_id":"0199…","generation":43,"entities":{"host":1,"claim":3}}
 | `project` | `{ project_id: string \| null, change: 'opened' \| 'closed' \| 'locked' \| 'unlocked', locked: boolean }` | **alle Daten verwerfen**, laufende Abrufe abbrechen, `/status` neu laden |
 | `reset` | `{ reason: 'reparse' \| 'buffer' \| 'restart' }` (auch, wenn die Generation zurückspringt) | alles neu laden |
 | `presentation` | `{ on: boolean }` | Kennzeichen, Logzeilen und offene Belege neu laden |
-| `progress` | `{ job_id, kind, status, pct: number \| null, message: string \| null }` | v0.1 nur `reparse`; `message` ist fester deutscher Text, nie Ziel- oder Modelltext |
+| `progress` | `{ job_id, kind, status, pct: number \| null, message: string \| null }` | v0.1 nur `reparse` (aus dem Daemon-Ereignis `job`; nach `done` folgt `reset` mit `reason: 'reparse'`); `message` ist fester deutscher Text, nie Ziel- oder Modelltext |
 
 Der Strom läuft auch ohne Projekt und bei gesperrtem Projekt; dann kommen nur `terminal`, `project` und `presentation`.
 
@@ -858,6 +864,7 @@ Jede Route mit Marke «501» existiert in diesem Bau, durchläuft dieselbe Middl
 3. **Bezugspunkt «Neu seit»** (Briefing 13.1, Frage 2): ohne Browser-Speicher geht er beim Neuladen verloren. Vorschlag: `GET/PUT /p/{pid}/ui/seen` in `state.db`, wie die Positionen.
 4. **Mehrere Tabs**: je ein Strom (höchstens 8 pro Sitzung). Später `BroadcastChannel`.
 5. **Peer-Bindung bei Weg E**: Ob Firefox in der Kali alle Anfragen aus demselben Prozess stellt (Socket-Prozess), ist zu verifizieren. Wechselt der Prozess, endet die Sitzung (lieber neu anmelden als ein fremdes Token annehmen).
+8. **Peer-Bindung bei Weg B**: Der sshd-Prozess der Sitzung ist für den eigenen Benutzer nicht lesbar (nach dem Rechtewechsel nicht «dumpable»), seine Sockets lassen sich ihm also nicht zuordnen. Gebunden wird darum an die SSH-Verbindung, die den Code geholt hat (PID über `ctl.sock` und die Eltern von `remote serve`), und jede Verbindung mit lesbarem Prozess muss genau dieser sein. Ein anderer, ebenfalls nicht lesbarer Prozess desselben Benutzers könnte ein gestohlenes Token benutzen, solange der Tunnel steht; ein solcher Prozess kann aber ohnehin `ctl.sock` erreichen und Codes holen (gleiche UID, Architektur 9.1 A4).
 6. **Positionen bei Merge und Split**: Wer verschiebt gespeicherte Positionen, wenn sich die stärkste Kennung eines Hosts ändert? v0.1: die UI legt einen unbekannten Knoten neu.
 7. **IP-Adressen in der URL** (Briefing 13.3): `?host=ip:default/…` steht im Browserverlauf. v0.1 erlaubt es; neutrale IDs wären eine spätere Änderung.
 
@@ -870,7 +877,7 @@ Jede Route mit Marke «501» existiert in diesem Bau, durchläuft dieselbe Middl
 | `held` mit Slug | `TerminalState.held_slug` |
 | Inbox-Modell weicht vom Backend ab | `/next` mit den echten Arten aus `inbox_item` |
 | `adopted`, `distrusted`, `cmd_ref` fehlen in der Zeitachse | `TimelineItem` `command` |
-| `d.unit.distrust` fehlt | `POST /commands/{cmd_id}/distrust`, Aufheben mit `d.revoke` |
+| `d.unit.distrust` fehlt | `POST /decisions` mit `d.unit.distrust` (allein), Aufheben mit `d.revoke` |
 | `rec` als Ereignis überholt, Ereignisse für Pause, `held`, Vorlauf, Kontext «auto», Scope-Warnung fehlen | `terminal` mit `change`, Scope-Warnung am Befehl in der Zeitachse |
 | Herkunft der Sitzung, Volltextsuche, eigene Secrets aufdecken | `GET /session`, `GET /search`, 13.3 (eigene Secrets bewusst nicht) |
 | Datei aus der Warteliste übernehmen, Export-Vorschau, Session abspielen, Phasenzuordnung | Abschnitt 15 |

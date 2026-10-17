@@ -6,6 +6,8 @@ Grundsatz: lieber zu viel als zu wenig verdecken. Gespeichert wird immer alles (
 from __future__ import annotations
 
 import pytest
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 from ariadne.ingest import inputs as I
 from ariadne.store.memory import MemoryJournal
@@ -48,8 +50,60 @@ def test_render_handles_cr_bs_and_line_editor_redraws():
 
 def test_remote_shell_echo_is_seen():
     assert I.echo_seen(b"id\r", b"id\r\n") is True
-    assert I.echo_seen(b"cd /et\t\r", b"cd /etc/\r\n") is False  # kurz und endet nicht die Zeile
     assert I.echo_seen(b"cd /etc/passwd-\t\r", b"cd /etc/passwd-old \r\n") is True  # lang: irgendwo
+    assert I.echo_seen(b"cat x\r", b"cat y\r\n") is False
+
+
+def test_tab_completion_is_a_placeholder():
+    """Was die Shell beim Tab ergänzt, kennt nur die Ausgabe."""
+    assert I.echo_seen(b"cd /et\t\r", b"cd /etc/\r\n") is True
+    assert I.echo_seen(b"cat /et\tpas\t\r", b"cat /etc/passwd\r\n") is True
+    assert I.echo_seen(b"ls Dok\t\x7f\r", b"ls Dokumente\r\n") is True  # Backspace nach dem Tab
+    assert I.echo_seen(b"cd /et\t\r", b"cd /usr/\r\n") is False
+    # echte zsh (compinit): «ls Dok», Tab, Enter
+    zsh = b"l\x08ls Dokumente\x1b[1m/\x1b[0m\x08\x1b[0m \x08\x1b[?2004l\r\r\n"
+    assert I.echo_seen(b"ls Dok\t\r", zsh) is True
+    assert I.echo_seen(b"a\tb\tc\td\te\tf\r", b"a1b2c3d4e5f\r\n") is False  # zu viele Platzhalter
+
+
+def test_right_prompt_and_suggestions_right_of_the_cursor():
+    """zsh mit RPROMPT (Kali zeigt nach einem Fehler ``1 ⨯`` rechts): Die Zeile endet nicht mit
+    dem Getippten, aber der Cursor stand beim Enter direkt dahinter. Aufgenommen aus echter zsh."""
+    out = b"# \x1b[K\x1b[74C[1]\x1b[77Dl\x08ls\x1b[?2004l\r\r\nexp.py\r\n"
+    assert I.render_output(out)[0].endswith("[1]")
+    assert I.echo_seen(b"ls\r", out) is True
+    # zsh-autosuggestions: Vorschlag rechts vom Cursor, beim Enter nicht gelöscht
+    sug = b"$ i\x1b[90md -u\x1b[0m\x1b[4Dd\x1b[?2004l\r\r\n"
+    assert I.render_output(sug)[0] == "$ id -u"
+    assert I.echo_seen(b"id\r", sug) is True
+
+
+def test_placeholder_is_one_word_and_anchored():
+    assert I.echo_seen(b"cat\tx\r", b"cat foo x\r\n") is False  # Ergänzung ohne Leerzeichen
+    assert I.echo_seen(b"ls Dok\t\r", b"ls Dokumente/ \r\n") is True  # zsh hängt ein Leerzeichen an
+    assert I.echo_seen(b"toor\t\r", b"toor@lame's password: \r\n") is False  # vorab getippt
+    assert I.echo_seen(b"cd /etc/passwd-\t -la\r", b"x cd /etc/passwd-old -la y\r\n") is True  # lang
+
+
+@settings(max_examples=200, deadline=None)
+@given(pw=st.text(alphabet=st.characters(min_codepoint=0x21, max_codepoint=0x7E), min_size=1, max_size=40),
+       prompt=st.text(alphabet=st.characters(min_codepoint=0x20, max_codepoint=0x7E), max_size=60))
+def test_password_absent_from_output_is_never_seen(pw, prompt):
+    """Sicherheit: Steht das Getippte nirgends in der Ausgabe, gilt es nie als Echo."""
+    assume(pw not in prompt)
+    assert I.echo_seen(pw.encode() + b"\r", prompt.encode() + b"\r\r\n") is False
+    assert I.classify(pw.encode() + b"\r", tty_no_echo=False, output=prompt.encode() + b"\r\n").hidden
+
+
+def test_hostile_long_line_is_fast():
+    """Die Ausgabe kommt vom Ziel: Der Vergleich ist linear (kein Rückverfolgen wie bei Regex)."""
+    import time
+
+    line = b"a" * 200_000 + b"\r\n"
+    t0 = time.monotonic()
+    assert I.echo_seen(b"a\ta\ta\ta\tb\r", line) is False
+    assert I.echo_seen(b"aaaaaaaaaaaaaaaaab\r", line) is False
+    assert time.monotonic() - t0 < 1.0
 
 
 def test_password_without_echo_is_not_seen():
@@ -59,8 +113,11 @@ def test_password_without_echo_is_not_seen():
 
 
 def test_short_secret_typed_ahead_into_prompt_is_not_an_echo():
-    """Vorab getippt, dann erscheint der Prompt: «root» steht darin, beendet aber keine Zeile."""
+    """Vorab getippt, dann erscheint der Prompt: «root» steht darin, beendet aber keine Zeile,
+    und der Cursor steht beim Enter hinter dem Prompt, nicht hinter «root»."""
     assert I.echo_seen(b"root\r", b"root@10.10.10.3's password: \r\n") is False
+    assert I.echo_seen(b"root\t\r", b"root@10.10.10.3's password: \r\n") is False
+    assert I.echo_seen(b"msfadmin\r", b"[sudo] password for msfadmin: \r\r\n") is False
 
 
 def test_output_window_cuts_after_enter_and_detects_gaps():

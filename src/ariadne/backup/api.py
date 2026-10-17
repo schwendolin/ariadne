@@ -9,9 +9,11 @@ Format (Endzustand, Details legt der Teil «backup» fest und dokumentiert sie h
   ``config.toml`` und ``~/.config/ariadne/backup-recipients.txt``, nur X25519 ``age1…``).
   Ohne Empfänger: Fehler ``no_recipients``, nie unverschlüsselt.
 * Innen ein Strom aus Manifest (Format-Version, Ariadne-Version, Zeit, Kettenköpfe pro
-  Projekt, SHA-256 jeder Datei) und den Dateien: Operator-Tresor immer, je Projekt
-  ``.vault/`` ohne ``derived*.db`` (wird nach dem Zurückspielen neu gebaut) und der
-  Arbeitsbereich, dazu ``~/.config/ariadne``. Keine Runtime-Ordner, keine Logs.
+  Projekt aus ``.vault/head.json``, SHA-256 jeder Datei) und den Dateien: Operator-Tresor
+  immer, je Projekt ``.vault/`` ohne ``derived*`` (wird nach dem Zurückspielen neu gebaut),
+  ohne ``*-shm`` und ``.lock``, aber **mit** ``*-wal``, falls vorhanden (nach einem Absturz
+  stehen dort bestätigte Einträge der Kette), und der Arbeitsbereich, dazu
+  ``~/.config/ariadne``. Keine Runtime-Ordner, keine Logs, keine Sockets, keine Links.
 * Ein offenes Projekt wird nicht gesichert: Die Sicherung nimmt pro Projekt den ``flock`` auf
   ``.vault/.lock`` (wie der Daemon) und bricht ab, wenn er gehalten wird (Code
   ``project_open``: zuerst ``ariadne stop`` oder ``ariadne lock``).

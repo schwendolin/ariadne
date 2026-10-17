@@ -11,8 +11,8 @@ nur additiv und nach Absprache (``contract_requests``), denn der Teil «api» ba
 
 Regeln für alle Routen (Vertrag 3.2): nur ``async def``-Handler (sie laufen im Loop des
 Daemons; ``def``-Handler liefen in einem Thread-Pool und dürfen den Daemon nicht anfassen),
-Daemon nur über ``daemon.call``, ``daemon.ingest.query``/``query_journal`` und
-``daemon.submit`` bzw. die ctl-Operationen, nie über private Felder.
+Daemon nur über ``daemon.call``, ``daemon.ingest.query``/``query_journal``,
+``daemon.submit``/``daemon.flush`` und die im Vertrag 3.2 genannten Felder, nie über private.
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ __all__ = ["SessionInfo", "EventPublisher", "WebContext", "session_of", "SSE_EVE
 
 SessionOrigin = Literal["local", "sshd"]
 
-# Ereignisse des Stroms (web-api.md Abschnitt 13). Daten sind nie Zieldaten oder Secrets.
-SSE_EVENTS = ("changes", "terminal", "inbox", "suggestion", "project", "reset", "presentation", "progress",
-              "session")
+# Ereignisse des Stroms (web-api.md Abschnitt 14). Daten sind nie Zieldaten oder Secrets. Endet eine
+# Sitzung, schliesst der Server den Strom ohne eigenes Ereignis (die nächste Anfrage ergibt 401).
+SSE_EVENTS = ("changes", "terminal", "inbox", "suggestion", "project", "reset", "presentation", "progress")
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,8 @@ class SessionInfo:
     origin: SessionOrigin  # «lokal» (Browser in der Kali) oder «über sshd» (Mac über den Tunnel)
     created_ns: int  # Wanduhr
     expires_ns: int  # höchstens 12 h nach der Anmeldung (E92)
-    peer_pid: int  # Prozess hinter der Verbindung bei der Anmeldung (R2)
+    peer_pid: int  # gebundener Prozess (R2): lokal der Browser-Prozess, über sshd der sshd-Prozess
+    #                der SSH-Verbindung, die den Code geholt hat (Vertrag 3.4)
     peer_comm: str = ""  # Name dieses Prozesses (nur Anzeige, z. B. «sshd-session», «firefox»)
 
 

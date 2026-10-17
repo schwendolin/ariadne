@@ -7,6 +7,8 @@ Endzustand: ``ariadne backup`` schreibt die age-verschlüsselte Sicherung auf st
 wenn stdout ein Terminal ist) oder mit ``--to-file PFAD`` in eine neue Datei (0600, ``O_EXCL``).
 ``ariadne restore`` liest den entschlüsselten Strom von stdin oder ``--from-file PFAD``; mit
 ``--identity DATEI`` entschlüsselt es eine ``.age``-Datei selbst (Recovery-Schlüssel in der VM).
+Mit Terminal prüft es danach jede Kette über den Daemon (Passphrase, ``unlock`` ohne Öffnen,
+``project.open``, ``verify``, ``project.close``, ``lock``); ``--no-verify`` lässt das weg.
 """
 
 from __future__ import annotations
@@ -40,4 +42,6 @@ def register(sub: Any) -> None:
     sp.add_argument("--from-file", metavar="PFAD", help="aus Datei lesen (statt stdin)")
     sp.add_argument("--identity", metavar="DATEI",
                     help="age-Schlüssel, um eine verschlüsselte Datei in der VM zu entschlüsseln")
+    sp.add_argument("--no-verify", action="store_true",
+                    help="Ketten nicht gleich prüfen (sonst fragt restore mit Terminal nach der Passphrase)")
     sp.set_defaults(fn=cmd_restore)
