@@ -2586,3 +2586,7 @@ _OPS: dict[str, Callable[[Daemon, dict[str, Any]], Any]] = {
 }
 # Operationen der Auswertung (Ansichten, Suche, Claims, Reparse) liegen in ops_eval.
 _OPS.update(ops_eval.OPS)
+# Bau v0.1-Export: Bericht-Export und Phasen (export.run, export.list, export.phases, export.phase).
+from ariadne.export import ops as _export_ops  # noqa: E402
+
+_OPS.update(_export_ops.OPS)

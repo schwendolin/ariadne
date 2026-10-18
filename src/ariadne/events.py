@@ -573,6 +573,68 @@ class DUnitDistrust(_M):
     reason: str | None = Field(default=None, max_length=500)
 
 
+class DUnitPhase(_M):
+    """Phase eines Befehls im Writeup (E62, Architektur 8.7): korrigiert den Vorschlag der Regeln
+    (:mod:`ariadne.ingest.proj_phases`). Gilt je Vorlage; der jüngste nicht widerrufene Entscheid
+    gewinnt. ``omit`` nimmt den Befehl aus dem Writeup. Übersteht Reparse, aufhebbar mit
+    ``d.revoke``. Ergänzt im Bau v0.1-Export, nur additiv."""
+
+    cmd_id: str = Field(min_length=3, max_length=200)
+    template: Literal["cys", "htb"]
+    phase: Literal[
+        "recon", "scanning", "exploitation", "post", "reporting",
+        "enumeration", "foothold", "privesc", "pivot", "loot", "lessons", "omit",
+    ]
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class DAiAllowCloud(_M):
+    """Ausdrückliche Freigabe der Cloud-KI für dieses Projekt (``ariadne ai allow-cloud``, E65, A 6.2).
+    Nur im Terminal; aufhebbar mit ``d.revoke``. Ergänzt im Bau v0.1-KI, nur additiv."""
+
+    functions: list[Literal["denkanstoss"]] = Field(default_factory=lambda: ["denkanstoss"], max_length=4)
+
+
+class DAiTemplateRef(_M):
+    template_id: str = Field(min_length=1, max_length=64)
+    host_id: str | None = Field(default=None, max_length=300)
+    service_id: str | None = Field(default=None, max_length=300)
+
+
+class DAiItem(_M):
+    """Ein geprüfter KI-Denkanstoss (Modelltext, nur als Text anzuzeigen)."""
+
+    kind: Literal["hypothesis", "question", "goal"]
+    title: str = Field(min_length=1, max_length=200)
+    reason: str = Field(max_length=600)
+    confirmed_if: str = Field(min_length=1, max_length=400)
+    refuted_if: str = Field(min_length=1, max_length=400)
+    question: str = Field(max_length=400)
+    direction: str = Field(max_length=500)
+    goal_id: str | None = Field(default=None, max_length=64)
+    evidence: list[str] = Field(default_factory=list, max_length=8)
+    host_id: str | None = Field(default=None, max_length=300)
+    service_id: str | None = Field(default=None, max_length=300)
+    claim_keys: list[str] = Field(default_factory=list, max_length=5)
+    templates: list[DAiTemplateRef] = Field(default_factory=list, max_length=3)
+    flags: list[Literal["injection_suspect"]] = Field(default_factory=list, max_length=1)
+
+
+class DAiDenkanstoss(_M):
+    """Ergebnis eines KI-Auftrags «Denkanstoss» (Architektur 6.3): höchstens vier geprüfte Einträge. Der
+    Zustand jedes Eintrags folgt wie bei Regeln aus ``d.suggestion.*``; ``d.revoke`` blendet alle aus.
+    Ergänzt im Bau v0.1-KI, nur additiv."""
+
+    job_id: str = Field(min_length=1, max_length=64)
+    call_id: str = Field(min_length=1, max_length=64)
+    provider: Literal["cloud", "local"]
+    model: str = Field(min_length=1, max_length=100)
+    prompt_version: str = Field(min_length=1, max_length=64)
+    items: list[DAiItem] = Field(default_factory=list, max_length=4)
+    dropped: int = Field(default=0, ge=0, le=1000)
+    injection_suspect: int = Field(default=0, ge=0, le=1000)
+
+
 # Findings (E113, web-api.md 18.5). Ergänzt im Bau v0.1-Oberfläche, nur additiv.
 Severity = Literal["critical", "high", "medium", "low", "info"]
 FindingStatus = Literal["draft", "final"]
@@ -750,6 +812,9 @@ KINDS: dict[str, KindSpec] = {
         _k("d.suggestion.dismiss", "decision", DSuggestion),
         _k("d.lab.not_customer", "decision", DLabNotCustomer),
         _k("d.unit.distrust", "decision", DUnitDistrust),
+        _k("d.ai.allow_cloud", "decision", DAiAllowCloud),
+        _k("d.ai.denkanstoss", "decision", DAiDenkanstoss),
+        _k("d.unit.phase", "decision", DUnitPhase),
         _k("d.finding", "decision", DGeneric),
         _k("d.finding.create", "decision", DFindingCreate),
         _k("d.finding.update", "decision", DFindingUpdate),
