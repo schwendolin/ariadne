@@ -5,10 +5,15 @@ hier als flache Liste mit der Zeit pro Eintrag), :func:`~ariadne.ingest.queries.
 :func:`~ariadne.ingest.queries.quiet_summary`. «Klären» ist die Spur «entscheiden», «Bestätigen»
 gibt es nur im Profil customer (Gruppen mit Sammelbestätigung, E88). Denkanstösse liefert
 :func:`ariadne.rules.api.suggestions` (web-api.md 18.6).
+
+Die Scope-Warnung (E120) steht als ``scope_warning`` in der Antwort, in derselben Form wie
+``Status.scope_warning`` (18.4), aber nur solange sie nicht quittiert ist; die Oberfläche zeigt sie
+als ersten Eintrag der Spalte. Quittiert wird unverändert über ``PUT /p/{pid}/ui/scope-ack``.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,6 +25,7 @@ from ariadne.ingest.proj_build import display
 from ariadne.parsers._common import canon_ip
 from ariadne.rules import api as rules_api
 from ariadne.web.api.common import Api
+from ariadne.web.api.status import scope_include
 from ariadne.web.api.text import Bag, iso
 from ariadne.web.api.views import (
     chunks,
@@ -35,7 +41,7 @@ from ariadne.web.api.views import (
     with_secrets,
 )
 
-__all__ = ["add_routes", "next_view"]
+__all__ = ["add_routes", "next_view", "scope_warning"]
 
 _VALUE_KINDS = ("decide_value", "candidate_group")
 _ITEMS_MAX = 2000
@@ -380,6 +386,27 @@ def next_view(conn: Any, profile: str, bag: Bag, redactor: Any = None) -> dict[s
     }
 
 
+def scope_warning(conn: Any, bag: Bag, include: list[str]) -> dict[str, Any] | None:
+    """Jüngster Befehl mit Ziel ausserhalb des Scopes (E67, E120) wie ``Status.scope_warning`` (18.4);
+    ``acked`` ist hier immer ``false`` (quittierte Warnungen liefert die Route nicht aus)."""
+    from ariadne.web.api.status import _scope_warning
+
+    return _scope_warning(conn, bag, include, queries.term_refs(conn))
+
+
+async def _acked(api: Api, p: Any, cmd_id: str) -> bool:
+    """Ist genau dieser Befehl quittiert (``state.db``, Schlüssel ``scope_ack``)? Ist ``state.db``
+    nicht lesbar, gilt «nicht quittiert» (die Warnung bleibt sichtbar)."""
+    from ariadne.web.api.ui_state import state_get
+
+    try:
+        return await asyncio.to_thread(state_get, p, "scope_ack") == cmd_id
+    except Exception:  # noqa: BLE001 - lieber einmal zu oft warnen als nie
+        return False
+    finally:
+        api.same(p)
+
+
 def add_routes(router: APIRouter, api: Api) -> None:
     @router.get("/p/{pid}/next", name="next")
     async def get_next(pid: str) -> Response:
@@ -387,7 +414,17 @@ def add_routes(router: APIRouter, api: Api) -> None:
         bag = api.bag()
         profile = p.info.profile
         redactor = api.daemon.redactor
-        view = await api.query(p, lambda c: next_view(c, profile, bag, redactor))
+        include = scope_include(p.settings)
+
+        def build(c: Any) -> dict[str, Any]:
+            out = next_view(c, profile, bag, redactor)
+            out["scope_warning"] = scope_warning(c, bag, include)
+            return out
+
+        view = await api.query(p, build)
+        warning = view["scope_warning"]
+        if warning is not None and await _acked(api, p, str(warning["cmd_id"])):
+            view["scope_warning"] = None
         keys = [str(i["item_key"]) for i in view["clarify"]]
         if keys:
             from ariadne.web.api.ui_state import item_ordinals, state_call

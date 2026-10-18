@@ -168,7 +168,7 @@ export function hostDetail(id: string): HostDetail | null {
   };
 }
 
-function tpl(id: string, tool: string, label: string, parts: [string, boolean][], values: CommandTemplate['values']): CommandTemplate {
+export function tpl(id: string, tool: string, label: string, parts: [string, boolean][], values: CommandTemplate['values']): CommandTemplate {
   return {
     template_id: id, tool, label, rendered: true, command: parts.map((p) => p[0]).join(''), parts: parts.map(([text, target]) => ({ text, target })),
     values, blocked_reason: null,

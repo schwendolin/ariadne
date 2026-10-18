@@ -40,6 +40,11 @@ ariadne = "ariadne.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ariadne"]
+# Die gebaute Weboberfläche (scripts/build-ui.sh) gehört ins Wheel, auch der versteckte Build-Vermerk.
+artifacts = ["src/ariadne/web/static/**"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["webui/node_modules", "webui/dist", "webui/test-results", ".venv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -86,8 +86,15 @@ def check_policy(profile: Any, klartext: bool, confirm: Any) -> None:
         raise ExportPolicy("Klartext braucht die Bestätigung im Terminal")
 
 
-async def run_export(d: Any, *, template: str = "cys", klartext: bool = False, confirm: Any = None,
-                     job_id: str | None = None, progress: Progress | None = None) -> dict[str, Any]:
+async def run_export(
+    d: Any,
+    *,
+    template: str = "cys",
+    klartext: bool = False,
+    confirm: Any = None,
+    job_id: str | None = None,
+    progress: Progress | None = None,
+) -> dict[str, Any]:
     """Führt einen Export aus und gibt das Ergebnis zurück (``export_id``, ``path``, ``files``,
     ``warnings``, ``chain``, ``masked``). ``job_id`` von :func:`new_job`, sonst wird einer reserviert."""
     if template not in TEMPLATES:
@@ -115,7 +122,12 @@ async def run_export(d: Any, *, template: str = "cys", klartext: bool = False, c
             raise RuntimeError("Projekt gewechselt")
         now = time.time_ns()
         redactor = d.redactor
-        project = {"id": p.info.id, "slug": p.info.slug, "profile": p.info.profile, "settings": dict(p.settings)}
+        project = {
+            "id": p.info.id,
+            "slug": p.info.slug,
+            "profile": p.info.profile,
+            "settings": dict(p.settings),
+        }
 
         def gather(conn: Any, journal: Any) -> dict[str, Any]:
             jconn = getattr(journal, "conn", None)
@@ -123,9 +135,16 @@ async def run_export(d: Any, *, template: str = "cys", klartext: bool = False, c
             def read_blob(blob_id: str) -> bytes:
                 return p.blobs.with_connection(jconn).open_bytes(blob_id)
 
-            return collect_mod.collect(conn, journal, redactor=redactor, template=template, klartext=klartext,
-                                       project=project, read_blob=read_blob if jconn is not None else None,
-                                       now_ns=now)
+            return collect_mod.collect(
+                conn,
+                journal,
+                redactor=redactor,
+                template=template,
+                klartext=klartext,
+                project=project,
+                read_blob=read_blob if jconn is not None else None,
+                now_ns=now,
+            )
 
         data = await ing.query_journal(gather)
         if d.project is not p:
@@ -143,7 +162,9 @@ async def run_export(d: Any, *, template: str = "cys", klartext: bool = False, c
         _ = own_job
 
 
-def _render_write(data: dict[str, Any], workspace: Any, template: str, now: int, redactor: Any) -> dict[str, Any]:
+def _render_write(
+    data: dict[str, Any], workspace: Any, template: str, now: int, redactor: Any
+) -> dict[str, Any]:
     files: dict[str, str | bytes] = dict(render_mod.render(data))
     for im in data["images"]:
         if im.get("data") is not None and im.get("sha256"):
@@ -158,21 +179,42 @@ def _render_write(data: dict[str, Any], workspace: Any, template: str, now: int,
     if redactor is not None:
         for content in files.values():
             if isinstance(content, str):
-                _own, warns = redactor.scan_outgoing(content)
+                _own, warns = redactor.scan_outgoing(content.replace("\\", ""))  # ohne Markdown-Escapes
                 generic |= {w.kind for w in warns}
     if generic:
         warnings.add("generic_secret")
     meta = data["meta"]
-    evidence = [{"unit_id": b.unit_id, "file": f"Belege/{render_mod.beleg_name(b.unit_id, render_mod._program_of(b))}",
-                 "chain": {"seq": b.chain_seq, "hash": b.chain_hash}} for b in data["belege"].values()]
+    evidence = [
+        {
+            "unit_id": b.unit_id,
+            "file": f"Belege/{render_mod.beleg_name(b.unit_id, render_mod._program_of(b))}",
+            "chain": {"seq": b.chain_seq, "hash": b.chain_hash},
+        }
+        for b in data["belege"].values()
+    ]
     manifest = {
-        "project_id": meta["project_id"], "template": template, "created_at": meta["created_at"],
-        "klartext": bool(meta["klartext"]), "chain": {"seq": meta["chain_seq"], "hash": meta["chain_hash"]},
-        "evidence": evidence, "warnings": sorted(warnings), "generic_kinds": sorted(generic),
+        "project_id": meta["project_id"],
+        "template": template,
+        "created_at": meta["created_at"],
+        "klartext": bool(meta["klartext"]),
+        "chain": {"seq": meta["chain_seq"], "hash": meta["chain_hash"]},
+        "evidence": evidence,
+        "warnings": sorted(warnings),
+        "generic_kinds": sorted(generic),
         "masked": int(data.get("masked") or 0),
     }
-    res = writer.write_export(workspace, files, template=template, now_ns=now, redactor=redactor, manifest=manifest)
-    res.update({"template": template, "warnings": sorted(warnings), "generic_kinds": sorted(generic),
-                "chain": manifest["chain"], "created_at": meta["created_at"], "klartext": bool(meta["klartext"]),
-                "masked": manifest["masked"]})
+    res = writer.write_export(
+        workspace, files, template=template, now_ns=now, redactor=redactor, manifest=manifest
+    )
+    res.update(
+        {
+            "template": template,
+            "warnings": sorted(warnings),
+            "generic_kinds": sorted(generic),
+            "chain": manifest["chain"],
+            "created_at": meta["created_at"],
+            "klartext": bool(meta["klartext"]),
+            "masked": manifest["masked"],
+        }
+    )
     return res

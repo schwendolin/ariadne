@@ -4,7 +4,8 @@
  *
  * - Nur im Mock-Build oder im Dev-Server ohne Daemon (select.ts); im Produktions-Build entfernt.
  * - Fehler wie der Daemon: ApiError mit Code (403 policy im Präsentationsmodus, 409 conflict,
- *   404, 501 für Export und Screenshot, 503 clipboard_tool im Szenario `noclip`).
+ *   404, 422 budget_confirm, 503 clipboard_tool im Szenario `noclip`, 503 shot_display im
+ *   Szenario `kigone`).
  * - Ereignisse wie der Daemon: `changes` nach jedem Entscheid, `terminal` nach Pause (mit
  *   600 ms Verzögerung, damit «wartet auf Bestätigung» sichtbar ist), `presentation`, `prefs`.
  * - Kein Browser-Speicher: Token, Positionen und Vorlieben nur im Speicher.
@@ -12,6 +13,16 @@
 import type { Backend, StreamHandlers } from '../api/backend';
 import { ApiError } from '../api/client';
 import type {
+  AiJob,
+  AiStatus,
+  ExportsView,
+  ExportStarted,
+  ExportTemplate,
+  PhaseSet,
+  PhasesView,
+  Screenshot,
+  ScreenshotsView,
+  ShotRequest,
   ChangeSet,
   ContextOp,
   ContextResult,
@@ -53,6 +64,7 @@ import type {
   TimelineItem,
 } from '../api/types';
 import * as base from './data/base';
+import * as e4 from './data/etappe4';
 import * as history from './data/history';
 import { applyHistoryDecision } from './handlers/history';
 import { applyMapDecision } from './handlers/map';
@@ -310,7 +322,11 @@ export class MockBackend implements Backend {
   next(pid: string): Promise<NextView> {
     return this.wait(() => {
       this.check(pid);
-      return clone(this.state.next);
+      const s = this.state;
+      const st = base.status(s.terminals, s.generation, s.presentation, s.origin);
+      // E120: nicht quittierte Scope-Warnung als erster Eintrag der Spalte
+      const warn = !s.scopeAcked && st.scope_warning ? { ...st.scope_warning, acked: false } : null;
+      return clone({ ...s.next, scope_warning: warn });
     });
   }
   suggestions(pid: string, state: SuggestionState | 'all' = 'open'): Promise<SuggestionsResponse> {
@@ -469,6 +485,196 @@ export class MockBackend implements Backend {
   }
 
   // ------------------------------------------------------------------ Ereignisse
+  // ------------------------------------------------------------------ KI (Etappe 4)
+  /** Pause zwischen den Schritten eines KI-Auftrags (ms); Tests setzen kleinere Werte */
+  aiStepMs = 450;
+
+  aiStatus(pid: string): Promise<AiStatus> {
+    return this.wait(() => {
+      this.check(pid);
+      return clone(e4.aiStatus(this.state.aiMode, this.state.aiJob));
+    });
+  }
+  aiRequest(pid: string, confirmBudget: boolean): Promise<AiJob> {
+    return this.wait(() => {
+      this.check(pid);
+      const s = this.state;
+      if (s.presentation) throw err('policy', 403);
+      const st = e4.aiStatus(s.aiMode, s.aiJob);
+      if (s.aiJob && (s.aiJob.status === 'queued' || s.aiJob.status === 'running')) throw err('conflict', 409);
+      if (!st.ready) throw err('policy', 403);
+      if (s.aiMode === 'over' && !confirmBudget) {
+        throw new ApiError('validation', 422, 'validation', [{ loc: ['body', 'confirm_budget'], type: 'budget_confirm' }]);
+      }
+      const job = e4.newJob(s.aiMode);
+      s.aiJob = job;
+      this.runAiJob(pid, job.job_id);
+      return clone(job);
+    });
+  }
+  aiJob(pid: string, jobId: string): Promise<AiJob> {
+    return this.wait(() => {
+      this.check(pid);
+      if (!this.state.aiJob || this.state.aiJob.job_id !== jobId) throw err('not_found', 404);
+      return clone(this.state.aiJob);
+    });
+  }
+
+  /** Simulierter Auftrag: Fortschritt wie der Server (pct 10, 40, 90, 100), feste Texte. */
+  private runAiJob(pid: string, jobId: string): void {
+    const s = this.state;
+    const steps: { pct: number; step: AiJob['step']; message: string; patch: Partial<AiJob> }[] = [
+      { pct: 10, step: 'lagebild', message: 'Lagebild wird erstellt', patch: { status: 'running' } },
+      { pct: 40, step: 'anfrage', message: 'Lagebild wird gesendet', patch: { status: 'running', tokens_in: 4212 } },
+      { pct: 90, step: 'pruefung', message: 'Antwort wird geprüft', patch: { status: 'running', tokens_out: 388 } },
+    ];
+    const progress = (job: AiJob, pct: number, status: string) =>
+      this.emit({
+        name: 'progress', id: null,
+        data: {
+          job_id: job.job_id, kind: 'ai', status, pct, message: job.message, tokens_in: job.tokens_in, tokens_out: job.tokens_out,
+          tokens_estimate: job.tokens_estimate, masked: job.masked, cost_usd: job.cost_usd, budget_level: job.budget_level,
+        },
+      });
+    let i = 0;
+    const tick = () => {
+      const job = s.aiJob;
+      if (!job || job.job_id !== jobId) return;
+      const st = steps[i];
+      if (st) {
+        s.aiJob = { ...job, ...st.patch, step: st.step, message: st.message };
+        progress(s.aiJob, st.pct, 'running');
+        i++;
+        // Szenario «kirun»: bleibt beim Senden stehen (Zustand für Screenshots und Tests)
+        if (s.aiMode === 'run' && st.step === 'anfrage') return;
+        setTimeout(tick, this.aiStepMs);
+        return;
+      }
+      const end = e4.finishJob(job, s.aiMode);
+      s.aiJob = end;
+      if (end.status === 'done' && end.created > 0) {
+        const sug = e4.aiSuggestion(end.job_id, s.aiMode === 'inject');
+        s.next = { ...s.next, suggestions: [...s.next.suggestions, sug] };
+        this.emit({ name: 'suggestion', id: null, data: { project_id: pid, open: s.next.suggestions.length } });
+      }
+      progress(end, 100, end.status === 'done' ? 'done' : 'failed');
+    };
+    setTimeout(tick, this.aiStepMs);
+  }
+
+  // ------------------------------------------------------------------ Export (Etappe 4)
+  exportStepMs = 400;
+  private exportCount = 0;
+
+  exports(pid: string): Promise<ExportsView> {
+    return this.wait(() => {
+      this.check(pid);
+      return clone({ exports: this.state.exports, running: this.state.exportRunning, last_error: null });
+    });
+  }
+  startExport(pid: string, template: ExportTemplate): Promise<ExportStarted> {
+    return this.wait(() => {
+      this.check(pid);
+      if (template !== 'cys' && template !== 'htb') throw err('validation', 422);
+      if (this.state.exportRunning) throw err('conflict', 409);
+      this.exportCount++;
+      const job_id = `exp-${this.exportCount}`;
+      this.state.exportRunning = { job_id, template, status: 'running', pct: 0 };
+      const steps: [number, string, string][] = [
+        [0, 'running', 'Daten sammeln'],
+        [40, 'running', 'Dateien schreiben'],
+        [100, 'done', 'Export fertig'],
+      ];
+      let i = 0;
+      const tick = () => {
+        const st = steps[i++];
+        if (!st) return;
+        const [pct, status, message] = st;
+        if (status === 'done') {
+          this.state.exportRunning = null;
+          this.state.exports = [e4.newExport(template, this.exportCount), ...this.state.exports];
+        } else if (this.state.exportRunning) {
+          this.state.exportRunning = { ...this.state.exportRunning, pct };
+        }
+        this.emit({ name: 'progress', id: null, data: { job_id, kind: 'export', status, pct, message } });
+        if (status !== 'done') setTimeout(tick, this.exportStepMs);
+      };
+      queueMicrotask(tick);
+      return { job_id, status: 'running', template };
+    });
+  }
+  exportPhases(pid: string, template: ExportTemplate): Promise<PhasesView> {
+    return this.wait(() => {
+      this.check(pid);
+      const own = this.state.phaseDecisions[template];
+      const commands = this.state.timeline
+        .filter((i): i is Extract<typeof i, { type: 'command' }> => i.type === 'command')
+        .map((i) => {
+          const text = i.cmd.text ?? '';
+          const decided = own[i.cmd.cmd_id];
+          const rule = e4.rulePhase(template, text);
+          return {
+            cmd_id: i.cmd.cmd_id, cmd_ref: i.cmd.cmd_ref, command: text, ts: i.ts,
+            phase: decided ?? rule, source: decided ? ('decision' as const) : rule ? ('rule' as const) : ('none' as const),
+            decision_id: decided ? `0199a3c2-dddd-7000-8000-${i.cmd.cmd_id.slice(-12)}` : null, ctrl: i.ctrl,
+          };
+        });
+      return clone({ template, phases: e4.PHASES[template], commands });
+    });
+  }
+  setExportPhase(pid: string, template: ExportTemplate, cmdId: string, phase: string): Promise<PhaseSet> {
+    return this.wait(() => {
+      this.check(pid);
+      if (!e4.PHASES[template]?.some((p) => p.key === phase)) throw err('validation', 422);
+      if (!this.state.timeline.some((i) => i.type === 'command' && i.cmd.cmd_id === cmdId)) throw err('not_found', 404);
+      this.state.phaseDecisions[template] = { ...this.state.phaseDecisions[template], [cmdId]: phase };
+      return { decision_id: newDecisionId(), cmd_id: cmdId, template, phase };
+    });
+  }
+
+  // ------------------------------------------------------------------ Screenshots (Etappe 4)
+  private shotBusy = false;
+
+  screenshots(pid: string): Promise<ScreenshotsView> {
+    return this.wait(() => {
+      this.check(pid);
+      const p = this.state.presentation;
+      const items = this.state.screenshots.map((x) => (p ? { ...x, window_title: null, wm_class: null, note: null } : x));
+      return clone({ items, presentation: p });
+    });
+  }
+  async takeScreenshot(pid: string, req: ShotRequest): Promise<Screenshot> {
+    await this.wait(() => this.check(pid));
+    if (this.shotBusy) throw err('conflict', 409);
+    if (req.mode === 'region' && !req.region) throw err('validation', 422);
+    this.shotBusy = true;
+    try {
+      await new Promise((r) => setTimeout(r, Math.max(0, req.delay_s ?? 3) * 1000));
+      if (this.state.scenario === 'kigone') throw new ApiError('shot_display', 503, 'shot_display');
+      const blob = req.mode === 'monitor' ? '0199a3c2-b10b-7000-8000-00000000000b' : '0199a3c2-b10b-7000-8000-00000000000a';
+      const id = `0199a3c2-5c07-7000-8000-${(0xb10 + this.state.screenshots.length).toString(16).padStart(12, '0')}`;
+      const shot: Screenshot = {
+        ...e4.screenshots()[1]!, id, seq: 6000 + this.state.screenshots.length, ts: new Date().toISOString(), blob_id: blob,
+        url: `/api/v1/p/${pid}/blobs/${blob}`, mode: req.mode ?? 'window', trigger: 'webui', note: req.note ?? null,
+        window_title: this.state.presentation ? null : 'root@kali: ~', wm_class: this.state.presentation ? null : 'xfce4-terminal',
+      };
+      this.state.screenshots = [shot, ...this.state.screenshots];
+      queueMicrotask(() => this.emit({ name: 'screenshot', id: null, data: { project_id: pid, id, trigger: 'webui' } }));
+      return clone(shot);
+    } finally {
+      this.shotBusy = false;
+    }
+  }
+  blob(pid: string, blobId: string): Promise<Blob> {
+    return this.wait(() => {
+      this.check(pid);
+      if (this.state.presentation) throw err('policy', 403);
+      const which = e4.SHOT_BLOBS[blobId];
+      if (!which) throw err('not_found', 404);
+      return new Blob([e4.pngBytes(which)], { type: 'image/png' });
+    });
+  }
+
   subscribe(handlers: StreamHandlers): () => void {
     this.listeners.add(handlers);
     if (this.state.scenario === 'offline') {

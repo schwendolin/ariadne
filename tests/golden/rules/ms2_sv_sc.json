@@ -1,7 +1,7 @@
 [
  {
   "ai": null,
-  "basis": "89fb80e6d35254f7",
+  "basis": "214c720827a405d2",
   "ctrl": false,
   "ctrl_reason": false,
   "decision_id": null,
@@ -15,23 +15,621 @@
     ],
     "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "4c38ea3ce13ce94f243858f6c5c71a6f68e5181eabd23668b0269f4234c78472",
+    "label": "nmap -sV -sC · Zeile 20",
+    "lines": [
+     19,
+     19
+    ],
+    "ts": "2026-10-08T12:02:11.000000Z",
+    "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "8b93c1b7421a1658464141df9f829584e1fc2ffb2b4c2a47274de408aa2546cc",
+    "label": "nmap -sV -sC · Zeile 31",
+    "lines": [
+     30,
+     30
+    ],
+    "ts": "2026-10-08T12:02:11.000000Z",
+    "unit_id": "cmd1"
    }
   ],
   "flags": [],
   "goal_id": "PZ-VULN-RECHERCHE",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [
+   {
+    "ctrl": false,
+    "label": "vsftpd 2.3.4 · 21/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "vsftpd 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 21/tcp"
+     }
+    ],
+    "port": 21,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/21",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit vsftpd 2.3.4",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "vsftpd"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "2.3.4"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "vsftpd"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "OpenSSH 4.7p1 Debian 8ubuntu1 · 22/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "OpenSSH 4.7p1 Debian 8ubuntu1"
+     },
+     {
+      "target": false,
+      "text": " · 22/tcp"
+     }
+    ],
+    "port": 22,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/22",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit OpenSSH 4.7p1",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "OpenSSH"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "4.7p1"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "OpenSSH"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "4.7p1"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "ISC BIND 9.4.2 · 53/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "ISC BIND 9.4.2"
+     },
+     {
+      "target": false,
+      "text": " · 53/tcp"
+     }
+    ],
+    "port": 53,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/53",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit ISC BIND 9.4.2",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "ISC BIND"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "9.4.2"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "ISC BIND"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "9.4.2"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "Apache httpd 2.2.8 · 80/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "Apache httpd 2.2.8"
+     },
+     {
+      "target": false,
+      "text": " · 80/tcp"
+     }
+    ],
+    "port": 80,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/80",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit Apache 2.2.8",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "Apache"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "2.2.8"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "Apache"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.2.8"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "Samba smbd 3.0.20-Debian · 445/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "Samba smbd 3.0.20-Debian"
+     },
+     {
+      "target": false,
+      "text": " · 445/tcp"
+     }
+    ],
+    "port": 445,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/445",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit Samba 3.0.20",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "Samba"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "3.0.20"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "Samba"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "3.0.20"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "ProFTPD 1.3.1 · 2121/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "ProFTPD 1.3.1"
+     },
+     {
+      "target": false,
+      "text": " · 2121/tcp"
+     }
+    ],
+    "port": 2121,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/2121",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit ProFTPD 1.3.1",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "ProFTPD"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "1.3.1"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "ProFTPD"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "1.3.1"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "MySQL 5.0.51a-3ubuntu5 · 3306/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "MySQL 5.0.51a-3ubuntu5"
+     },
+     {
+      "target": false,
+      "text": " · 3306/tcp"
+     }
+    ],
+    "port": 3306,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/3306",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit MySQL 5.0.51a",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "MySQL"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "5.0.51a"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "MySQL"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "5.0.51a"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "Apache Tomcat/Coyote JSP engine 1.1 · 8180/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "Apache Tomcat/Coyote JSP engine 1.1"
+     },
+     {
+      "target": false,
+      "text": " · 8180/tcp"
+     }
+    ],
+    "port": 8180,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.101|tcp/8180",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit Apache Tomcat Coyote JSP 1.1",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "Apache Tomcat Coyote JSP"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "1.1"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "Apache Tomcat Coyote JSP"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "1.1"
+      }
+     ]
+    }
+   }
+  ],
   "kind": "goal",
   "origin": "rule",
-  "reason": "Produkt und Version bekannt: vsftpd 2.3.4",
+  "reason": "Produkt und Version für 8 Dienste bekannt",
   "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/21",
+  "service_id": null,
   "stages": {
    "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+   "question": "Gibt es für diese Versionen bekannte Schwachstellen?"
   },
   "state": "open",
-  "suggestion_key": "sg:04e64e671d15d9e8a9617a3a",
+  "suggestion_key": "sg:29d804235cccb4ccc1f0d2bf",
   "templates": [
    {
     "blocked_reason": null,
@@ -87,67 +685,7 @@
       "value": "2.3.4"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: vsftpd 2.3.4 (192.168.56.101:21)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "vsftpd 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:21"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:12.000000Z"
- },
- {
-  "ai": null,
-  "basis": "c836ded91b57cf63",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "4c38ea3ce13ce94f243858f6c5c71a6f68e5181eabd23668b0269f4234c78472",
-    "label": "nmap -sV -sC · Zeile 20",
-    "lines": [
-     19,
-     19
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.101",
-  "host_label": "192.168.56.101",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: OpenSSH 4.7p1 Debian 8ubuntu1",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/22",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:9aacaf7fb10245762ac5ae11",
-  "templates": [
    {
     "blocked_reason": null,
     "command": "searchsploit OpenSSH 4.7p1",
@@ -202,67 +740,7 @@
       "value": "4.7p1"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: OpenSSH 4.7p1 Debian 8ubuntu1 (192.168.56.101:22)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "OpenSSH 4.7p1 Debian 8ubuntu1"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:22"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:12.000000Z"
- },
- {
-  "ai": null,
-  "basis": "d40b80726fa10f92",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "8b93c1b7421a1658464141df9f829584e1fc2ffb2b4c2a47274de408aa2546cc",
-    "label": "nmap -sV -sC · Zeile 31",
-    "lines": [
-     30,
-     30
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.101",
-  "host_label": "192.168.56.101",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: ISC BIND 9.4.2",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/53",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:a4b0a7451ff9def7aae9204b",
-  "templates": [
    {
     "blocked_reason": null,
     "command": "searchsploit ISC BIND 9.4.2",
@@ -317,67 +795,7 @@
       "value": "9.4.2"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: ISC BIND 9.4.2 (192.168.56.101:53)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "ISC BIND 9.4.2"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:53"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:12.000000Z"
- },
- {
-  "ai": null,
-  "basis": "b35dbb04be605335",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "f038c3d26c702ea6e8a89d9bb30a00152cd2377163786461b35be4776c3774aa",
-    "label": "nmap -sV -sC · Zeile 34",
-    "lines": [
-     33,
-     33
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.101",
-  "host_label": "192.168.56.101",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: Apache httpd 2.2.8",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/80",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:b07eeafb49d05a132cd86b19",
-  "templates": [
    {
     "blocked_reason": null,
     "command": "searchsploit Apache 2.2.8",
@@ -434,497 +852,19 @@
     ]
    }
   ],
-  "title": "Version recherchieren: Apache httpd 2.2.8 (192.168.56.101:80)",
+  "title": "Versionen recherchieren: 192.168.56.101 (8 Dienste)",
   "title_parts": [
    {
     "target": false,
-    "text": "Version recherchieren: "
+    "text": "Versionen recherchieren: "
    },
    {
     "target": true,
-    "text": "Apache httpd 2.2.8"
+    "text": "192.168.56.101"
    },
    {
     "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:80"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:12.000000Z"
- },
- {
-  "ai": null,
-  "basis": "d4801bc0ab7712a0",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "ba81615e67da9776437db409fdc088f5d5b7614a8927a1c43176133c2b3aa529",
-    "label": "nmap -sV -sC · Zeilen 103 bis 109",
-    "lines": [
-     102,
-     108
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   },
-   {
-    "claim_key": "afb2a3bc401b838d38a3c27ec4363eb64c939a534258ad401ab0a04b592ab6b4",
-    "label": "nmap -sV -sC · Zeile 46",
-    "lines": [
-     45,
-     45
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.101",
-  "host_label": "192.168.56.101",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: Samba smbd 3.0.20-Debian",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/445",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:1ac19846b47d3092f193f83e",
-  "templates": [
-   {
-    "blocked_reason": null,
-    "command": "searchsploit Samba 3.0.20",
-    "label": "searchsploit",
-    "parts": [
-     {
-      "target": false,
-      "text": "searchsploit "
-     },
-     {
-      "target": true,
-      "text": "Samba"
-     },
-     {
-      "target": false,
-      "text": " "
-     },
-     {
-      "target": true,
-      "text": "3.0.20"
-     }
-    ],
-    "rendered": true,
-    "template_id": "searchsploit",
-    "tool": "searchsploit",
-    "values": [
-     {
-      "ctrl": false,
-      "label": "Werkzeug",
-      "safe": true,
-      "slot": "tool",
-      "target": false,
-      "type": "word",
-      "value": "searchsploit"
-     },
-     {
-      "ctrl": false,
-      "label": "Produkt",
-      "safe": true,
-      "slot": "service.product",
-      "target": true,
-      "type": "words",
-      "value": "Samba"
-     },
-     {
-      "ctrl": false,
-      "label": "Version",
-      "safe": true,
-      "slot": "service.version",
-      "target": true,
-      "type": "word",
-      "value": "3.0.20"
-     }
-    ]
-   }
-  ],
-  "title": "Version recherchieren: Samba smbd 3.0.20-Debian (192.168.56.101:445)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
-   },
-   {
-    "target": true,
-    "text": "Samba smbd 3.0.20-Debian"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:445"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:12.000000Z"
- },
- {
-  "ai": null,
-  "basis": "532f67baed6b14f6",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "1aa480475830630fa95ec5e6cb5416d522fa1f4e8051b9f0ee2ce12d1da72f59",
-    "label": "nmap -sV -sC · Zeile 53",
-    "lines": [
-     52,
-     52
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.101",
-  "host_label": "192.168.56.101",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: ProFTPD 1.3.1",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/2121",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:68801c47bdaf51a8f39b179c",
-  "templates": [
-   {
-    "blocked_reason": null,
-    "command": "searchsploit ProFTPD 1.3.1",
-    "label": "searchsploit",
-    "parts": [
-     {
-      "target": false,
-      "text": "searchsploit "
-     },
-     {
-      "target": true,
-      "text": "ProFTPD"
-     },
-     {
-      "target": false,
-      "text": " "
-     },
-     {
-      "target": true,
-      "text": "1.3.1"
-     }
-    ],
-    "rendered": true,
-    "template_id": "searchsploit",
-    "tool": "searchsploit",
-    "values": [
-     {
-      "ctrl": false,
-      "label": "Werkzeug",
-      "safe": true,
-      "slot": "tool",
-      "target": false,
-      "type": "word",
-      "value": "searchsploit"
-     },
-     {
-      "ctrl": false,
-      "label": "Produkt",
-      "safe": true,
-      "slot": "service.product",
-      "target": true,
-      "type": "words",
-      "value": "ProFTPD"
-     },
-     {
-      "ctrl": false,
-      "label": "Version",
-      "safe": true,
-      "slot": "service.version",
-      "target": true,
-      "type": "word",
-      "value": "1.3.1"
-     }
-    ]
-   }
-  ],
-  "title": "Version recherchieren: ProFTPD 1.3.1 (192.168.56.101:2121)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
-   },
-   {
-    "target": true,
-    "text": "ProFTPD 1.3.1"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:2121"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:12.000000Z"
- },
- {
-  "ai": null,
-  "basis": "f28e0dbc73ea5bb5",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "e468a68c1e84708cb642c5503084fbcb5c0bcad0ecc07b9c09064e26a29a1dff",
-    "label": "nmap -sV -sC · Zeile 54",
-    "lines": [
-     53,
-     53
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.101",
-  "host_label": "192.168.56.101",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: MySQL 5.0.51a-3ubuntu5",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/3306",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:ee0f33b0bf83aca418ed9fe6",
-  "templates": [
-   {
-    "blocked_reason": null,
-    "command": "searchsploit MySQL 5.0.51a",
-    "label": "searchsploit",
-    "parts": [
-     {
-      "target": false,
-      "text": "searchsploit "
-     },
-     {
-      "target": true,
-      "text": "MySQL"
-     },
-     {
-      "target": false,
-      "text": " "
-     },
-     {
-      "target": true,
-      "text": "5.0.51a"
-     }
-    ],
-    "rendered": true,
-    "template_id": "searchsploit",
-    "tool": "searchsploit",
-    "values": [
-     {
-      "ctrl": false,
-      "label": "Werkzeug",
-      "safe": true,
-      "slot": "tool",
-      "target": false,
-      "type": "word",
-      "value": "searchsploit"
-     },
-     {
-      "ctrl": false,
-      "label": "Produkt",
-      "safe": true,
-      "slot": "service.product",
-      "target": true,
-      "type": "words",
-      "value": "MySQL"
-     },
-     {
-      "ctrl": false,
-      "label": "Version",
-      "safe": true,
-      "slot": "service.version",
-      "target": true,
-      "type": "word",
-      "value": "5.0.51a"
-     }
-    ]
-   }
-  ],
-  "title": "Version recherchieren: MySQL 5.0.51a-3ubuntu5 (192.168.56.101:3306)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
-   },
-   {
-    "target": true,
-    "text": "MySQL 5.0.51a-3ubuntu5"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:3306"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:12.000000Z"
- },
- {
-  "ai": null,
-  "basis": "a238590007d16ab4",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "e89f2c0ecf57205bb3bd7a7a11fc151288a3f5562f392452416e3d6c524e2fac",
-    "label": "nmap -sV -sC · Zeile 88",
-    "lines": [
-     87,
-     87
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.101",
-  "host_label": "192.168.56.101",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: Apache Tomcat/Coyote JSP engine 1.1",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.101|tcp/8180",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:e4fd37e251960d87f540b5f2",
-  "templates": [
-   {
-    "blocked_reason": null,
-    "command": "searchsploit Apache Tomcat Coyote JSP 1.1",
-    "label": "searchsploit",
-    "parts": [
-     {
-      "target": false,
-      "text": "searchsploit "
-     },
-     {
-      "target": true,
-      "text": "Apache Tomcat Coyote JSP"
-     },
-     {
-      "target": false,
-      "text": " "
-     },
-     {
-      "target": true,
-      "text": "1.1"
-     }
-    ],
-    "rendered": true,
-    "template_id": "searchsploit",
-    "tool": "searchsploit",
-    "values": [
-     {
-      "ctrl": false,
-      "label": "Werkzeug",
-      "safe": true,
-      "slot": "tool",
-      "target": false,
-      "type": "word",
-      "value": "searchsploit"
-     },
-     {
-      "ctrl": false,
-      "label": "Produkt",
-      "safe": true,
-      "slot": "service.product",
-      "target": true,
-      "type": "words",
-      "value": "Apache Tomcat Coyote JSP"
-     },
-     {
-      "ctrl": false,
-      "label": "Version",
-      "safe": true,
-      "slot": "service.version",
-      "target": true,
-      "type": "word",
-      "value": "1.1"
-     }
-    ]
-   }
-  ],
-  "title": "Version recherchieren: Apache Tomcat/Coyote JSP engine 1.1 (192.168.56.101:8180)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
-   },
-   {
-    "target": true,
-    "text": "Apache Tomcat/Coyote JSP engine 1.1"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.101:8180"
-   },
-   {
-    "target": false,
-    "text": ")"
+    "text": " (8 Dienste)"
    }
   ],
   "ts": "2026-10-08T12:02:12.000000Z"
@@ -961,6 +901,7 @@
   "goal_id": "PZ-SMB-SHARES",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "SMB auf Port 139, 445 ohne Liste der Shares",
@@ -1144,6 +1085,7 @@
   "goal_id": "PZ-NFS-EXPORTS",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "NFS auf Port 2049 ohne Liste der Exporte",
@@ -1272,6 +1214,7 @@
   "goal_id": "PZ-WEB-INHALT",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
@@ -1480,6 +1423,7 @@
   "goal_id": "PZ-WEB-INHALT",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
@@ -1688,6 +1632,7 @@
   "goal_id": "PZ-CRED-DEFAULT",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "Telnet-Zugänge in Labs haben oft Standardkonten",
@@ -1795,6 +1740,7 @@
   "goal_id": "PZ-CRED-DEFAULT",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "VNC-Server sind oft nur mit einem schwachen oder leeren Passwort geschützt",
@@ -1902,6 +1848,7 @@
   "goal_id": "PZ-CRED-DEFAULT",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "Der Tomcat-Manager wird oft mit Standardkonten betrieben",
@@ -2009,6 +1956,7 @@
   "goal_id": "PZ-DB-ZUGRIFF",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "MySQL-Dienst ohne Anmeldeversuch",
@@ -2175,6 +2123,7 @@
   "goal_id": "PZ-DB-ZUGRIFF",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "PostgreSQL-Dienst ohne Anmeldeversuch",
@@ -2286,6 +2235,7 @@
   "goal_id": "PZ-SMTP-USER",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "SMTP-Dienst ohne Prüfung auf Benutzer-Enumeration",
@@ -2448,6 +2398,7 @@
   "goal_id": "PZ-PORTS-TCP",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Bisher nur die häufigsten TCP-Ports gescannt",
@@ -2538,6 +2489,7 @@
   "goal_id": "PZ-PORTS-UDP",
   "host_id": "ip:default/192.168.56.101",
   "host_label": "192.168.56.101",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Noch kein UDP-Scan für diesen Host",

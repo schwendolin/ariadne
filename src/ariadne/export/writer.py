@@ -25,11 +25,32 @@ __all__ = ["ExportError", "write_export", "list_exports", "sync_folder", "EXPORT
 
 MANIFEST_FORMAT = "ariadne-export/1"
 EXPORT_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z-(cys|htb)(-[0-9]{1,3})?$")
-_PATH_RE = re.compile(r"^(?:[A-Za-z0-9ÄÖÜäöü][A-Za-z0-9ÄÖÜäöü ._-]{0,80}/){0,3}[A-Za-z0-9ÄÖÜäöü][A-Za-z0-9ÄÖÜäöü ._-]{0,80}$")
-_SYNC_MARKERS = (".obsidian", ".nextcloudsync.log", ".owncloudsync.log", ".sync_", ".dropbox", ".dropbox.cache",
-                 ".stfolder", ".sync-exclude.lst")
-_SYNC_NAMES = ("dropbox", "nextcloud", "owncloud", "onedrive", "google drive", "googledrive", "mega", "icloud",
-               "seafile", "pcloud", "syncthing")
+_PATH_RE = re.compile(
+    r"^(?:[A-Za-z0-9ÄÖÜäöü][A-Za-z0-9ÄÖÜäöü ._-]{0,80}/){0,3}[A-Za-z0-9ÄÖÜäöü][A-Za-z0-9ÄÖÜäöü ._-]{0,80}$"
+)
+_SYNC_MARKERS = (
+    ".obsidian",
+    ".nextcloudsync.log",
+    ".owncloudsync.log",
+    ".sync_",
+    ".dropbox",
+    ".dropbox.cache",
+    ".stfolder",
+    ".sync-exclude.lst",
+)
+_SYNC_NAMES = (
+    "dropbox",
+    "nextcloud",
+    "owncloud",
+    "onedrive",
+    "google drive",
+    "googledrive",
+    "mega",
+    "icloud",
+    "seafile",
+    "pcloud",
+    "syncthing",
+)
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 
@@ -91,8 +112,15 @@ def _stamp(now_ns: int) -> str:
     return datetime.fromtimestamp(now_ns // 1_000_000_000, tz=UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
-def write_export(workspace: Path, files: Mapping[str, str | bytes], *, template: str, now_ns: int,
-                 redactor: Any, manifest: Mapping[str, Any]) -> dict[str, Any]:
+def write_export(
+    workspace: Path,
+    files: Mapping[str, str | bytes],
+    *,
+    template: str,
+    now_ns: int,
+    redactor: Any,
+    manifest: Mapping[str, Any],
+) -> dict[str, Any]:
     """Schreibt alle Dateien in einen neuen Export-Ordner und das Manifest. Gibt Kennung, relativen
     Pfad, Zahl der Dateien und das Manifest zurück."""
     if template not in ("cys", "htb"):
@@ -150,8 +178,12 @@ def write_export(workspace: Path, files: Mapping[str, str | bytes], *, template:
         for fd in dirs.values():
             with contextlib.suppress(OSError):
                 os.close(fd)
-    return {"export_id": export_id, "path": f"exports/{export_id}", "files": len(entries) + 1,
-            "manifest_sha256": hashlib.sha256(body).hexdigest()}
+    return {
+        "export_id": export_id,
+        "path": f"exports/{export_id}",
+        "files": len(entries) + 1,
+        "manifest_sha256": hashlib.sha256(body).hexdigest(),
+    }
 
 
 def _read_manifest(exp_fd: int, name: str) -> dict[str, Any] | None:
@@ -199,18 +231,26 @@ def list_exports(workspace: Path, limit: int = 100) -> list[dict[str, Any]]:
             chain = man.get("chain") if isinstance(man.get("chain"), dict) else {}
             files = man.get("files") if isinstance(man.get("files"), list) else []
             warnings = man.get("warnings") if isinstance(man.get("warnings"), list) else []
-            out.append({
-                "export_id": n,
-                "template": man.get("template") if man.get("template") in ("cys", "htb") else None,
-                "created_at": man.get("created_at") if isinstance(man.get("created_at"), str) else None,
-                "path": f"exports/{n}",
-                "files": len(files) + 1,
-                "klartext": man.get("klartext") is True,
-                "warnings": [w for w in warnings if isinstance(w, str) and re.fullmatch(r"[a-z_]{1,32}", w)],
-                "chain": {"seq": chain.get("seq") if isinstance(chain.get("seq"), int) else None,
-                          "hash": chain.get("hash") if isinstance(chain.get("hash"), str)
-                          and re.fullmatch(r"[0-9a-f]{0,128}", chain["hash"]) else None},
-            })
+            out.append(
+                {
+                    "export_id": n,
+                    "template": man.get("template") if man.get("template") in ("cys", "htb") else None,
+                    "created_at": man.get("created_at") if isinstance(man.get("created_at"), str) else None,
+                    "path": f"exports/{n}",
+                    "files": len(files) + 1,
+                    "klartext": man.get("klartext") is True,
+                    "warnings": [
+                        w for w in warnings if isinstance(w, str) and re.fullmatch(r"[a-z_]{1,32}", w)
+                    ],
+                    "chain": {
+                        "seq": chain.get("seq") if isinstance(chain.get("seq"), int) else None,
+                        "hash": chain.get("hash")
+                        if isinstance(chain.get("hash"), str)
+                        and re.fullmatch(r"[0-9a-f]{0,128}", chain["hash"])
+                        else None,
+                    },
+                }
+            )
         return out
     finally:
         os.close(exp_fd)

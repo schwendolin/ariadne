@@ -21,6 +21,7 @@
   "goal_id": "PZ-AUTH-ANON",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "FTP-Dienst ohne geprüfte anonyme Anmeldung",
@@ -183,6 +184,7 @@
   "goal_id": "PZ-AUTH-ANON",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "FTP-Dienst ohne geprüfte anonyme Anmeldung",
@@ -345,6 +347,7 @@
   "goal_id": "PZ-AUTH-ANON",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "FTP-Dienst ohne geprüfte anonyme Anmeldung",
@@ -487,7 +490,7 @@
  },
  {
   "ai": null,
-  "basis": "3df91ce2d5ec03c8",
+  "basis": "32ca2d157ced713b",
   "ctrl": false,
   "ctrl_reason": false,
   "decision_id": null,
@@ -501,6 +504,26 @@
     ],
     "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "1b812cf0f00b60acb355e258d1685d386564fd9e4a70dc669b6a37eb978ed275",
+    "label": "nmap -sV · Zeile 7",
+    "lines": [
+     6,
+     6
+    ],
+    "ts": "2026-10-08T12:02:11.000000Z",
+    "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "6cbd4c0c79144add5a900464c248fc27f243c85e6028fb34a1c6d23ced08f6a8",
+    "label": "nmap -sV · Zeile 8",
+    "lines": [
+     7,
+     7
+    ],
+    "ts": "2026-10-08T12:02:11.000000Z",
+    "unit_id": "cmd1"
    }
   ],
   "flags": [
@@ -509,17 +532,404 @@
   "goal_id": "PZ-VULN-RECHERCHE",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [
+   {
+    "ctrl": false,
+    "label": "vsftpd'; !sh -c 'id 2.3.4 · 21/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "vsftpd'; !sh -c 'id 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 21/tcp"
+     }
+    ],
+    "port": 21,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.105|tcp/21",
+    "template": {
+     "blocked_reason": "shell_meta",
+     "command": null,
+     "label": "searchsploit",
+     "parts": [],
+     "rendered": false,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": false,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "vsftpd'; !sh -c 'id"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "Apache`echo PWNED` 2.3.4 · 80/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "Apache`echo PWNED` 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 80/tcp"
+     }
+    ],
+    "port": 80,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.105|tcp/80",
+    "template": {
+     "blocked_reason": "shell_meta",
+     "command": null,
+     "label": "searchsploit",
+     "parts": [],
+     "rendered": false,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": false,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "Apache`echo PWNED`"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "ProFTPD $(echo PWNED) 2.3.4 · 2121/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "ProFTPD $(echo PWNED) 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 2121/tcp"
+     }
+    ],
+    "port": 2121,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.105|tcp/2121",
+    "template": {
+     "blocked_reason": "shell_meta",
+     "command": null,
+     "label": "searchsploit",
+     "parts": [],
+     "rendered": false,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": false,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "ProFTPD $(echo PWNED)"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": true,
+    "label": "MySQL<LF>INJECTED 2.3.4 · 3306/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "MySQL<LF>INJECTED 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 3306/tcp"
+     }
+    ],
+    "port": 3306,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.105|tcp/3306",
+    "template": {
+     "blocked_reason": "newline",
+     "command": null,
+     "label": "searchsploit",
+     "parts": [],
+     "rendered": false,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": true,
+       "label": "Produkt",
+       "safe": false,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "MySQL<LF>INJECTED"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": true,
+    "label": "nginx<ESC>[2J 2.3.4 · 8080/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "nginx<ESC>[2J 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 8080/tcp"
+     }
+    ],
+    "port": 8080,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.105|tcp/8080",
+    "template": {
+     "blocked_reason": "control",
+     "command": null,
+     "label": "searchsploit",
+     "parts": [],
+     "rendered": false,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": true,
+       "label": "Produkt",
+       "safe": false,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "nginx<ESC>[2J"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": true,
+    "label": "Apache Tomcat<U+202E>/Coyote 2.3.4 · 8180/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "Apache Tomcat<U+202E>/Coyote 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 8180/tcp"
+     }
+    ],
+    "port": 8180,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.105|tcp/8180",
+    "template": {
+     "blocked_reason": "control",
+     "command": null,
+     "label": "searchsploit",
+     "parts": [],
+     "rendered": false,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": true,
+       "label": "Produkt",
+       "safe": false,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "Apache Tomcat<U+202E>/Coyote"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "vsftрd 2.3.4 · 10021/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "vsftрd 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 10021/tcp"
+     }
+    ],
+    "port": 10021,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/192.168.56.105|tcp/10021",
+    "template": {
+     "blocked_reason": "non_ascii",
+     "command": null,
+     "label": "searchsploit",
+     "parts": [],
+     "rendered": false,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": false,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "vsftрd"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   }
+  ],
   "kind": "goal",
   "origin": "rule",
-  "reason": "Produkt und Version bekannt: vsftpd'; !sh -c 'id 2.3.4",
+  "reason": "Produkt und Version für 7 Dienste bekannt",
   "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.105|tcp/21",
+  "service_id": null,
   "stages": {
    "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+   "question": "Gibt es für diese Versionen bekannte Schwachstellen?"
   },
   "state": "open",
-  "suggestion_key": "sg:7d311727c7e8b7dcb174bc93",
+  "suggestion_key": "sg:40c56445c20c8d31a4d8db43",
   "templates": [
    {
     "blocked_reason": "shell_meta",
@@ -558,69 +968,7 @@
       "value": "2.3.4"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: vsftpd'; !sh -c 'id 2.3.4 (192.168.56.105:21)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "vsftpd'; !sh -c 'id 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.105:21"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:11.000000Z"
- },
- {
-  "ai": null,
-  "basis": "a7cf8383daa47e2b",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "1b812cf0f00b60acb355e258d1685d386564fd9e4a70dc669b6a37eb978ed275",
-    "label": "nmap -sV · Zeile 7",
-    "lines": [
-     6,
-     6
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [
-   "injection_suspect"
-  ],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.105",
-  "host_label": "192.168.56.105",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: Apache`echo PWNED` 2.3.4",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.105|tcp/80",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:19271c4fe0abd06d2f1cf6d9",
-  "templates": [
    {
     "blocked_reason": "shell_meta",
     "command": null,
@@ -658,69 +1006,7 @@
       "value": "2.3.4"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: Apache`echo PWNED` 2.3.4 (192.168.56.105:80)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "Apache`echo PWNED` 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.105:80"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:11.000000Z"
- },
- {
-  "ai": null,
-  "basis": "eafcd834ef06b439",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "6cbd4c0c79144add5a900464c248fc27f243c85e6028fb34a1c6d23ced08f6a8",
-    "label": "nmap -sV · Zeile 8",
-    "lines": [
-     7,
-     7
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [
-   "injection_suspect"
-  ],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.105",
-  "host_label": "192.168.56.105",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: ProFTPD $(echo PWNED) 2.3.4",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.105|tcp/2121",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:65138b683e765a4b00d8e796",
-  "templates": [
    {
     "blocked_reason": "shell_meta",
     "command": null,
@@ -758,69 +1044,7 @@
       "value": "2.3.4"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: ProFTPD $(echo PWNED) 2.3.4 (192.168.56.105:2121)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "ProFTPD $(echo PWNED) 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.105:2121"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:11.000000Z"
- },
- {
-  "ai": null,
-  "basis": "d885270ea3a67b85",
-  "ctrl": true,
-  "ctrl_reason": true,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "b17ee0632a34a5fe6a49fd42216a99525ea7b9c3508a7de6a14ab7fe11884868",
-    "label": "nmap -sV · Zeile 9",
-    "lines": [
-     8,
-     8
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [
-   "injection_suspect"
-  ],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.105",
-  "host_label": "192.168.56.105",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: MySQL<LF>INJECTED 2.3.4",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.105|tcp/3306",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:e41158a763ed2e55393e27ff",
-  "templates": [
    {
     "blocked_reason": "newline",
     "command": null,
@@ -860,325 +1084,19 @@
     ]
    }
   ],
-  "title": "Version recherchieren: MySQL<LF>INJECTED 2.3.4 (192.168.56.105:3306)",
+  "title": "Versionen recherchieren: 192.168.56.105 (7 Dienste)",
   "title_parts": [
    {
     "target": false,
-    "text": "Version recherchieren: "
+    "text": "Versionen recherchieren: "
    },
    {
     "target": true,
-    "text": "MySQL<LF>INJECTED 2.3.4"
+    "text": "192.168.56.105"
    },
    {
     "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.105:3306"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:11.000000Z"
- },
- {
-  "ai": null,
-  "basis": "2f3429d3f241abff",
-  "ctrl": true,
-  "ctrl_reason": true,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "4abf9f643bca6961d39e46e8a7de967bb0080634c7757eb98d84764f82173149",
-    "label": "nmap -sV · Zeile 10",
-    "lines": [
-     9,
-     9
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [
-   "injection_suspect"
-  ],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.105",
-  "host_label": "192.168.56.105",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: nginx<ESC>[2J 2.3.4",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.105|tcp/8080",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:eaf42688804d3d22e692daa4",
-  "templates": [
-   {
-    "blocked_reason": "control",
-    "command": null,
-    "label": "searchsploit",
-    "parts": [],
-    "rendered": false,
-    "template_id": "searchsploit",
-    "tool": "searchsploit",
-    "values": [
-     {
-      "ctrl": false,
-      "label": "Werkzeug",
-      "safe": true,
-      "slot": "tool",
-      "target": false,
-      "type": "word",
-      "value": "searchsploit"
-     },
-     {
-      "ctrl": true,
-      "label": "Produkt",
-      "safe": false,
-      "slot": "service.product",
-      "target": true,
-      "type": "words",
-      "value": "nginx<ESC>[2J"
-     },
-     {
-      "ctrl": false,
-      "label": "Version",
-      "safe": true,
-      "slot": "service.version",
-      "target": true,
-      "type": "word",
-      "value": "2.3.4"
-     }
-    ]
-   }
-  ],
-  "title": "Version recherchieren: nginx<ESC>[2J 2.3.4 (192.168.56.105:8080)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
-   },
-   {
-    "target": true,
-    "text": "nginx<ESC>[2J 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.105:8080"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:11.000000Z"
- },
- {
-  "ai": null,
-  "basis": "55bbe385c6d48bbe",
-  "ctrl": true,
-  "ctrl_reason": true,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "382f47f0dd40eefea8ee8fdca09d32fb08bda2e6624de2ab5c80b95448d1874a",
-    "label": "nmap -sV · Zeile 11",
-    "lines": [
-     10,
-     10
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [
-   "injection_suspect"
-  ],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.105",
-  "host_label": "192.168.56.105",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: Apache Tomcat<U+202E>/Coyote 2.3.4",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.105|tcp/8180",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:152df5cced95a5ba30bd85bc",
-  "templates": [
-   {
-    "blocked_reason": "control",
-    "command": null,
-    "label": "searchsploit",
-    "parts": [],
-    "rendered": false,
-    "template_id": "searchsploit",
-    "tool": "searchsploit",
-    "values": [
-     {
-      "ctrl": false,
-      "label": "Werkzeug",
-      "safe": true,
-      "slot": "tool",
-      "target": false,
-      "type": "word",
-      "value": "searchsploit"
-     },
-     {
-      "ctrl": true,
-      "label": "Produkt",
-      "safe": false,
-      "slot": "service.product",
-      "target": true,
-      "type": "words",
-      "value": "Apache Tomcat<U+202E>/Coyote"
-     },
-     {
-      "ctrl": false,
-      "label": "Version",
-      "safe": true,
-      "slot": "service.version",
-      "target": true,
-      "type": "word",
-      "value": "2.3.4"
-     }
-    ]
-   }
-  ],
-  "title": "Version recherchieren: Apache Tomcat<U+202E>/Coyote 2.3.4 (192.168.56.105:8180)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
-   },
-   {
-    "target": true,
-    "text": "Apache Tomcat<U+202E>/Coyote 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.105:8180"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-08T12:02:11.000000Z"
- },
- {
-  "ai": null,
-  "basis": "858d01f7adf8ddca",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "67a29653cbe31571d9fe53aa0fb5625ad38def85b0cacff3a60a44bde3de245a",
-    "label": "nmap -sV · Zeile 12",
-    "lines": [
-     11,
-     11
-    ],
-    "ts": "2026-10-08T12:02:11.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/192.168.56.105",
-  "host_label": "192.168.56.105",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: vsftрd 2.3.4",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/192.168.56.105|tcp/10021",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:49eb755e3c634f83fd15d6ad",
-  "templates": [
-   {
-    "blocked_reason": "non_ascii",
-    "command": null,
-    "label": "searchsploit",
-    "parts": [],
-    "rendered": false,
-    "template_id": "searchsploit",
-    "tool": "searchsploit",
-    "values": [
-     {
-      "ctrl": false,
-      "label": "Werkzeug",
-      "safe": true,
-      "slot": "tool",
-      "target": false,
-      "type": "word",
-      "value": "searchsploit"
-     },
-     {
-      "ctrl": false,
-      "label": "Produkt",
-      "safe": false,
-      "slot": "service.product",
-      "target": true,
-      "type": "words",
-      "value": "vsftрd"
-     },
-     {
-      "ctrl": false,
-      "label": "Version",
-      "safe": true,
-      "slot": "service.version",
-      "target": true,
-      "type": "word",
-      "value": "2.3.4"
-     }
-    ]
-   }
-  ],
-  "title": "Version recherchieren: vsftрd 2.3.4 (192.168.56.105:10021)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
-   },
-   {
-    "target": true,
-    "text": "vsftрd 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "192.168.56.105:10021"
-   },
-   {
-    "target": false,
-    "text": ")"
+    "text": " (7 Dienste)"
    }
   ],
   "ts": "2026-10-08T12:02:11.000000Z"
@@ -1205,6 +1123,7 @@
   "goal_id": "PZ-WEB-INHALT",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
@@ -1413,6 +1332,7 @@
   "goal_id": "PZ-WEB-INHALT",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
@@ -1621,6 +1541,7 @@
   "goal_id": "PZ-WEB-INHALT",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
@@ -1829,6 +1750,7 @@
   "goal_id": "PZ-CRED-DEFAULT",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "Der Tomcat-Manager wird oft mit Standardkonten betrieben",
@@ -1936,6 +1858,7 @@
   "goal_id": "PZ-DB-ZUGRIFF",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "question",
   "origin": "rule",
   "reason": "MySQL-Dienst ohne Anmeldeversuch",
@@ -2102,6 +2025,7 @@
   "goal_id": "PZ-PORTS-TCP",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Bisher nur die häufigsten TCP-Ports gescannt",
@@ -2192,6 +2116,7 @@
   "goal_id": "PZ-PORTS-UDP",
   "host_id": "ip:default/192.168.56.105",
   "host_label": "192.168.56.105",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Noch kein UDP-Scan für diesen Host",

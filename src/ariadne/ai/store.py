@@ -30,7 +30,16 @@ from ariadne.rules.state import load_marks, state_of
 from ariadne.rules.templates import TEMPLATES, render
 from ariadne.rules.text import iso, mask_known, vis
 
-__all__ = ["suggestions", "check_decision", "key_of", "basis_of", "records", "done_titles", "RULE_ID", "LIMIT"]
+__all__ = [
+    "suggestions",
+    "check_decision",
+    "key_of",
+    "basis_of",
+    "records",
+    "done_titles",
+    "RULE_ID",
+    "LIMIT",
+]
 
 RULE_ID = "KI"
 LIMIT = 200
@@ -52,7 +61,8 @@ def basis_of(call_id: str, idx: int) -> str:
 
 
 def records(conn: Any) -> list[tuple[int, str, int | None, dict[str, Any]]]:
-    """Aktive ``d.ai.denkanstoss`` (ohne widerrufene): ``(seq, decision_id, ts_ns, payload)``, jüngste zuletzt."""
+    """Aktive ``d.ai.denkanstoss`` (ohne widerrufene): ``(seq, decision_id, ts_ns, payload)``,
+    jüngste zuletzt."""
     rows = conn.execute(
         "SELECT seq, id, kind, payload_json, ts FROM decision WHERE kind IN ('d.ai.denkanstoss', 'd.revoke') "
         "ORDER BY seq DESC LIMIT ?",
@@ -83,8 +93,14 @@ def records(conn: Any) -> list[tuple[int, str, int | None, dict[str, Any]]]:
 class _Entry:
     __slots__ = ("key", "basis", "item", "rec", "idx", "state", "decision_id")
 
-    def __init__(self, key: str, basis: str, item: dict[str, Any], rec: tuple[int, str, int | None, dict[str, Any]],
-                 idx: int) -> None:
+    def __init__(
+        self,
+        key: str,
+        basis: str,
+        item: dict[str, Any],
+        rec: tuple[int, str, int | None, dict[str, Any]],
+        idx: int,
+    ) -> None:
         self.key, self.basis, self.item, self.rec, self.idx = key, basis, item, rec, idx
         self.state = "open"
         self.decision_id: str | None = None
@@ -110,7 +126,9 @@ def _entries(conn: Any) -> list[_Entry]:
 
 def done_titles(conn: Any) -> list[tuple[str, str]]:
     """(Zustand, Titel) erledigter und verworfener KI-Denkanstösse (für das Lagebild)."""
-    return [(e.state, str(e.item.get("title") or "")) for e in _entries(conn) if e.state in ("done", "dismissed")]
+    return [
+        (e.state, str(e.item.get("title") or "")) for e in _entries(conn) if e.state in ("done", "dismissed")
+    ]
 
 
 def _refs_for(f: Facts, item: dict[str, Any]) -> list[ClaimRef]:
@@ -195,7 +213,10 @@ def _json(conn: Any, f: Facts, e: _Entry, sources: dict[str, Any], profile: str)
         "reason": reason,
         "ctrl_reason": ctrl_r,
         "evidence": _evidence(conn, f, _refs_for(f, it), sources),
-        "stages": {"question": _text(it.get("question"), known)[0], "direction": _text(it.get("direction"), known)[0]},
+        "stages": {
+            "question": _text(it.get("question"), known)[0],
+            "direction": _text(it.get("direction"), known)[0],
+        },
         "templates": templates,
         "state": e.state,
         "decision_id": e.decision_id,
@@ -212,7 +233,9 @@ def _json(conn: Any, f: Facts, e: _Entry, sources: dict[str, Any], profile: str)
     }
 
 
-def suggestions(conn: Any, *, profile: str, state: str = "open", limit: int = 50) -> tuple[list[dict[str, Any]], bool]:
+def suggestions(
+    conn: Any, *, profile: str, state: str = "open", limit: int = 50
+) -> tuple[list[dict[str, Any]], bool]:
     """KI-Denkanstösse mit Zustand ``state`` (``open``, ``done``, ``dismissed``, ``all``), jüngste zuerst."""
     if state not in ("open", "done", "dismissed", "all"):
         raise ValueError("state")
@@ -228,7 +251,8 @@ def suggestions(conn: Any, *, profile: str, state: str = "open", limit: int = 50
 
 
 def check_decision(conn: Any, kind: str, header: dict[str, Any]) -> bool:
-    """Prüft ``d.suggestion.done``/``dismiss`` auf einen KI-Schlüssel wie :func:`ariadne.rules.api.check_decision`.
+    """Prüft ``d.suggestion.done``/``dismiss`` auf einen KI-Schlüssel wie
+    :func:`ariadne.rules.api.check_decision`.
 
     ``False``: Schlüssel gehört keinem KI-Denkanstoss (die Regel-Engine prüft weiter). Sonst ``True`` oder
     :class:`~ariadne.rules.api.RuleRefError` (``conflict``, ``basis_required``)."""

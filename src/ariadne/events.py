@@ -336,6 +336,11 @@ class ShotCaptured(_M):
     stream_off: int | None = None
     note: str | None = None
     rec: bool = True
+    # Bau v0.1-Screenshots (Teil «screenshots»): Kontext zum Zeitpunkt der Aufnahme
+    dhash: str | None = Field(default=None, description="Differenz-Hash (16 Hex) für Beinahe-Duplikate")
+    host: str | None = Field(default=None, description="Host der obersten Stufe des Terminals (nicht lokal)")
+    host_auto: bool = Field(default=False, description="host aus der Auswertung (E23), nicht vom Nutzer")
+    stack: tuple[Stage, ...] | None = Field(default=None, description="Kontextstapel ohne Auto-Hosts")
 
 
 class NetRoute(_M):

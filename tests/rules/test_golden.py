@@ -51,6 +51,7 @@ SUGGESTION_KEYS = {
     "evidence",
     "stages",
     "templates",
+    "items",
     "state",
     "decision_id",
     "basis",
@@ -60,47 +61,26 @@ SUGGESTION_KEYS = {
 }
 TEMPLATE_KEYS = {"template_id", "tool", "label", "rendered", "command", "parts", "values", "blocked_reason"}
 VALUE_KEYS = {"slot", "type", "label", "value", "ctrl", "target", "safe"}
+ITEM_KEYS = {"service_id", "port", "proto", "label", "ctrl", "label_parts", "template"}
 _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2028\u2029\u2066-\u2069\ufeff]")
 
 U = "192.168.56.101"
 NMAP_ANON_21 = f"nmap -p 21 --script ftp-anon {U}"
 
 MS2_SV_SC = [
-    ("R-VERSION-RECHERCHE", f"Version recherchieren: vsftpd 2.3.4 ({U}:21)", ["searchsploit vsftpd 2.3.4"]),
     (
         "R-VERSION-RECHERCHE",
-        f"Version recherchieren: OpenSSH 4.7p1 Debian 8ubuntu1 ({U}:22)",
-        ["searchsploit OpenSSH 4.7p1"],
-    ),
-    (
-        "R-VERSION-RECHERCHE",
-        f"Version recherchieren: ISC BIND 9.4.2 ({U}:53)",
-        ["searchsploit ISC BIND 9.4.2"],
-    ),
-    (
-        "R-VERSION-RECHERCHE",
-        f"Version recherchieren: Apache httpd 2.2.8 ({U}:80)",
-        ["searchsploit Apache 2.2.8"],
-    ),
-    (
-        "R-VERSION-RECHERCHE",
-        f"Version recherchieren: Samba smbd 3.0.20-Debian ({U}:445)",
-        ["searchsploit Samba 3.0.20"],
-    ),
-    (
-        "R-VERSION-RECHERCHE",
-        f"Version recherchieren: ProFTPD 1.3.1 ({U}:2121)",
-        ["searchsploit ProFTPD 1.3.1"],
-    ),
-    (
-        "R-VERSION-RECHERCHE",
-        f"Version recherchieren: MySQL 5.0.51a-3ubuntu5 ({U}:3306)",
-        ["searchsploit MySQL 5.0.51a"],
-    ),
-    (
-        "R-VERSION-RECHERCHE",
-        f"Version recherchieren: Apache Tomcat/Coyote JSP engine 1.1 ({U}:8180)",
-        ["searchsploit Apache Tomcat Coyote JSP 1.1"],
+        f"Versionen recherchieren: {U} (8 Dienste)",
+        [
+            "searchsploit vsftpd 2.3.4",
+            "searchsploit OpenSSH 4.7p1",
+            "searchsploit ISC BIND 9.4.2",
+            "searchsploit Apache 2.2.8",
+            "searchsploit Samba 3.0.20",
+            "searchsploit ProFTPD 1.3.1",
+            "searchsploit MySQL 5.0.51a",
+            "searchsploit Apache Tomcat Coyote JSP 1.1",
+        ],
     ),
     (
         "R-SMB-SHARES",
@@ -163,16 +143,10 @@ MS2_SV_SC = [
 
 L = "10.10.10.3"
 LAME = [
-    ("R-VERSION-RECHERCHE", f"Version recherchieren: vsftpd 2.3.4 ({L}:21)", ["searchsploit vsftpd 2.3.4"]),
     (
         "R-VERSION-RECHERCHE",
-        f"Version recherchieren: OpenSSH 4.7p1 Debian 8ubuntu1 ({L}:22)",
-        ["searchsploit OpenSSH 4.7p1"],
-    ),
-    (
-        "R-VERSION-RECHERCHE",
-        f"Version recherchieren: Samba smbd 3.0.20-Debian ({L}:445)",
-        ["searchsploit Samba 3.0.20"],
+        f"Versionen recherchieren: {L} (3 Dienste)",
+        ["searchsploit vsftpd 2.3.4", "searchsploit OpenSSH 4.7p1", "searchsploit Samba 3.0.20"],
     ),
     (
         "R-SMB-SHARES",
@@ -264,9 +238,28 @@ def test_ms2_without_scripts_matches_design(results):
         {"text": " --script ftp-anon ", "target": False},
         {"text": U, "target": True},
     ]
-    d2 = next(s for s in items if s["rule_id"] == "R-VERSION-RECHERCHE")
-    assert d2["title"] == f"Version recherchieren: vsftpd 2.3.4 ({U}:21)"
-    assert d2["templates"][0]["command"] == "searchsploit vsftpd 2.3.4"
+    # E119: ein Denkanstoss pro Host, aufgeklappt die Liste mit je einer Vorlage
+    (d2,) = H.by_rule(items, "R-VERSION-RECHERCHE")
+    assert d2["title"] == f"Versionen recherchieren: {U} (7 Dienste)"
+    assert d2["title_parts"] == [
+        {"text": "Versionen recherchieren: ", "target": False},
+        {"text": U, "target": True},
+        {"text": " (7 Dienste)", "target": False},
+    ]
+    assert d2["service_id"] is None and d2["host_id"] == f"ip:default/{U}"
+    assert d2["reason"] == "Produkt und Version für 7 Dienste bekannt"
+    first_item = d2["items"][0]
+    assert first_item["service_id"] == f"svc:ip:default/{U}|tcp/21"
+    assert (first_item["port"], first_item["proto"]) == (21, "tcp")
+    assert first_item["label"] == "vsftpd 2.3.4 · 21/tcp"
+    assert first_item["label_parts"] == [
+        {"text": "vsftpd 2.3.4", "target": True},
+        {"text": " · 21/tcp", "target": False},
+    ]
+    assert first_item["template"]["command"] == "searchsploit vsftpd 2.3.4"
+    assert [i["port"] for i in d2["items"]] == [21, 22, 53, 80, 2121, 3306, 8180]
+    # ältere Ansichten: die ersten vier Vorlagen auch in ``templates``
+    assert d2["templates"] == [i["template"] for i in d2["items"][:4]]
     anon = [(s["title"], s["service_id"]) for s in H.by_rule(items, "R-ANON-ZUGRIFF")]
     assert anon == [
         (f"Unauthentisierten Zugriff auf {U}:21 prüfen", f"svc:ip:default/{U}|tcp/21"),
@@ -274,21 +267,23 @@ def test_ms2_without_scripts_matches_design(results):
         (f"Unauthentisierten Zugriff auf {U}:2121 prüfen", f"svc:ip:default/{U}|tcp/2121"),
     ]
     # ohne -sC und ohne smb-os-discovery bleibt die Samba-Version ein Bereich: keine Recherche
-    assert not any("Samba" in s["title"] for s in H.by_rule(items, "R-VERSION-RECHERCHE"))
+    assert not any("Samba" in i["label"] for i in d2["items"])
 
 
 def test_hostile_products_give_no_template_only_values(results):
     items = results["hostile"]
-    versions = H.by_rule(items, "R-VERSION-RECHERCHE")
-    assert len(versions) == len(H.HOSTILE_PRODUCTS)
+    (version,) = H.by_rule(items, "R-VERSION-RECHERCHE")  # E119: ein Denkanstoss für den Host
+    assert len(version["items"]) == len(H.HOSTILE_PRODUCTS)
+    assert version["title"] == f"Versionen recherchieren: {H.HOSTILE} ({len(H.HOSTILE_PRODUCTS)} Dienste)"
+    suspect = any(i["template"]["blocked_reason"] in SUSPECT_REASONS for i in version["items"])
+    assert suspect and "injection_suspect" in version["flags"]
     reasons = {}
-    for s in versions:
-        (tpl,) = s["templates"]
+    for it in version["items"]:
+        tpl = it["template"]
         assert not tpl["rendered"] and tpl["command"] is None and tpl["parts"] == []
         assert [v["label"] for v in tpl["values"]] == ["Werkzeug", "Produkt", "Version"]
         assert tpl["values"][0]["value"] == "searchsploit" and tpl["values"][1]["safe"] is False
-        reasons[s["service_id"].rsplit("/", 1)[1]] = tpl["blocked_reason"]
-        assert ("injection_suspect" in s["flags"]) is (tpl["blocked_reason"] in SUSPECT_REASONS)
+        reasons[str(it["port"])] = tpl["blocked_reason"]
     assert reasons == {
         "21": "shell_meta",
         "2121": "shell_meta",
@@ -298,12 +293,13 @@ def test_hostile_products_give_no_template_only_values(results):
         "8180": "control",
         "10021": "non_ascii",
     }
-    shown = {s["service_id"].rsplit("/", 1)[1]: s["templates"][0]["values"][1]["value"] for s in versions}
+    shown = {str(i["port"]): i["template"]["values"][1]["value"] for i in version["items"]}
     assert shown["3306"] == "MySQL<LF>INJECTED" and shown["8080"] == "nginx<ESC>[2J"
     assert shown["8180"] == "Apache Tomcat<U+202E>/Coyote"  # nicht druckbar: unverändert, sichtbar gemacht
     assert shown["21"] == "vsftpd'; !sh -c 'id"
-    ctrl = {s["service_id"].rsplit("/", 1)[1]: (s["ctrl"], s["ctrl_reason"]) for s in versions}
-    assert ctrl["3306"] == (True, True) and ctrl["21"] == (False, False)
+    ctrl = {str(i["port"]): i["ctrl"] for i in version["items"]}
+    assert ctrl["3306"] is True and ctrl["21"] is False
+    assert version["ctrl"] is False  # der Titel nennt nur die Adresse
     # Vorlagen ohne Produkt (nur IP und Port) bleiben fertig; die Richtung nennt kein feindliches Produkt
     anon = {s["service_id"].rsplit("/", 1)[1]: s for s in H.by_rule(items, "R-ANON-ZUGRIFF")}
     assert anon["21"]["templates"][0]["command"] == f"nmap -p 21 --script ftp-anon {H.HOSTILE}"
@@ -334,7 +330,14 @@ def test_shape_matches_web_api_18_6(name, results):
             assert set(e) == {"claim_key", "unit_id", "lines", "label", "ts"} and re.fullmatch(
                 r"[0-9a-f]{64}", e["claim_key"]
             )
-        for t in s["templates"]:
+        assert isinstance(s["items"], list) and len(s["items"]) <= 64
+        assert bool(s["items"]) is (s["rule_id"] == "R-VERSION-RECHERCHE")
+        for it in s["items"]:
+            assert set(it) == ITEM_KEYS and it["label"] == "".join(p["text"] for p in it["label_parts"])
+            assert it["service_id"].endswith(f"|{it['proto']}/{it['port']}")
+        if s["items"]:
+            assert s["templates"] == [i["template"] for i in s["items"][:4]]
+        for t in [*s["templates"], *(i["template"] for i in s["items"])]:
             assert set(t) == TEMPLATE_KEYS and t["template_id"] in TEMPLATES
             assert all(set(v) == VALUE_KEYS for v in t["values"])
             if t["rendered"]:
@@ -368,7 +371,7 @@ def test_every_rendered_golden_command_splits_exactly(results, shell):
     seen = 0
     for items in results.values():
         for s in items:
-            for t in s["templates"]:
+            for t in [*s["templates"], *(i["template"] for i in s["items"])]:
                 if not t["rendered"]:
                     continue
                 expected = _expected_argv(t)

@@ -311,6 +311,12 @@ def _masked(value: object, known: list[str]) -> object:
     return mask_known(value, known) if isinstance(value, str) else value
 
 
+def _rendered(tid: str, raw: dict[str, object], known: list[str], scope: Scope) -> dict[str, Any]:
+    slots = {k: _masked(v, known) for k, v in raw.items()}
+    ip = slots.get("host.ip")
+    return render(TEMPLATES[tid], slots, scope, ipv6=isinstance(ip, str) and ":" in ip)
+
+
 def to_json(conn: Any, f: Facts, built: list[Built], *, profile: str) -> list[dict[str, Any]]:
     """``Suggestion`` (web-api.md 18.6) für die gegebenen Einträge, mit Belegen und Vorlagen."""
     keys = sorted({r.claim_key for b in built for r in b.cand.detail.evidence[:_EVIDENCE_MAX]})
@@ -335,15 +341,38 @@ def to_json(conn: Any, f: Facts, built: list[Built], *, profile: str) -> list[di
                 reason.lit(text)
         flags = set(d.flags)
         templates: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         if not (c.rule.login_attempt and profile != "lab"):
-            slots = {k: _masked(v, known) for k, v in d.slots.items()}
-            ip = slots.get("host.ip")
-            ipv6 = isinstance(ip, str) and ":" in ip
-            for tid in d.templates[:_TEMPLATES_MAX]:
-                t = render(TEMPLATES[tid], slots, scope, ipv6=ipv6)
-                if t["blocked_reason"] in SUSPECT_REASONS:
-                    flags.add("injection_suspect")
-                templates.append(t)
+            if d.items:
+                # Liste mit je einer Vorlage (E119); ``templates`` trägt die ersten für ältere Ansichten
+                for it in d.items:
+                    t = _rendered(it.template, it.slots, known, scope)
+                    if t["blocked_reason"] in SUSPECT_REASONS:
+                        flags.add("injection_suspect")
+                    label = Parts()
+                    for text, target in it.label:
+                        if target:
+                            label.target(mask_known(text, known))
+                        else:
+                            label.lit(text)
+                    items.append(
+                        {
+                            "service_id": it.service.service_id,
+                            "port": it.service.port,
+                            "proto": it.service.proto,
+                            "label": label.text,
+                            "ctrl": label.ctrl,
+                            "label_parts": label.json(),
+                            "template": t,
+                        }
+                    )
+                templates = [i["template"] for i in items[:_TEMPLATES_MAX]]
+            else:
+                for tid in d.templates[:_TEMPLATES_MAX]:
+                    t = _rendered(tid, d.slots, known, scope)
+                    if t["blocked_reason"] in SUSPECT_REASONS:
+                        flags.add("injection_suspect")
+                    templates.append(t)
         host_label, _ = vis(mask_known(c.host.label, known))
         out.append(
             {
@@ -363,6 +392,7 @@ def to_json(conn: Any, f: Facts, built: list[Built], *, profile: str) -> list[di
                 "evidence": _evidence(conn, f, d.evidence, sources),
                 "stages": {"question": d.question, "direction": d.direction},
                 "templates": templates,
+                "items": items,
                 "state": b.state,
                 "decision_id": b.decision_id,
                 "basis": b.basis,

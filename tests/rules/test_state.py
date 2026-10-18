@@ -31,7 +31,7 @@ def test_dismiss_is_permanent_and_revoke_reopens():
     assert sg["suggestion_key"] not in {s["suggestion_key"] for s in H.suggestions(conn)}
     (gone,) = [s for s in H.suggestions(conn, state="dismissed")]
     assert gone["suggestion_key"] == sg["suggestion_key"] and gone["decision_id"] == "dec-100"
-    assert gone["state"] == "dismissed" and rules_api.open_count(conn, profile="lab") == 21
+    assert gone["state"] == "dismissed" and rules_api.open_count(conn, profile="lab") == 15
     # neuer Anlass (andere Version) ändert nichts am Verwerfen
     apply_items(
         p,
@@ -86,7 +86,7 @@ def test_state_survives_rebuild_and_full_reparse():
     conn, p = H.ms2(scripts=False)
     items = H.suggestions(conn)
     anon = _find(items, "R-ANON-ZUGRIFF", ":21 ")
-    ver = _find(items, "R-VERSION-RECHERCHE", "vsftpd")
+    ver = _find(items, "R-VERSION-RECHERCHE")
     decisions = [
         dec(100, "d.suggestion.dismiss", suggestion_key=anon["suggestion_key"]),
         dec(101, "d.suggestion.done", suggestion_key=ver["suggestion_key"], basis=ver["basis"]),
@@ -143,7 +143,7 @@ def test_merge_keeps_dismissed_state():
 def test_suggestions_state_filter_limit_and_truncated():
     conn, p = H.ms2(scripts=False)
     every, tr = rules_api.suggestions(conn, profile="lab", state="all", limit=200)
-    assert len(every) == 22 and tr is False
+    assert len(every) == 16 and tr is False
     few, tr = rules_api.suggestions(conn, profile="lab", state="open", limit=3)
     assert [s["suggestion_key"] for s in few] == [s["suggestion_key"] for s in every[:3]] and tr is True
     none, tr = rules_api.suggestions(conn, profile="lab", state="done", limit=50)
@@ -160,7 +160,7 @@ def test_check_decision_codes():
     conn, p = H.ms2(scripts=False)
     items = H.suggestions(conn)
     anon = _find(items, "R-ANON-ZUGRIFF", ":21 ")
-    ver = _find(items, "R-VERSION-RECHERCHE", "vsftpd")
+    ver = _find(items, "R-VERSION-RECHERCHE")
     check = rules_api.check_decision
 
     def code(kind: str, **h) -> str | None:

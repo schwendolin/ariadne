@@ -11,6 +11,16 @@ import { ApiClient, apiPath } from './client';
 import { SseClient, type ConnectionState } from './sse';
 import type {
   Accepted,
+  AiJob,
+  AiStatus,
+  ExportsView,
+  ExportStarted,
+  ExportTemplate,
+  PhaseSet,
+  PhasesView,
+  Screenshot,
+  ScreenshotsView,
+  ShotRequest,
   ChangeSet,
   ConfirmGroupResult,
   ContextOp,
@@ -125,6 +135,22 @@ export interface Backend {
   finding(pid: string, findingId: string, signal?: AbortSignal): Promise<FindingDetail>;
 
   /** Globaler Ereignisstrom (14); gibt eine Abmeldefunktion zurück. */
+  // KI (Entwurf api-ki, v0.1-KI)
+  aiStatus(pid: string, signal?: AbortSignal): Promise<AiStatus>;
+  aiRequest(pid: string, confirmBudget: boolean): Promise<AiJob>;
+  aiJob(pid: string, jobId: string, signal?: AbortSignal): Promise<AiJob>;
+
+  // Export (Entwurf api-export, v0.1-Export)
+  exports(pid: string, signal?: AbortSignal): Promise<ExportsView>;
+  startExport(pid: string, template: ExportTemplate): Promise<ExportStarted>;
+  exportPhases(pid: string, template: ExportTemplate, signal?: AbortSignal): Promise<PhasesView>;
+  setExportPhase(pid: string, template: ExportTemplate, cmdId: string, phase: string): Promise<PhaseSet>;
+
+  // Screenshots und Blobs (Entwurf api-screenshots)
+  screenshots(pid: string, signal?: AbortSignal): Promise<ScreenshotsView>;
+  takeScreenshot(pid: string, req: ShotRequest): Promise<Screenshot>;
+  blob(pid: string, blobId: string, signal?: AbortSignal): Promise<Blob>;
+
   subscribe(handlers: StreamHandlers): () => void;
 }
 
@@ -278,6 +304,41 @@ export class HttpBackend implements Backend {
   }
   finding(pid: string, findingId: string, signal?: AbortSignal) {
     return this.api.get<FindingDetail>(apiPath('p', pid, 'findings', findingId), { signal });
+  }
+
+  aiStatus(pid: string, signal?: AbortSignal) {
+    return this.api.get<AiStatus>(apiPath('p', pid, 'ai', 'status'), { signal });
+  }
+  async aiRequest(pid: string, confirmBudget: boolean) {
+    return (await this.api.post<{ job: AiJob }>(apiPath('p', pid, 'ai', 'denkanstoss'), { confirm_budget: confirmBudget })).job;
+  }
+  async aiJob(pid: string, jobId: string, signal?: AbortSignal) {
+    return (await this.api.get<{ job: AiJob }>(apiPath('p', pid, 'ai', 'jobs', jobId), { signal })).job;
+  }
+
+  exports(pid: string, signal?: AbortSignal) {
+    return this.api.get<ExportsView>(apiPath('p', pid, 'exports'), { signal });
+  }
+  startExport(pid: string, template: ExportTemplate) {
+    return this.api.post<ExportStarted>(apiPath('p', pid, 'exports'), { template });
+  }
+  exportPhases(pid: string, template: ExportTemplate, signal?: AbortSignal) {
+    return this.api.get<PhasesView>(apiPath('p', pid, 'exports', 'phases'), { query: { template }, signal });
+  }
+  setExportPhase(pid: string, template: ExportTemplate, cmdId: string, phase: string) {
+    return this.api.post<PhaseSet>(apiPath('p', pid, 'exports', 'phases'), { template, cmd_id: cmdId, phase });
+  }
+
+  screenshots(pid: string, signal?: AbortSignal) {
+    return this.api.get<ScreenshotsView>(apiPath('p', pid, 'screenshots'), { query: { limit: 200 }, signal });
+  }
+  async takeScreenshot(pid: string, req: ShotRequest) {
+    // Der Server wartet den Countdown ab und antwortet erst nach der Aufnahme (delay_s + etwa 1 s).
+    const timeoutMs = ((req.delay_s ?? 3) + 20) * 1000;
+    return (await this.api.post<{ screenshot: Screenshot }>(apiPath('p', pid, 'screenshots'), req, { timeoutMs })).screenshot;
+  }
+  blob(pid: string, blobId: string, signal?: AbortSignal) {
+    return this.api.get<Blob>(apiPath('p', pid, 'blobs', blobId), { expect: 'blob', signal });
   }
 
   subscribe(handlers: StreamHandlers): () => void {

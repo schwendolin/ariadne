@@ -1352,8 +1352,10 @@ class Daemon:
                                    shim_off=obj.get("stream_off"))
             elif kind == "req.keystep":
                 self._keystep(t, obj)
-            elif kind == "req.shot":
-                self._flash(t, "Screenshots kommen in einer späteren Version")
+            elif kind == "req.shot":  # Bau v0.1-Screenshots: Aufnahme als Hintergrundaufgabe
+                from ariadne.sources import screenshot_service
+
+                self._spawn(screenshot_service.from_hotkey(self, t, obj))
             if self.writer.pending:
                 entry.need_gen = self.writer.pending_gen
         except (ValueError, TypeError, OpError):
@@ -2590,3 +2592,11 @@ _OPS.update(ops_eval.OPS)
 from ariadne.export import ops as _export_ops  # noqa: E402
 
 _OPS.update(_export_ops.OPS)
+# Bau v0.1-KI: KI-Gateway (ai.status, ai.key.set, ai.key.remove, ai.allow_cloud).
+from ariadne.ai import ops as _ai_ops  # noqa: E402
+
+_OPS.update(_ai_ops.OPS)
+# Bau v0.1-Screenshots: shot.take (CLI ariadne shot).
+from ariadne.sources import screenshot_service as _shot_ops  # noqa: E402
+
+_OPS.update(_shot_ops.OPS)

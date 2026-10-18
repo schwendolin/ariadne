@@ -12,7 +12,7 @@ build/
 htmlcov/
 node_modules/
 webui/dist/
-src/ariadne/web/static/
+# src/ariadne/web/static/ ist eingecheckt (gebaute Oberfläche, scripts/build-ui.sh)
 # Testprojekte und lokale Daten nie einchecken
 /ariadne-data/
 *.ariadne

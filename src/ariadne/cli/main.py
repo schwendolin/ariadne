@@ -27,9 +27,12 @@ from collections.abc import Callable
 from typing import Any
 
 from ariadne import __version__
+from ariadne.cli import ai as ai_cli
 from ariadne.cli import analysis
 from ariadne.cli import backup as backup_cli
+from ariadne.cli import export as export_cli
 from ariadne.cli import remote as remote_cli
+from ariadne.cli import shot as shot_cli
 from ariadne.cli import ui as ui_cli
 from ariadne.cli.common import SECRET_PROMPT_S, CliError, _call, _client, _terminal_id, read_secret, s, say
 from ariadne.crypto.vault import MIN_PASSPHRASE, OperatorVault
@@ -767,6 +770,9 @@ def build_parser() -> argparse.ArgumentParser:
     ui_cli.register(sub)
     backup_cli.register(sub)
     remote_cli.register(sub)
+    export_cli.register(sub)  # Bau v0.1-Export
+    ai_cli.register(sub)  # Bau v0.1-KI
+    shot_cli.register(sub)  # Bau v0.1-Screenshots
     return p
 
 

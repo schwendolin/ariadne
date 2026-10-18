@@ -46,14 +46,18 @@ def register(app: Any, ctx: WebContext) -> None:
     from fastapi import APIRouter
 
     from ariadne.web.api import (
+        ai,
+        blobs,
         clipboard,
         decisions,
         evidence,
+        exports,
         findings,
         graph,
         hosts,
         later,
         project,
+        screenshots,
         search,
         secrets,
         status,
@@ -88,6 +92,10 @@ def register(app: Any, ctx: WebContext) -> None:
         findings,
         suggestions,
         clipboard,
+        ai,  # Bau v0.1-KI: KI-Denkanstoss (Teil «ki»)
+        exports,  # Bau v0.1-Export: Bericht-Export und Phasen (Teil «export»)
+        screenshots,  # Bau v0.1-Screenshots: Screenshots (Teil «screenshots»)
+        blobs,  # Bau v0.1-Screenshots: Bilder aus dem Blob-Store (Teil «screenshots»)
     ):
         mod.add_routes(router, api)
     later.add_routes(router)

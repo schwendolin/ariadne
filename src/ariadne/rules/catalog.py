@@ -20,7 +20,7 @@ from functools import lru_cache, partial
 from ariadne.rules import commands as C
 from ariadne.rules.facts import ClaimRef, Facts, Host, Service
 
-__all__ = ["Rule", "Candidate", "Detail", "CATALOG", "RULES"]
+__all__ = ["Rule", "Candidate", "Detail", "Item", "CATALOG", "RULES", "ITEMS_MAX"]
 
 # --------------------------------------------------------------------------- Typen
 
@@ -48,6 +48,18 @@ class Detail:
     templates: list[str]
     slots: dict[str, object] = field(default_factory=dict)
     flags: set[str] = field(default_factory=set)
+    items: list[Item] = field(default_factory=list)  # Liste mit je einer Vorlage (E119)
+
+
+@dataclass(slots=True)
+class Item:
+    """Ein Eintrag der Liste eines Denkanstosses (E119): Dienst, Label in Teilen (Zieldaten markiert),
+    eine Vorlage der Bibliothek und ihre Rohwerte."""
+
+    service: Service
+    label: list[tuple[str, bool]]
+    template: str
+    slots: dict[str, object]
 
 
 @dataclass(slots=True)
@@ -439,25 +451,59 @@ def _search_version(version: str) -> str:
     return m.group(1) if m else first
 
 
-def _d_version(h: Host, s: Service, product: str, version: str, refs: list[ClaimRef]) -> Detail:
-    return Detail(
-        title=[
-            ("Version recherchieren: ", False),
-            (f"{product} {version}", True),
-            (" (", False),
-            (_at(h, s), True),
-            (")", False),
-        ],
-        reason=[("Produkt und Version bekannt: ", False), (f"{product} {version}", True)],
-        question="Gibt es für diese Version bekannte Schwachstellen?",
-        direction=(
-            "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen "
-            "Version prüfen."
-        ),
-        evidence=refs,
-        templates=["searchsploit"],
+ITEMS_MAX = 64  # Einträge pro Denkanstoss mit Liste (E119)
+
+_Member = tuple[Service, str, str, list[ClaimRef]]
+
+
+def _version_item(s: Service, product: str, version: str) -> Item:
+    return Item(
+        service=s,
+        label=[(f"{product} {version}", True), (f" · {s.port}/{s.proto}", False)],
+        template="searchsploit",
         slots={"service.product": _search_words(product), "service.version": _search_version(version)},
+    )
+
+
+def _d_version(h: Host, members: list[_Member]) -> Detail:
+    """Ein Denkanstoss pro Host (E119): bei einem Dienst wie bisher benannt, sonst «Versionen
+    recherchieren: <Host> (n Dienste)»; aufgeklappt die Liste mit je einer Vorlage."""
+    items = [_version_item(s, product, version) for s, product, version, _r in members]
+    refs = [r for m in members for r in m[3]]
+    question = "Gibt es für diese Version bekannte Schwachstellen?"
+    direction = (
+        "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen "
+        "Version prüfen."
+    )
+    if len(members) == 1:
+        s, product, version, _r = members[0]
+        return Detail(
+            title=[
+                ("Version recherchieren: ", False),
+                (f"{product} {version}", True),
+                (" (", False),
+                (_at(h, s), True),
+                (")", False),
+            ],
+            reason=[("Produkt und Version bekannt: ", False), (f"{product} {version}", True)],
+            question=question,
+            direction=direction,
+            evidence=refs[:5],
+            templates=[it.template for it in items],
+            slots=dict(items[0].slots),
+            flags=_flags(refs),
+            items=items,
+        )
+    n = len(members)
+    return Detail(
+        title=[("Versionen recherchieren: ", False), (_ip_text(h), True), (f" ({n} Dienste)", False)],
+        reason=[(f"Produkt und Version für {n} Dienste bekannt", False)],
+        question="Gibt es für diese Versionen bekannte Schwachstellen?",
+        direction=direction,
+        evidence=refs[:5],
+        templates=[],
         flags=_flags(refs),
+        items=items,
     )
 
 
@@ -481,20 +527,25 @@ def _version(f: Facts) -> Iterator[Candidate]:
             continue
         key = (h.host_id, _search_words(prod.value).lower(), _search_version(version))
         groups.setdefault(key, []).append((s, prod.value, version, refs, derived))
+    per_host: dict[str, list[_Member]] = {}
     for key, group in groups.items():
         # Subjekt: eigener genauer Wert vor abgeleitetem (smb_os), SMB auf 445 zuerst, dann der kleinste Port
         members = sorted(
             group, key=lambda m: (m[4], not (is_smb(m[0]) and m[0].port == 445), m[0].proto, m[0].port)
         )
         s, product, version, refs, _derived = members[0]
-        h = f.hosts[key[0]]
         if _searchsploit_any(f, product.split(" ")[0]):
             continue
         if any(_observed_script(f, m[0].observers, "vulners") for m in members):
             continue
-        yield Candidate(
-            rule, h, s, (s.service_id,), (product, version), partial(_d_version, h, s, product, version, refs)
-        )
+        per_host.setdefault(key[0], []).append((s, product, version, refs))
+    for host_id, found in per_host.items():
+        h = f.hosts[host_id]
+        found.sort(key=lambda m: (m[0].port, m[0].proto, m[0].service_id))
+        found = found[:ITEMS_MAX]
+        subject = found[0][0] if len(found) == 1 else None
+        basis = tuple(sorted(f"{m[0].service_id}\x1f{m[1]}\x1f{m[2]}" for m in found))
+        yield Candidate(rule, h, subject, (h.host_id,), basis, partial(_d_version, h, found))
 
 
 def _searchsploit_any(f: Facts, first_word: str) -> bool:

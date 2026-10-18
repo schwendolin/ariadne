@@ -16,16 +16,11 @@ __all__ = ["add_routes", "LATER_ROUTES"]
 
 # (Methode, Pfad, Name, Version)
 LATER_ROUTES: tuple[tuple[str, str, str, str], ...] = (
-    ("POST", "/p/{pid}/ai/denkanstoss", "ai_denkanstoss", "v0.1-KI"),
     ("POST", "/p/{pid}/ai/frage", "ai_frage", "v0.2"),
-    ("POST", "/p/{pid}/exports", "exports_create", "v0.1-Export"),
-    ("GET", "/p/{pid}/exports", "exports_list", "v0.1-Export"),
-    ("POST", "/p/{pid}/screenshots", "screenshots", "v0.1-Screenshots"),
     ("GET", "/p/{pid}/credentials", "credentials", "v0.2"),
     ("GET", "/p/{pid}/cred-matrix", "cred_matrix", "v0.2"),
     ("POST", "/p/{pid}/credentials/{cred_id}/copy", "credential_copy", "v0.2"),
     ("POST", "/p/{pid}/query", "query", "v0.2"),
-    ("GET", "/p/{pid}/blobs/{blob_id}", "blob", "v0.2"),
 )
 
 

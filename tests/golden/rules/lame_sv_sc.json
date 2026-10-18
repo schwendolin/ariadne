@@ -1,7 +1,7 @@
 [
  {
   "ai": null,
-  "basis": "89fb80e6d35254f7",
+  "basis": "2ce34047de3111f3",
   "ctrl": false,
   "ctrl_reason": false,
   "decision_id": null,
@@ -15,23 +15,261 @@
     ],
     "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "3d64f949172648556429c23dbac9c4bf30bcf77127e6f0d3a1ca7f68341be2b1",
+    "label": "nmap -sV -sC · Zeile 20",
+    "lines": [
+     19,
+     19
+    ],
+    "ts": "2026-10-15T17:02:00.000000Z",
+    "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "84c62bb0ea5f90e70085282eee1c90f7b554e83862f1b9e6c7cb6e4ed5d562fd",
+    "label": "nmap -sV -sC · Zeile 25",
+    "lines": [
+     24,
+     24
+    ],
+    "ts": "2026-10-15T17:02:00.000000Z",
+    "unit_id": "cmd1"
    }
   ],
   "flags": [],
   "goal_id": "PZ-VULN-RECHERCHE",
   "host_id": "ip:default/10.10.10.3",
   "host_label": "10.10.10.3",
+  "items": [
+   {
+    "ctrl": false,
+    "label": "vsftpd 2.3.4 · 21/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "vsftpd 2.3.4"
+     },
+     {
+      "target": false,
+      "text": " · 21/tcp"
+     }
+    ],
+    "port": 21,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/10.10.10.3|tcp/21",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit vsftpd 2.3.4",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "vsftpd"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "2.3.4"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "vsftpd"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "2.3.4"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "OpenSSH 4.7p1 Debian 8ubuntu1 · 22/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "OpenSSH 4.7p1 Debian 8ubuntu1"
+     },
+     {
+      "target": false,
+      "text": " · 22/tcp"
+     }
+    ],
+    "port": 22,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/10.10.10.3|tcp/22",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit OpenSSH 4.7p1",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "OpenSSH"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "4.7p1"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "OpenSSH"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "4.7p1"
+      }
+     ]
+    }
+   },
+   {
+    "ctrl": false,
+    "label": "Samba smbd 3.0.20-Debian · 445/tcp",
+    "label_parts": [
+     {
+      "target": true,
+      "text": "Samba smbd 3.0.20-Debian"
+     },
+     {
+      "target": false,
+      "text": " · 445/tcp"
+     }
+    ],
+    "port": 445,
+    "proto": "tcp",
+    "service_id": "svc:ip:default/10.10.10.3|tcp/445",
+    "template": {
+     "blocked_reason": null,
+     "command": "searchsploit Samba 3.0.20",
+     "label": "searchsploit",
+     "parts": [
+      {
+       "target": false,
+       "text": "searchsploit "
+      },
+      {
+       "target": true,
+       "text": "Samba"
+      },
+      {
+       "target": false,
+       "text": " "
+      },
+      {
+       "target": true,
+       "text": "3.0.20"
+      }
+     ],
+     "rendered": true,
+     "template_id": "searchsploit",
+     "tool": "searchsploit",
+     "values": [
+      {
+       "ctrl": false,
+       "label": "Werkzeug",
+       "safe": true,
+       "slot": "tool",
+       "target": false,
+       "type": "word",
+       "value": "searchsploit"
+      },
+      {
+       "ctrl": false,
+       "label": "Produkt",
+       "safe": true,
+       "slot": "service.product",
+       "target": true,
+       "type": "words",
+       "value": "Samba"
+      },
+      {
+       "ctrl": false,
+       "label": "Version",
+       "safe": true,
+       "slot": "service.version",
+       "target": true,
+       "type": "word",
+       "value": "3.0.20"
+      }
+     ]
+    }
+   }
+  ],
   "kind": "goal",
   "origin": "rule",
-  "reason": "Produkt und Version bekannt: vsftpd 2.3.4",
+  "reason": "Produkt und Version für 3 Dienste bekannt",
   "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/10.10.10.3|tcp/21",
+  "service_id": null,
   "stages": {
    "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+   "question": "Gibt es für diese Versionen bekannte Schwachstellen?"
   },
   "state": "open",
-  "suggestion_key": "sg:3293e2c09a9593835c239292",
+  "suggestion_key": "sg:fc75aafe8bbe6a3af321188c",
   "templates": [
    {
     "blocked_reason": null,
@@ -87,67 +325,7 @@
       "value": "2.3.4"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: vsftpd 2.3.4 (10.10.10.3:21)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "vsftpd 2.3.4"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "10.10.10.3:21"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-15T17:02:00.000000Z"
- },
- {
-  "ai": null,
-  "basis": "c836ded91b57cf63",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "3d64f949172648556429c23dbac9c4bf30bcf77127e6f0d3a1ca7f68341be2b1",
-    "label": "nmap -sV -sC · Zeile 20",
-    "lines": [
-     19,
-     19
-    ],
-    "ts": "2026-10-15T17:02:00.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/10.10.10.3",
-  "host_label": "10.10.10.3",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: OpenSSH 4.7p1 Debian 8ubuntu1",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/10.10.10.3|tcp/22",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:0d43a6c1ae5641073ac3b6eb",
-  "templates": [
    {
     "blocked_reason": null,
     "command": "searchsploit OpenSSH 4.7p1",
@@ -202,67 +380,7 @@
       "value": "4.7p1"
      }
     ]
-   }
-  ],
-  "title": "Version recherchieren: OpenSSH 4.7p1 Debian 8ubuntu1 (10.10.10.3:22)",
-  "title_parts": [
-   {
-    "target": false,
-    "text": "Version recherchieren: "
    },
-   {
-    "target": true,
-    "text": "OpenSSH 4.7p1 Debian 8ubuntu1"
-   },
-   {
-    "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "10.10.10.3:22"
-   },
-   {
-    "target": false,
-    "text": ")"
-   }
-  ],
-  "ts": "2026-10-15T17:02:00.000000Z"
- },
- {
-  "ai": null,
-  "basis": "d4801bc0ab7712a0",
-  "ctrl": false,
-  "ctrl_reason": false,
-  "decision_id": null,
-  "evidence": [
-   {
-    "claim_key": "84c62bb0ea5f90e70085282eee1c90f7b554e83862f1b9e6c7cb6e4ed5d562fd",
-    "label": "nmap -sV -sC · Zeile 25",
-    "lines": [
-     24,
-     24
-    ],
-    "ts": "2026-10-15T17:02:00.000000Z",
-    "unit_id": "cmd1"
-   }
-  ],
-  "flags": [],
-  "goal_id": "PZ-VULN-RECHERCHE",
-  "host_id": "ip:default/10.10.10.3",
-  "host_label": "10.10.10.3",
-  "kind": "goal",
-  "origin": "rule",
-  "reason": "Produkt und Version bekannt: Samba smbd 3.0.20-Debian",
-  "rule_id": "R-VERSION-RECHERCHE",
-  "service_id": "svc:ip:default/10.10.10.3|tcp/445",
-  "stages": {
-   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
-   "question": "Gibt es für diese Version bekannte Schwachstellen?"
-  },
-  "state": "open",
-  "suggestion_key": "sg:7c4d1363ce47b77d73b55d6f",
-  "templates": [
    {
     "blocked_reason": null,
     "command": "searchsploit Samba 3.0.20",
@@ -319,27 +437,19 @@
     ]
    }
   ],
-  "title": "Version recherchieren: Samba smbd 3.0.20-Debian (10.10.10.3:445)",
+  "title": "Versionen recherchieren: 10.10.10.3 (3 Dienste)",
   "title_parts": [
    {
     "target": false,
-    "text": "Version recherchieren: "
+    "text": "Versionen recherchieren: "
    },
    {
     "target": true,
-    "text": "Samba smbd 3.0.20-Debian"
+    "text": "10.10.10.3"
    },
    {
     "target": false,
-    "text": " ("
-   },
-   {
-    "target": true,
-    "text": "10.10.10.3:445"
-   },
-   {
-    "target": false,
-    "text": ")"
+    "text": " (3 Dienste)"
    }
   ],
   "ts": "2026-10-15T17:02:00.000000Z"
@@ -376,6 +486,7 @@
   "goal_id": "PZ-SMB-SHARES",
   "host_id": "ip:default/10.10.10.3",
   "host_label": "10.10.10.3",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "SMB auf Port 139, 445 ohne Liste der Shares",
@@ -559,6 +670,7 @@
   "goal_id": "PZ-PORTS-TCP",
   "host_id": "ip:default/10.10.10.3",
   "host_label": "10.10.10.3",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Bisher nur die häufigsten TCP-Ports gescannt",
@@ -649,6 +761,7 @@
   "goal_id": "PZ-PORTS-UDP",
   "host_id": "ip:default/10.10.10.3",
   "host_label": "10.10.10.3",
+  "items": [],
   "kind": "goal",
   "origin": "rule",
   "reason": "Noch kein UDP-Scan für diesen Host",

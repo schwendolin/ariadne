@@ -63,16 +63,32 @@ def phase_rows(conn: Any, template: str, limit: int = 2000) -> list[dict[str, An
     """Befehle mit Phase für Prüfung und Korrektur (neueste ``limit``), Befehlstext maskiert."""
     from ariadne.ingest import proj_phases, queries
 
-    known = sorted({str(r[0]) for r in conn.execute("SELECT value FROM secret_value LIMIT 10000")
-                    if isinstance(r[0], str) and len(str(r[0])) >= 4}, key=len, reverse=True)
-    rows = proj_phases.assign(conn, template, queries.revoked_ids(conn))[-int(limit):]
+    known = sorted(
+        {
+            str(r[0])
+            for r in conn.execute("SELECT value FROM secret_value LIMIT 10000")
+            if isinstance(r[0], str) and len(str(r[0])) >= 4
+        },
+        key=len,
+        reverse=True,
+    )
+    rows = proj_phases.assign(conn, template, queries.revoked_ids(conn))[-int(limit) :]
     out = []
     for r in rows:
         text = r["cmd_text"] or ""
         for k in known:
             text = text.replace(k, "••••••••")
-        out.append({"cmd_id": r["cmd_id"], "cmd_ref": queries.cmd_ref(r["cmd_id"]), "command": text,
-                    "ts": r["ts"], "phase": r["phase"], "source": r["source"], "decision_id": r["decision_id"]})
+        out.append(
+            {
+                "cmd_id": r["cmd_id"],
+                "cmd_ref": queries.cmd_ref(r["cmd_id"]),
+                "command": text,
+                "ts": r["ts"],
+                "phase": r["phase"],
+                "source": r["source"],
+                "decision_id": r["decision_id"],
+            }
+        )
     return out
 
 
@@ -83,8 +99,15 @@ async def op_export_phases(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     return _exit(d, {"template": template, "commands": rows})
 
 
-async def submit_phase(d: Any, *, template: str, ref: str, phase: str, origin: str,
-                       query: Callable[[Callable[[Any], Any]], Any] | None = None) -> dict[str, Any]:
+async def submit_phase(
+    d: Any,
+    *,
+    template: str,
+    ref: str,
+    phase: str,
+    origin: str,
+    query: Callable[[Callable[[Any], Any]], Any] | None = None,
+) -> dict[str, Any]:
     """Löst ``ref`` (``cmd_id`` oder Kurzform) auf und schreibt ``d.unit.phase``."""
     from ariadne.ingest import queries
     from ariadne.ingest.proj_phases import valid_phase
@@ -104,8 +127,9 @@ async def submit_phase(d: Any, *, template: str, ref: str, phase: str, origin: s
         raise OpError("not_found", "Befehl nicht gefunden") from None
     if d.project is not p:
         raise OpError("project_changed", "Projekt wurde währenddessen gewechselt, nichts gespeichert")
-    d.submit(AppendItem("d.unit.phase", {"cmd_id": cmd_id, "template": template, "phase": phase},
-                        origin=origin))
+    d.submit(
+        AppendItem("d.unit.phase", {"cmd_id": cmd_id, "template": template, "phase": phase}, origin=origin)
+    )
     recs = d.flush()
     did = next((r.id for r in recs if r.kind == "d.unit.phase"), None)
     await d._sync_ingest()

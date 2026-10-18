@@ -38,7 +38,8 @@ export type GraphLayer = 'topology' | 'services' | 'thread' | 'oos' | 'fog';
 export type ApiErrorCode =
   | 'unauthorized' | 'forbidden' | 'policy' | 'not_found' | 'method' | 'no_project' | 'project_mismatch'
   | 'conflict' | 'too_large' | 'host' | 'validation' | 'locked' | 'rate_limited' | 'not_implemented'
-  | 'unavailable' | 'internal' | 'clipboard_tool' | 'clipboard_session';
+  | 'unavailable' | 'internal' | 'clipboard_tool' | 'clipboard_session'
+  | 'shot_display' | 'shot_wayland' | 'shot_window' | 'shot_region' | 'shot_failed';
 
 export interface ApiErrorBody {
   error: {
@@ -591,7 +592,8 @@ export type SuggestionState = 'open' | 'done' | 'dismissed';
 
 export interface Suggestion {
   suggestion_key: string;
-  origin: 'rule';
+  /** `ai`: KI-Denkanstoss (v0.1-KI), sonst Regel */
+  origin: 'rule' | 'ai';
   rule_id: string;
   goal_id: string | null;
   kind: 'goal' | 'question' | 'hypothesis' | 'hint';
@@ -609,9 +611,28 @@ export interface Suggestion {
   state: SuggestionState;
   decision_id: string | null;
   basis: string;
-  flags: ('from_target' | 'injection_suspect')[];
+  flags: ('from_target' | 'injection_suspect' | 'ai')[];
   ts: string | null;
-  ai: null;
+  /** nur bei `origin: 'ai'`: Modell und Kriterien (Modelltext, geprüft, nur als Text) */
+  ai: AiSuggestionMeta | null;
+  /** E119: Liste pro Dienst mit je einer Vorlage (sonst leer); ältere Server ohne Feld */
+  items?: SuggestionItemView[];
+}
+export interface AiSuggestionMeta {
+  model: string;
+  confirmed_if: string;
+  refuted_if: string;
+  job_id: string;
+  created_at: string;
+}
+export interface SuggestionItemView {
+  service_id: string;
+  port: number;
+  proto: string;
+  label: string;
+  ctrl: boolean;
+  label_parts: TextPart[];
+  template: CommandTemplate;
 }
 
 export interface NextView {
@@ -619,6 +640,8 @@ export interface NextView {
   confirm: NextGroup[];
   suggestions: Suggestion[];
   suggestions_available: boolean;
+  /** E120: nicht quittierte Scope-Warnung als erster Eintrag (ältere Server ohne Feld) */
+  scope_warning?: ScopeWarning | null;
   quiet: QuietCounts;
   open: number;
 }
@@ -985,8 +1008,145 @@ export interface StreamPayloads {
   project: { project_id: string | null; change: 'opened' | 'closed' | 'locked' | 'unlocked'; locked: boolean };
   reset: { reason: 'reparse' | 'buffer' | 'restart' };
   presentation: { on: boolean };
-  progress: { job_id: string; kind: string; status: string; pct: number | null; message: string | null };
+  progress: {
+    job_id: string;
+    kind: string;
+    status: string;
+    pct: number | null;
+    message: string | null;
+    tokens_in?: number | null;
+    tokens_out?: number | null;
+    tokens_estimate?: number | null;
+    masked?: number;
+    cost_usd?: number | null;
+    budget_level?: AiBudgetLevel;
+  };
+  screenshot: { project_id: string; id: string; trigger: ShotTrigger };
   prefs: Record<string, never>;
 }
 export type StreamEventName = keyof StreamPayloads;
 export type StreamEvent = { [K in StreamEventName]: { name: K; id: string | null; data: StreamPayloads[K] } }[StreamEventName];
+
+// ------------------------------------------------------------------ KI (v0.1-KI, Entwurf api-ki)
+export type AiProvider = 'off' | 'cloud' | 'local';
+export type AiBudgetLevel = 'ok' | 'warn' | 'over';
+export type AiReason = 'off' | 'config' | 'no_model' | 'no_key' | 'locked' | 'cloud_not_allowed' | 'profile' | 'public_scope' | 'busy';
+export interface AiJob {
+  job_id: string;
+  status: 'queued' | 'running' | 'done' | 'refused' | 'failed';
+  step: 'lagebild' | 'anfrage' | 'pruefung' | 'fertig';
+  /** fester deutscher Text, nie Modell- oder Zieltext */
+  message: string;
+  started_at: string;
+  ended_at: string | null;
+  provider: 'cloud' | 'local';
+  model: string;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  tokens_estimate: number | null;
+  masked: number;
+  cost_usd: number | null;
+  budget_level: AiBudgetLevel;
+  created: number;
+  dropped: number;
+  injection_suspect: number;
+  /** Ablehnung des Modells, wörtlich (Modelltext, nur als Text) */
+  refusal: { category: string | null; text: string } | null;
+  error: null | 'unreachable' | 'auth' | 'schema' | 'truncated' | 'project_changed' | 'internal';
+}
+export interface AiStatus {
+  provider: AiProvider;
+  model: string | null;
+  ready: boolean;
+  reason: AiReason | null;
+  reason_text: string | null;
+  budget: { month: string; limit_usd: number; used_usd: number; pct: number; level: AiBudgetLevel };
+  job: AiJob | null;
+}
+
+// ------------------------------------------------------------------ Export (v0.1-Export, api-export)
+export type ExportTemplate = 'cys' | 'htb';
+export type ExportWarning = 'sync_folder' | 'generic_secret' | 'klartext';
+export interface ExportEntry {
+  export_id: string;
+  template: ExportTemplate;
+  created_at: string;
+  path: string;
+  files: number;
+  klartext: boolean;
+  warnings: ExportWarning[];
+  chain: { seq: number; hash: string };
+}
+export interface ExportRunning {
+  job_id: string;
+  template: ExportTemplate;
+  status: string;
+  pct: number | null;
+}
+export interface ExportsView {
+  exports: ExportEntry[];
+  running: ExportRunning | null;
+  last_error: { job_id: string; message: string } | null;
+}
+export interface ExportStarted {
+  job_id: string;
+  status: string;
+  template: ExportTemplate;
+}
+export interface PhaseCommand {
+  cmd_id: string;
+  cmd_ref: string;
+  command: string;
+  ts: string;
+  phase: string | null;
+  source: 'rule' | 'decision' | 'none';
+  decision_id: string | null;
+  ctrl: boolean;
+}
+export interface PhasesView {
+  template: ExportTemplate;
+  phases: { key: string; label: string }[];
+  commands: PhaseCommand[];
+}
+export interface PhaseSet {
+  decision_id: string;
+  cmd_id: string;
+  template: ExportTemplate;
+  phase: string;
+}
+
+// ------------------------------------------------------------------ Screenshots (api-screenshots)
+export type ShotMode = 'window' | 'monitor' | 'region';
+export type ShotTrigger = 'hotkey' | 'cli' | 'webui';
+export interface Screenshot {
+  id: string;
+  seq: number;
+  ts: string;
+  blob_id: string;
+  url: string;
+  mime: string;
+  mode: ShotMode;
+  trigger: ShotTrigger;
+  width: number;
+  height: number;
+  sha256: string;
+  dhash: string;
+  /** Zieldaten möglich (Fenstertitel), nur als Text; im Präsentationsmodus null */
+  window_title: string | null;
+  wm_class: string | null;
+  terminal_id: string | null;
+  stream_off: number | null;
+  host: string | null;
+  note: string | null;
+}
+export interface ScreenshotsView {
+  items: Screenshot[];
+  presentation: boolean;
+}
+export interface ShotRequest {
+  mode?: ShotMode;
+  region?: { x: number; y: number; width: number; height: number };
+  delay_s?: number;
+  terminal_id?: string;
+  note?: string;
+}

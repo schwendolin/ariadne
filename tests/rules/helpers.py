@@ -146,8 +146,18 @@ def by_rule(items: list[dict], rule_id: str) -> list[dict]:
 
 
 def summary(items: list[dict]) -> list[tuple[str, str, list[str | None]]]:
-    """(Regel, Titel, Befehle) je Denkanstoss: die lesbare Kurzform für die Golden-Tests."""
-    return [(s["rule_id"], s["title"], [t["command"] for t in s["templates"]]) for s in items]
+    """(Regel, Titel, Befehle) je Denkanstoss: die lesbare Kurzform für die Golden-Tests. Bei einer Liste
+    (E119) die Befehle aller Einträge."""
+    return [
+        (
+            s["rule_id"],
+            s["title"],
+            [i["template"]["command"] for i in s["items"]]
+            if s["items"]
+            else [t["command"] for t in s["templates"]],
+        )
+        for s in items
+    ]
 
 
 def decide(p: Any, seq: int, kind: str, **header: Any) -> None:

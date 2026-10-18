@@ -59,11 +59,31 @@ def valid_phase(template: str, phase: str) -> bool:
 
 
 # Programme, die nur einen anderen Befehl starten; der eigentliche Befehl folgt danach.
-_WRAPPERS = frozenset({
-    "sudo", "doas", "proxychains", "proxychains4", "env", "time", "nohup", "stdbuf", "unbuffer",
-    "timeout", "torsocks", "rlwrap", "exec", "command", "builtin", "nice", "ionice", "faketime",
-})
-_INTERPRETERS = frozenset({"python", "python2", "python3", "perl", "ruby", "bash", "sh", "zsh", "php", "node"})
+_WRAPPERS = frozenset(
+    {
+        "sudo",
+        "doas",
+        "proxychains",
+        "proxychains4",
+        "env",
+        "time",
+        "nohup",
+        "stdbuf",
+        "unbuffer",
+        "timeout",
+        "torsocks",
+        "rlwrap",
+        "exec",
+        "command",
+        "builtin",
+        "nice",
+        "ionice",
+        "faketime",
+    }
+)
+_INTERPRETERS = frozenset(
+    {"python", "python2", "python3", "perl", "ruby", "bash", "sh", "zsh", "php", "node"}
+)
 
 # Werkzeug -> (Phase cys, Phase htb)
 _TOOLS: dict[str, tuple[str, str]] = {}
@@ -74,24 +94,42 @@ def _add(names: str, cys: str, htb: str) -> None:
         _TOOLS[n] = (cys, htb)
 
 
-_add("whois dig nslookup host theharvester theHarvester amass subfinder dnsrecon dnsenum fierce "
-     "recon-ng shodan netdiscover arp-scan fping traceroute tracepath ping ping6 sublist3r",
-     "recon", "enumeration")
-_add("nmap masscan rustscan unicornscan naabu nikto gobuster ffuf feroxbuster dirb dirsearch wfuzz "
-     "whatweb wpscan joomscan droopescan sslscan sslyze testssl testssl.sh enum4linux enum4linux-ng "
-     "smbmap smbclient nbtscan rpcclient snmpwalk snmp-check onesixtyone showmount ldapsearch "
-     "nuclei curl wget httpx dnsx kerbrute rpcinfo nc-zv smtp-user-enum finger ike-scan "
-     "sqsh mysql psql redis-cli ftp telnet tftp ncrack-scan", "scanning", "enumeration")
-_add("msfconsole msfvenom searchsploit hydra medusa ncrack patator sqlmap commix xsser "
-     "crackmapexec netexec nxc evil-winrm psexec.py wmiexec.py smbexec.py impacket-psexec "
-     "impacket-wmiexec impacket-smbexec responder ntlmrelayx.py impacket-ntlmrelayx "
-     "pwncat pwncat-cs socat", "exploitation", "foothold")
-_add("linpeas linpeas.sh winpeas winpeas.exe winPEASx64.exe pspy pspy64 pspy32 linenum linenum.sh "
-     "linux-exploit-suggester linux-exploit-suggester.sh les.sh getcap sudo-l lse.sh "
-     "linux-smart-enumeration powerup.ps1 seatbelt", "post", "privesc")
+_add(
+    "whois dig nslookup host theharvester theHarvester amass subfinder dnsrecon dnsenum fierce "
+    "recon-ng shodan netdiscover arp-scan fping traceroute tracepath ping ping6 sublist3r",
+    "recon",
+    "enumeration",
+)
+_add(
+    "nmap masscan rustscan unicornscan naabu nikto gobuster ffuf feroxbuster dirb dirsearch wfuzz "
+    "whatweb wpscan joomscan droopescan sslscan sslyze testssl testssl.sh enum4linux enum4linux-ng "
+    "smbmap smbclient nbtscan rpcclient snmpwalk snmp-check onesixtyone showmount ldapsearch "
+    "nuclei curl wget httpx dnsx kerbrute rpcinfo nc-zv smtp-user-enum finger ike-scan "
+    "sqsh mysql psql redis-cli ftp telnet tftp ncrack-scan",
+    "scanning",
+    "enumeration",
+)
+_add(
+    "msfconsole msfvenom searchsploit hydra medusa ncrack patator sqlmap commix xsser "
+    "crackmapexec netexec nxc evil-winrm psexec.py wmiexec.py smbexec.py impacket-psexec "
+    "impacket-wmiexec impacket-smbexec responder ntlmrelayx.py impacket-ntlmrelayx "
+    "pwncat pwncat-cs socat",
+    "exploitation",
+    "foothold",
+)
+_add(
+    "linpeas linpeas.sh winpeas winpeas.exe winPEASx64.exe pspy pspy64 pspy32 linenum linenum.sh "
+    "linux-exploit-suggester linux-exploit-suggester.sh les.sh getcap sudo-l lse.sh "
+    "linux-smart-enumeration powerup.ps1 seatbelt",
+    "post",
+    "privesc",
+)
 _add("chisel ligolo ligolo-ng sshuttle plink plink.exe autossh", "post", "pivot")
-_add("mimikatz secretsdump.py impacket-secretsdump hashdump john hashcat unshadow pypykatz "
-     "lazagne", "post", "loot")
+_add(
+    "mimikatz secretsdump.py impacket-secretsdump hashdump john hashcat unshadow pypykatz lazagne",
+    "post",
+    "loot",
+)
 
 _LISTENER_FLAGS = re.compile(r"^-[a-zA-Z]*l[a-zA-Z]*$")
 _LOOT_PATHS = ("/etc/shadow", "root.txt", "user.txt", "flag", "id_rsa", ".kdbx", "ntds.dit", "sam")
@@ -122,9 +160,9 @@ def program_of(argv: Sequence[Any]) -> tuple[str | None, list[str]]:
             while j < len(args) and args[j].startswith("-"):
                 j += 1
             if j < len(args):
-                return _base(args[j]), args[j + 1:]
+                return _base(args[j]), args[j + 1 :]
             return name, []
-        return name, args[i + 1:]
+        return name, args[i + 1 :]
     return None, []
 
 
@@ -135,8 +173,9 @@ def _remote(context: Mapping[str, Any] | None) -> bool:
     return (host not in _LOCAL_HOSTS) or kind in ("ssh", "revshell", "msf", "meterpreter", "remote")
 
 
-def suggest(template: str, argv: Sequence[Any], cmd_text: str | None,
-            context: Mapping[str, Any] | None) -> str | None:
+def suggest(
+    template: str, argv: Sequence[Any], cmd_text: str | None, context: Mapping[str, Any] | None
+) -> str | None:
     """Vorschlag der Regeln für einen Befehl, ``None`` wenn keine Regel passt."""
     if template not in PHASES:
         return None
@@ -166,7 +205,15 @@ def suggest(template: str, argv: Sequence[Any], cmd_text: str | None,
             phase = "privesc"
         return phase
     # Ohne Werkzeug aus der Liste: Hinweise aus dem Befehl und dem Kontext
-    if any(p in text for p in _LOOT_PATHS) and low in ("cat", "type", "more", "less", "head", "tail", "strings"):
+    if any(p in text for p in _LOOT_PATHS) and low in (
+        "cat",
+        "type",
+        "more",
+        "less",
+        "head",
+        "tail",
+        "strings",
+    ):
         return ("post", "loot")[idx]
     if any(h in text for h in _PRIVESC_HINTS):
         return ("post", "privesc")[idx]
@@ -189,7 +236,8 @@ def overrides(conn: Any, template: str, revoked: Iterable[str] = ()) -> dict[str
     gone = set(revoked)
     out: dict[str, tuple[str, str]] = {}
     for did, payload in conn.execute(
-            "SELECT id, payload_json FROM decision WHERE kind = 'd.unit.phase' ORDER BY seq"):
+        "SELECT id, payload_json FROM decision WHERE kind = 'd.unit.phase' ORDER BY seq"
+    ):
         if did in gone:
             continue
         p = _json(payload, {}) or {}
@@ -209,9 +257,10 @@ def assign(conn: Any, template: str, revoked: Iterable[str] = (), limit: int = 5
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for unit_id, cmd_id, argv, cmd_text, context, ts in conn.execute(
-            "SELECT unit_id, cmd_id, argv, cmd_text, context, ts_utc_ns FROM unit "
-            "WHERE kind = 'command' AND cmd_id IS NOT NULL ORDER BY ts_utc_ns, event_seq LIMIT ?",
-            (int(limit),)):
+        "SELECT unit_id, cmd_id, argv, cmd_text, context, ts_utc_ns FROM unit "
+        "WHERE kind = 'command' AND cmd_id IS NOT NULL ORDER BY ts_utc_ns, event_seq LIMIT ?",
+        (int(limit),),
+    ):
         if cmd_id in seen:
             continue
         seen.add(str(cmd_id))
@@ -222,7 +271,17 @@ def assign(conn: Any, template: str, revoked: Iterable[str] = (), limit: int = 5
         else:
             phase = suggest(template, _json(argv, []) or [], cmd_text, ctx)
             source, did = ("rule" if phase else "none"), None
-        out.append({"unit_id": unit_id, "cmd_id": cmd_id, "cmd_text": cmd_text, "ts": ts,
-                    "context": ctx, "phase": phase, "source": source, "decision_id": did,
-                    "program": program_of(_json(argv, []) or [])[0]})
+        out.append(
+            {
+                "unit_id": unit_id,
+                "cmd_id": cmd_id,
+                "cmd_text": cmd_text,
+                "ts": ts,
+                "context": ctx,
+                "phase": phase,
+                "source": source,
+                "decision_id": did,
+                "program": program_of(_json(argv, []) or [])[0],
+            }
+        )
     return out

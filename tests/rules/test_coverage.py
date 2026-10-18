@@ -20,7 +20,14 @@ def _svc(port: int, proto: str = "tcp") -> list[Obs]:
 
 
 def _keys(items: list[dict]) -> set[tuple[str, str | None]]:
-    return {(s["rule_id"], s["service_id"].rsplit("/", 1)[1] if s["service_id"] else None) for s in items}
+    """(Regel, Port) je Denkanstoss; bei einer Liste (E119, «Versionen recherchieren») je Eintrag."""
+    out: set[tuple[str, str | None]] = set()
+    for s in items:
+        if s["items"]:
+            out |= {(s["rule_id"], i["service_id"].rsplit("/", 1)[1]) for i in s["items"]}
+        else:
+            out.add((s["rule_id"], s["service_id"].rsplit("/", 1)[1] if s["service_id"] else None))
+    return out
 
 
 @pytest.fixture(scope="module")
@@ -121,7 +128,11 @@ def test_dead_end_done_and_out_of_scope_suppress():
     H.decide(p, 101, "d.status.work", subject=f"ip:default/{U}", value="dead_end", reason="nur RDP")
     assert H.suggestions(conn) == []
     H.decide(p, 102, "d.revoke", decision_id="dec-101")
-    assert len(H.suggestions(conn)) == 20  # 22 ohne Web und Version auf Port 80 (erledigt)
+    # 16 ohne Web auf Port 80 (erledigt); die Versionen bilden einen Denkanstoss ohne Port 80 (E119)
+    sugg = H.suggestions(conn)
+    assert len(sugg) == 15
+    (ver,) = H.by_rule(sugg, "R-VERSION-RECHERCHE")
+    assert "80" not in {i["service_id"].rsplit("/", 1)[1] for i in ver["items"]}
 
 
 def test_fog_and_out_of_scope_hosts_trigger_nothing():
@@ -187,11 +198,11 @@ def test_known_secret_values_are_masked_and_block_templates():
     conn.execute("INSERT INTO secret_value VALUES ('secret:x', 'password', ?)", (secret,))
     items = H.suggestions(conn, state="all")
     assert secret not in repr(items)
-    ver = next(
-        s for s in items if s["rule_id"] == "R-VERSION-RECHERCHE" and s["service_id"].endswith("/9999")
-    )
-    assert ver["title"] == f"Version recherchieren: vsftpd •••••••• 2.3.4 ({U}:9999)"
-    (tpl,) = ver["templates"]
+    (ver,) = H.by_rule(items, "R-VERSION-RECHERCHE")
+    item = next(i for i in ver["items"] if i["service_id"].endswith("/9999"))
+    assert item["label"] == "vsftpd •••••••• 2.3.4 · 9999/tcp"
+    assert item["label_parts"][0] == {"text": "vsftpd •••••••• 2.3.4", "target": True}
+    tpl = item["template"]
     assert not tpl["rendered"] and tpl["blocked_reason"] == "non_ascii" and tpl["command"] is None
     assert tpl["values"][1]["value"] == "vsftpd ••••••••"
     anon = next(s for s in items if s["rule_id"] == "R-ANON-ZUGRIFF" and s["service_id"].endswith("/9999"))

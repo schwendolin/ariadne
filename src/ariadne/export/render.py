@@ -8,6 +8,7 @@ Dateien dieses Exports; externe URLs, Bilder von aussen, HTML und Mermaid gibt e
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -27,7 +28,12 @@ SEVERITY_LABELS = {
 }
 _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 _STEP_LABELS = {"foothold": "Foothold", "privesc": "Privilege Escalation", "pivot": "Pivot", "loot": "Loot"}
-_SCOPE = {"in": "im Scope", "out": "ausserhalb des Scopes", "excluded": "ausgeschlossen", "unknown": "unbekannt"}
+_SCOPE = {
+    "in": "im Scope",
+    "out": "ausserhalb des Scopes",
+    "excluded": "ausgeschlossen",
+    "unknown": "unbekannt",
+}
 _EV_STATE = {"ok": "gültig", "distrusted": "misstraut", "missing": "fehlt nach Reparse"}
 
 _GOALS = {
@@ -62,6 +68,14 @@ def _t(value: Any) -> str:
     return md_text("" if value is None else value)
 
 
+_TS = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
+
+
+def _ts(value: Any) -> str:
+    """Zeit aus :func:`~ariadne.export.collect.iso_ms` (eigenes Format, kein Zielwert) lesbar."""
+    return value if isinstance(value, str) and _TS.match(value) else "-"
+
+
 def _link(path: str) -> str:
     """Link auf eine Datei dieses Exports (Name nur aus Kurz-ID und Slug, ohne Leerzeichen)."""
     return f"[{path}]({path})"
@@ -86,8 +100,6 @@ def _program_of(beleg: Any) -> str | None:
 
 def render(data: Mapping[str, Any]) -> dict[str, str]:
     """Alle Markdown-Dateien: ``{relativer Pfad: Inhalt}``."""
-    meta = data["meta"]
-    template = meta["template"]
     files: dict[str, str] = {}
     belege = data["belege"]
     bnames = {uid: beleg_name(uid, _program_of(b)) for uid, b in belege.items()}
@@ -109,7 +121,6 @@ def render(data: Mapping[str, Any]) -> dict[str, str]:
         files[f"Belege/{bnames[uid]}"] = _beleg(b)
     if data["images"]:
         files["Belege/Screenshots.md"] = _images(data)
-    _ = template
     return files
 
 
@@ -130,8 +141,8 @@ def _overview(data: Mapping[str, Any], hnames: Mapping[str, str]) -> str:
         "",
         f"- Projekt: {_t(meta['slug'])} (Profil {_t(meta['profile'])})",
         f"- Vorlage: {_t(meta['template'])}, {TEMPLATE_TITLES.get(meta['template'], '')}",
-        f"- Zeitraum: {_t(meta['period'][0] or '-')} bis {_t(meta['period'][1] or '-')}",
-        f"- Export: {_t(meta['created_at'])}",
+        f"- Zeitraum: {_ts(meta['period'][0])} bis {_ts(meta['period'][1])}",
+        f"- Export: {_ts(meta['created_at'])}",
         f"- Kettenkopf des Journals: Event {meta['chain_seq']}, Hash {_t(meta['chain_hash'] or '-')}",
         "",
         "## Scope",
@@ -148,16 +159,24 @@ def _overview(data: Mapping[str, Any], hnames: Mapping[str, str]) -> str:
         f"- Befehle: {len(data['commands'])}, Belege: {len(data['belege'])}",
         f"- Schlüsselschritte im Faden: {len(data['keysteps'])}",
         f"- Findings: {len(data['findings'])}"
-        + (" (" + ", ".join(f"{SEVERITY_LABELS.get(k if k != 'none' else None)}: {v}"
-                            for k, v in sorted(sev.items(), key=lambda kv: _SEV_ORDER.get(kv[0], 9))) + ")"
-           if sev else ""),
+        + (
+            " ("
+            + ", ".join(
+                f"{SEVERITY_LABELS.get(k if k != 'none' else None)}: {v}"
+                for k, v in sorted(sev.items(), key=lambda kv: _SEV_ORDER.get(kv[0], 9))
+            )
+            + ")"
+            if sev
+            else ""
+        ),
         f"- Screenshots: {len(data['images'])}",
         "",
         "## Hosts",
         "",
     ]
     for h in hosts:
-        out.append(f"- {_t(h['label'])} ({_SCOPE.get(h['scope'], _t(h['scope']))}): {_link('Hosts/' + hnames[h['host_id']])}")
+        scope = _SCOPE.get(h["scope"], _t(h["scope"]))
+        out.append(f"- {_t(h['label'])} ({scope}): {_link('Hosts/' + hnames[h['host_id']])}")
     if not hosts:
         out.append("- keine Hosts")
     out += [
@@ -172,12 +191,24 @@ def _overview(data: Mapping[str, Any], hnames: Mapping[str, str]) -> str:
         "",
     ]
     if meta["klartext"]:
-        out += ["## Achtung", "", "Dieser Export enthält Zugangsdaten des Ziels im Klartext. Nicht weitergeben.", ""]
+        out += [
+            "## Achtung",
+            "",
+            "Dieser Export enthält Zugangsdaten des Ziels im Klartext. Nicht weitergeben.",
+            "",
+        ]
     return "\n".join(out)
 
 
 def _path(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
-    out = ["# Angriffspfad", "", _HINWEIS, "", "Der Faden: die markierten Schlüsselschritte in zeitlicher Folge.", ""]
+    out = [
+        "# Angriffspfad",
+        "",
+        _HINWEIS,
+        "",
+        "Der Faden: die markierten Schlüsselschritte in zeitlicher Folge.",
+        "",
+    ]
     if not data["keysteps"]:
         out += ["Noch keine Schlüsselschritte markiert (im Terminal F12 k oder ariadne mark).", ""]
     for i, k in enumerate(data["keysteps"], 1):
@@ -185,7 +216,7 @@ def _path(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
         out.append(f"## Schritt {i}: {step}")
         out.append("")
         out.append(f"- Host: {_t(k['host'] or '-')}")
-        out.append(f"- Zeit: {_t(k['ts'] or '-')}")
+        out.append(f"- Zeit: {_ts(k['ts'])}")
         if k.get("note"):
             out.append(f"- Notiz: {_t(k['note'])}")
         b = data["belege"].get(k.get("unit_id")) if k.get("unit_id") else None
@@ -230,7 +261,7 @@ def _writeup(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
             out += ["keine", ""]
         for i, c in enumerate(cmds, 1):
             src = "Entscheid" if c["source"] == "decision" else "Regel"
-            out.append(f"{i}\\. {_t(c['ts'] or '-')}, {_t(c['context'])} (Zuordnung: {src})")
+            out.append(f"{i}\\. {_ts(c['ts'])}, {_t(c['context'])} (Zuordnung: {src})")
             out.append("")
             out.append(code_block(c["command"]))
             out.append("")
@@ -244,14 +275,18 @@ def _writeup(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
             out.append("")
         if ph == "reporting":
             out += ["### Findings", ""]
-            out += [f"- F{f['ordinal']} {_t(f['title'])}: {_sev(f)}" for f in _sorted(data["findings"])] or ["keine"]
+            out += [f"- F{f['ordinal']} {_t(f['title'])}: {_sev(f)}" for f in _sorted(data["findings"])] or [
+                "keine"
+            ]
             out += ["", "Details: 03 Findings.md", ""]
     rest = by_phase.get(None, [])
     if rest:
         out += ["## Nicht zugeordnet", "", "Keine Regel passt; Phase per Entscheid setzen.", ""]
         for c in rest:
-            out.append(f"- {_t(c['ts'] or '-')}, {_t(c['context'])}: {_t(c['command'])}"
-                       + (f" ({_link('Belege/' + bnames[c['unit_id']])})" if c["unit_id"] in bnames else ""))
+            out.append(
+                f"- {_ts(c['ts'])}, {_t(c['context'])}: {_t(c['command'])}"
+                + (f" ({_link('Belege/' + bnames[c['unit_id']])})" if c["unit_id"] in bnames else "")
+            )
         out.append("")
     return "\n".join(out)
 
@@ -261,8 +296,15 @@ def _sorted(findings: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
 
 
 def _findings(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
-    out = ["# Findings", "", _HINWEIS, "", "Schwere setzt nur der Mensch. ATT&CK und CVE gelten als Hypothese, "
-           "bis sie mit einem gültigen Beleg als belegt markiert sind.", ""]
+    out = [
+        "# Findings",
+        "",
+        _HINWEIS,
+        "",
+        "Schwere setzt nur der Mensch. ATT&CK und CVE gelten als Hypothese, "
+        "bis sie mit einem gültigen Beleg als belegt markiert sind.",
+        "",
+    ]
     if not data["findings"]:
         out += ["Keine Findings.", ""]
     for f in _sorted(data["findings"]):
@@ -274,7 +316,7 @@ def _findings(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
             f"- Betroffen: {', '.join(_t(a) for a in f['affected']) or '-'}",
             f"- MITRE ATT&CK: {_refs(f['attack'])}",
             f"- CVE: {_refs(f['cves'])}",
-            f"- Angelegt: {_t(f['created'] or '-')}, geändert: {_t(f['updated'] or '-')}",
+            f"- Angelegt: {_ts(f['created'])}, geändert: {_ts(f['updated'])}",
             "",
             "### Beschreibung",
             "",
@@ -291,9 +333,15 @@ def _findings(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
             out.append("- keine Belege")
         for ev in f["evidence"]:
             label = _t(ev["label"]) if ev.get("label") else "Logauszug"
-            links = [f"{_link('Belege/' + bnames[u])}" + (f" Zeilen {rng[0]} bis {rng[1]}" if rng else "")
-                     for u, rng in zip(ev["units"], ev["lines"], strict=False) if u in bnames]
-            out.append(f"- {label} ({_EV_STATE.get(ev['state'], _t(ev['state']))}): " + (", ".join(links) or "ohne Logauszug"))
+            links = [
+                f"{_link('Belege/' + bnames[u])}" + (f" Zeilen {rng[0]} bis {rng[1]}" if rng else "")
+                for u, rng in zip(ev["units"], ev["lines"], strict=False)
+                if u in bnames
+            ]
+            out.append(
+                f"- {label} ({_EV_STATE.get(ev['state'], _t(ev['state']))}): "
+                + (", ".join(links) or "ohne Logauszug")
+            )
         out.append("")
     return "\n".join(out)
 
@@ -308,7 +356,8 @@ def _host(h: Mapping[str, Any]) -> str:
         f"- Adressen: {', '.join(_t(a) for a in h['addresses']) or '-'}",
         f"- Namen: {', '.join(_t(a) for a in h['names']) or '-'}",
         f"- Betriebssystem: {_t(h['os'] or '-')}",
-        f"- Zugriff: {_t(h['access'] or 'keiner')}, Wissen: {_t(h['knowledge'] or '-')}, Arbeitsstand: {_t(h['work'] or '-')}",
+        f"- Zugriff: {_t(h['access'] or 'keiner')}, Wissen: {_t(h['knowledge'] or '-')}, "
+        f"Arbeitsstand: {_t(h['work'] or '-')}",
         "",
         "## Dienste",
         "",
@@ -316,7 +365,10 @@ def _host(h: Mapping[str, Any]) -> str:
     if not h["services"]:
         out += ["keine", ""]
         return "\n".join(out)
-    out += ["| Port | Protokoll | Dienst | Produkt | Version | CVE (Hypothese) |", "|---|---|---|---|---|---|"]
+    out += [
+        "| Port | Protokoll | Dienst | Produkt | Version | CVE (Hypothese) |",
+        "|---|---|---|---|---|---|",
+    ]
     for s in h["services"]:
         out.append(
             f"| {_t(s['port'])} | {_t(s['proto'])} | {_t(s['name'] or '-')} | {_t(s['product'] or '-')} | "
@@ -330,11 +382,17 @@ def _credentials(data: Mapping[str, Any]) -> str:
     klar = data["meta"]["klartext"]
     out = ["# Credentials", "", _HINWEIS, ""]
     if klar:
-        out += ["**Klartext:** Dieser Export enthält Zugangsdaten des Ziels im Klartext (Profil lab, im "
-                "Terminal bestätigt). Nicht weitergeben.", ""]
+        out += [
+            "**Klartext:** Dieser Export enthält Zugangsdaten des Ziels im Klartext (Profil lab, im "
+            "Terminal bestätigt). Nicht weitergeben.",
+            "",
+        ]
     else:
-        out += ["Zugangsdaten des Ziels sind maskiert. Klartext nur im Profil lab mit "
-                "ariadne export --klartext und Bestätigung im Terminal.", ""]
+        out += [
+            "Zugangsdaten des Ziels sind maskiert. Klartext nur im Profil lab mit "
+            "ariadne export --klartext und Bestätigung im Terminal.",
+            "",
+        ]
     if not data["credentials"]:
         out += ["Keine bekannten Zugangsdaten.", ""]
     for i, c in enumerate(data["credentials"], 1):
@@ -349,9 +407,15 @@ def _timeline(data: Mapping[str, Any], bnames: Mapping[str, str]) -> str:
     out = ["# Zeitachse", "", _HINWEIS, ""]
     if not data["timeline"]:
         out += ["Keine Einträge.", ""]
-    kinds = {"command": "Befehl", "segment": "Segment", "file": "Datei", "keystep": "Schlüsselschritt", "image": "Bild"}
+    kinds = {
+        "command": "Befehl",
+        "segment": "Segment",
+        "file": "Datei",
+        "keystep": "Schlüsselschritt",
+        "image": "Bild",
+    }
     for e in data["timeline"]:
-        parts = [_t(e["ts"] or "-"), kinds.get(e["type"], _t(e["type"]))]
+        parts = [_ts(e["ts"]), kinds.get(e["type"], _t(e["type"]))]
         if e.get("terminal"):
             parts.append(_t(e["terminal"]))
         parts.append(_t(e["context"]))
@@ -372,7 +436,7 @@ def _beleg(b: Any) -> str:
         _HINWEIS,
         "",
         f"- Art: {_t(b.kind)}",
-        f"- Zeit: {_t(b.started or '-')} bis {_t(b.ended or '-')}",
+        f"- Zeit: {_ts(b.started)} bis {_ts(b.ended)}",
         f"- Terminal: {_t(b.terminal or '-')}" + (f" ({_t(b.tty)})" if b.tty else ""),
         f"- Kontext: {_t(b.context)}",
     ]
@@ -409,8 +473,8 @@ def _images(data: Mapping[str, Any]) -> str:
     for im in data["images"]:
         if im.get("data") is not None and im.get("sha256"):
             name = f"img/{slug(im['sha256'])[:16]}.png"
-            out.append(f"- {_t(im['ts'] or '-')}: {_link(name)}")
+            out.append(f"- {_ts(im['ts'])}: {_link(name)}")
         else:
-            out.append(f"- {_t(im['ts'] or '-')}: Bild nicht exportiert (fehlt oder kein PNG)")
+            out.append(f"- {_ts(im['ts'])}: Bild nicht exportiert (fehlt oder kein PNG)")
     out.append("")
     return "\n".join(out)

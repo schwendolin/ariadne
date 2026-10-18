@@ -306,7 +306,8 @@ export class AppState implements AppApi {
         void this.prefs.load();
         return;
       case 'progress':
-        return;
+        // KI und Export (Etappe 4): die Projekt-Stores werten `kind` aus
+        break;
       default:
         break;
     }

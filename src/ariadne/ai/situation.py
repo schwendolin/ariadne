@@ -72,7 +72,8 @@ class Situation:
 
     @property
     def wrapped(self) -> str:
-        return f'<daten id="D1" quelle="projektion" grenze="{self.nonce}">\n{self.text}\n</daten grenze="{self.nonce}">'
+        head = f'<daten id="D1" quelle="projektion" grenze="{self.nonce}">'
+        return f'{head}\n{self.text}\n</daten grenze="{self.nonce}">'
 
     @property
     def tokens_estimate(self) -> int:
@@ -219,7 +220,9 @@ def build_situation(
 
     # Identitäten: Name als Zieldatum, Secret immer maskiert
     idents = _safe_rows(
-        conn, "SELECT entity_id, label FROM entity WHERE type = 'identity' ORDER BY entity_id LIMIT ?", (_IDENT_MAX,)
+        conn,
+        "SELECT entity_id, label FROM entity WHERE type = 'identity' ORDER BY entity_id LIMIT ?",
+        (_IDENT_MAX,),
     )
     for i, (_eid, label) in enumerate(idents, 1):
         refs[f"C{i}"] = Ref("identity")

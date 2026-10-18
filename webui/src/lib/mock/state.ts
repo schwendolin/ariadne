@@ -15,8 +15,13 @@
  *   T3 mit 5 min Rest), local (Sitzung lokal, Browser in der Kali).
  */
 import type {
+  AiJob,
   DecisionInput,
   DecisionResult,
+  ExportEntry,
+  ExportRunning,
+  ExportTemplate,
+  Screenshot,
   FindingDetail,
   GraphView,
   HostDetail,
@@ -33,6 +38,7 @@ import type {
   TimelineItem,
 } from '../api/types';
 import * as base from './data/base';
+import * as e4 from './data/etappe4';
 import * as history from './data/history';
 import * as map from './data/map';
 
@@ -41,6 +47,8 @@ export const SCENARIOS = [
   'allon', 'present', 'scope', 'noconfirm', 'budget', 'local',
   // Korrektur A3: nach 2,5 s kommt ein neuer Host dazu (Karte springt nicht unter der Maus)
   'grow',
+  // Etappe 4: KI-Zustände, E119 gruppierte Versionen
+  'ki', 'kiwarn', 'kiover', 'kigone', 'kirefuse', 'kiinject', 'kirun', 'kioff', 'versions',
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
@@ -63,10 +71,21 @@ export interface MockState {
   pending: PendingResponse;
   positions: PositionsView;
   scopeAcked: boolean;
+  /** Etappe 4: KI-Modus, letzter Auftrag, Screenshots, Exporte, Phasenkorrekturen */
+  aiMode: e4.AiMode;
+  aiJob: AiJob | null;
+  screenshots: Screenshot[];
+  exports: ExportEntry[];
+  exportRunning: ExportRunning | null;
+  phaseDecisions: Record<ExportTemplate, Record<string, string>>;
   decisions: { decision_id: string; kind: string; payload: Record<string, unknown> }[];
   /** gesetzt vom MockBackend: Ereignis an alle Abonnenten */
   emit: (ev: StreamEvent) => void;
 }
+
+const AI_MODES: Partial<Record<Scenario, e4.AiMode>> = {
+  ki: 'ready', kiwarn: 'warn', kiover: 'over', kigone: 'gone', kirefuse: 'refuse', kiinject: 'inject', kirun: 'run', kioff: 'notallowed',
+};
 
 export function scenarioFromLocation(loc: Location | null = typeof location === 'undefined' ? null : location): Scenario {
   const v = loc ? new URLSearchParams(loc.search).get('mock') : null;
@@ -112,6 +131,12 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     pending: history.pending(),
     positions: { positions: {}, updated_at: null },
     scopeAcked: true,
+    aiMode: AI_MODES[scenario] ?? 'off',
+    aiJob: null,
+    screenshots: e4.screenshots(),
+    exports: e4.exportsList(),
+    exportRunning: null,
+    phaseDecisions: { cys: {}, htb: {} },
     decisions: [],
     emit: () => undefined,
   };
@@ -124,6 +149,10 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     s.terminals = s.terminals.map((x) =>
       x.terminal_id === base.T2 ? { ...x, web_pause_left_s: null } : x.terminal_id === base.T3 ? { ...x, web_pause_left_s: 300 } : x,
     );
+  }
+  if (scenario === 'versions' || scenario === 'ki') {
+    const rest = s.next.suggestions.filter((x) => x.rule_id !== 'R-VERSION-RECHERCHE');
+    s.next = { ...s.next, suggestions: [...rest, e4.versionsSuggestion()] };
   }
   if (scenario === 'held') s.terminals = [...s.terminals, base.heldTerminal()];
   if (scenario === 'hostile') {

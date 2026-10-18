@@ -270,7 +270,8 @@ def test_ctx_requests_keystep_shot_and_ctl_ctx(paths, operator):
         await shim.event(4, "req.keystep", step="foothold", note="ssh mit Standardpasswort")
         await shim._wait(lambda: shim.state.get("title_extra") == "Schlüsselschritt: foothold", 3)
         await shim.event(5, "req.shot")
-        await shim._wait(lambda: "späteren Version" in (shim.state.get("title_extra") or ""), 3)
+        # Bau v0.1-Screenshots: Ergebnis (gespeichert oder klare Meldung ohne X11) im Titel
+        await shim._wait(lambda: "Screenshot" in (shim.state.get("title_extra") or ""), 5)
         await shim.event(6, "req.ctx.set", host="evil host;rm -rf /")
         await shim._wait(lambda: shim.state.get("title_extra") == "Eingabe ungültig", 3)
         await shim.wait_ack(6)

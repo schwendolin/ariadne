@@ -12,12 +12,14 @@ import type { Backend } from '../api/backend';
 import type { ChangeSet, DecisionInput, DecisionResponse, ProjectView, StreamEvent } from '../api/types';
 import { errorText, isAbort } from '../util/errors';
 import { clientRef, type AppApi, type DecideOptions, type OwnDecision, type ProjectCtx, type ProjectPart } from './ctx';
+import { AiStore } from './ai.svelte';
 import { EvidenceStore } from './evidence.svelte';
 import { FindingsStore } from './findings.svelte';
 import { HostStore } from './host.svelte';
 import { MapStore } from './map.svelte';
 import { NextStore } from './next.svelte';
 import { SeenStore } from './seen.svelte';
+import { ShotsStore } from './shots.svelte';
 import { TerminalsStore } from './terminals.svelte';
 import { TimelineStore } from './timeline.svelte';
 
@@ -40,6 +42,8 @@ export class ProjectStore implements ProjectCtx {
   readonly timeline: TimelineStore;
   readonly evidence: EvidenceStore;
   readonly findings: FindingsStore;
+  readonly ai: AiStore;
+  readonly shots: ShotsStore;
   private readonly parts: ProjectPart[];
   private changesTimer: ReturnType<typeof setTimeout> | null = null;
   private changesBusy = false;
@@ -60,7 +64,9 @@ export class ProjectStore implements ProjectCtx {
     this.timeline = new TimelineStore(this);
     this.evidence = new EvidenceStore(this);
     this.findings = new FindingsStore(this);
-    this.parts = [this.map, this.next, this.host, this.seen, this.terminals, this.timeline, this.evidence, this.findings];
+    this.ai = new AiStore(this);
+    this.shots = new ShotsStore(this);
+    this.parts = [this.map, this.next, this.host, this.seen, this.terminals, this.timeline, this.evidence, this.findings, this.ai, this.shots];
   }
 
   get signal(): AbortSignal {

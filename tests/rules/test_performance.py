@@ -214,9 +214,9 @@ def test_500_hosts_under_200_ms():
     items, truncated = rules_api.suggestions(conn, profile="lab", state="open", limit=50)
     assert len(items) == 50 and truncated
     total = rules_api.open_count(conn, profile="lab")
-    # je Host: ANON (ftp, smb), VERSION (ftp, ssh, http, smb 445, mysql, tomcat), SHARES, NFS, WEB (80, 8080),
-    # CREDS (vnc, tomcat), DB, SMTP, FULL, UDP
-    assert total == HOSTS * 18
+    # je Host: ANON (ftp, smb), VERSION (ein Denkanstoss für ftp, ssh, http, smb 445, mysql, tomcat; E119),
+    # SHARES, NFS, WEB (80, 8080), CREDS (vnc, tomcat), DB, SMTP, FULL, UDP
+    assert total == HOSTS * 13
     # warm: dieselbe Projektion (der Normalfall: /next nach jedem Ereignis, open_count nach dem Durchgang)
     warm_next = min(_cpu(lambda: rules_api.suggestions(conn, profile="lab", limit=50)) for _ in range(3))
     warm_count = min(_cpu(lambda: rules_api.open_count(conn, profile="lab")) for _ in range(3))

@@ -118,7 +118,7 @@ export function backoffDelay(attempt: number, initialMs = 1000, maxMs = 30000, j
 }
 
 const EVENT_NAMES = new Set<StreamEventName>([
-  'changes', 'terminal', 'inbox', 'suggestion', 'progress', 'presentation', 'project', 'reset', 'prefs',
+  'changes', 'terminal', 'inbox', 'suggestion', 'progress', 'presentation', 'project', 'reset', 'prefs', 'screenshot',
 ]);
 
 /** Wandelt eine SSE-Nachricht in ein typisiertes Ereignis; unbekannte oder kaputte werden verworfen. */

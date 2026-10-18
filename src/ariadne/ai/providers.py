@@ -87,7 +87,9 @@ class CloudProvider:
         except Exception as exc:  # nur Aufräumen
             log.debug("Client nicht sauber geschlossen (%s)", type(exc).__name__)
 
-    def run(self, system: str, user: str, schema: dict[str, Any], *, effort: str, max_tokens: int) -> ProviderResult:
+    def run(
+        self, system: str, user: str, schema: dict[str, Any], *, effort: str, max_tokens: int
+    ) -> ProviderResult:
         import anthropic
 
         try:
@@ -137,7 +139,9 @@ class CloudProvider:
             )
         if stop == "max_tokens":
             return ProviderResult("truncated", None, served, usage, error="truncated")
-        text = "".join(getattr(b, "text", "") for b in (r.content or []) if getattr(b, "type", None) == "text")
+        text = "".join(
+            getattr(b, "text", "") for b in (r.content or []) if getattr(b, "type", None) == "text"
+        )
         return ProviderResult("ok", text, served, usage)
 
 
@@ -151,11 +155,15 @@ class LocalProvider:
     name = "local"
     journal_name = "ollama"
 
-    def __init__(self, model: str, *, port: int = 11434, host: str = "127.0.0.1", conn_factory: Any = None) -> None:
+    def __init__(
+        self, model: str, *, port: int = 11434, host: str = "127.0.0.1", conn_factory: Any = None
+    ) -> None:
         if not is_loopback(host):
             raise ValueError("Ollama nur auf 127.0.0.1 oder ::1")
         self.model, self.host, self.port = model, host, port
-        self._conn = conn_factory or (lambda: http.client.HTTPConnection(self.host, self.port, timeout=_TIMEOUT_S))
+        self._conn = conn_factory or (
+            lambda: http.client.HTTPConnection(self.host, self.port, timeout=_TIMEOUT_S)
+        )
 
     def close(self) -> None:
         return None
@@ -171,7 +179,9 @@ class LocalProvider:
         except (OSError, http.client.HTTPException):
             return False
 
-    def run(self, system: str, user: str, schema: dict[str, Any], *, effort: str, max_tokens: int) -> ProviderResult:
+    def run(
+        self, system: str, user: str, schema: dict[str, Any], *, effort: str, max_tokens: int
+    ) -> ProviderResult:
         body = json.dumps(
             {
                 "model": self.model,
@@ -198,7 +208,9 @@ class LocalProvider:
             raise ProviderError("schema") from None
         msg = data.get("message") if isinstance(data, dict) else None
         text = msg.get("content") if isinstance(msg, dict) else None
-        usage = Usage(input_tokens=_int(data.get("prompt_eval_count")), output_tokens=_int(data.get("eval_count")))
+        usage = Usage(
+            input_tokens=_int(data.get("prompt_eval_count")), output_tokens=_int(data.get("eval_count"))
+        )
         model = data.get("model") if isinstance(data.get("model"), str) else self.model
         if data.get("done_reason") == "length":
             return ProviderResult("truncated", None, model, usage, error="truncated")
