@@ -306,6 +306,68 @@ def test_outage_adopted_even_without_adopt_flag_e102(paths, operator):
     run(paths, None, second)
 
 
+def _outage_in_other_project(paths: Any, operator: Any, adopt: bool) -> None:
+    """Befund F3 (E70, E102): Der Ausfallpuffer gehört zum Projekt, das beim Neustart aktiv war.
+    ``start other`` übernimmt davon nie etwas ohne Zustimmung und meldet den verworfenen Puffer;
+    mit ``adopt_preroll`` nur, was an kein Projekt gebunden war."""
+    state: dict[str, Any] = {}
+
+    async def first(d) -> None:
+        await ctl_ok(paths.ctl_sock, "start", slug="lame", targets=["10.10.10.3"])
+        await ctl_ok(paths.ctl_sock, "start", slug="other", targets=["10.10.10.4"])
+        await ctl_ok(paths.ctl_sock, "start", slug="lame")
+        state["lame"] = d.project.info.id
+        b = await FakeShim(paths.term_sock, "term-bound-00001").connect(proto=2)
+        await b.wait_state(rec="on")
+        await b.outx(1, 0, b"lame vorher\r\n")
+        await b.wait_ack(1)
+        await b.close()
+
+    async def second(d) -> None:
+        d.operator = backup_of(state["backup"])
+        neu = await FakeShim(paths.term_sock).connect(proto=2)  # an kein Projekt gebunden
+        bound = await FakeShim(paths.term_sock, "term-bound-00001").connect(
+            proto=2, resume_from_seq=2, bound_project_id=state["lame"], bound_slug="lame")
+        await neu.wait_state(rec="locked")
+        await bound.wait_state(rec="locked")
+        await neu.outx(1, 0, b"Arbeit fuer lame im Ausfall\r\n")
+        await bound.outx(2, 13, b"gebunden an lame\r\n")
+        await neu.wait_ack(1)
+        await bound.wait_ack(2)
+        info = await ctl_ok(paths.ctl_sock, "preroll.info")
+        assert info["outage_terminals"] == 2
+        res = await ctl_ok(paths.ctl_sock, "start", slug="other", adopt_preroll=adopt)
+        pre = res["preroll"]
+        assert pre["outage_terminals"] == 0  # nie «ohne Rückfrage» in ein anderes Projekt
+        d.flush()
+        j = d.project.journal
+
+        def stream(tid: str) -> bytes:
+            return b"".join(r.body for r in j.iter_events(kinds=["term.out"], terminal_id=tid))
+
+        assert b"gebunden an lame" not in stream(bound.terminal_id)  # E70: nie ins andere Projekt
+        if adopt:
+            assert stream(neu.terminal_id) == b"Arbeit fuer lame im Ausfall\r\n"
+            assert pre["discarded_outage_terminals"] == 1
+        else:
+            assert stream(neu.terminal_id) == b""
+            assert pre["discarded_outage_terminals"] == 2 and pre["adopted"] is False
+        await neu.close()
+        await bound.close()
+
+    state["backup"] = backup_of(operator)
+    run(paths, operator, first)
+    run(paths, None, second)
+
+
+def test_outage_never_goes_into_another_project_without_consent_f3(paths, operator):
+    _outage_in_other_project(paths, operator, adopt=False)
+
+
+def test_outage_into_another_project_only_unbound_and_only_with_consent_f3(paths, operator):
+    _outage_in_other_project(paths, operator, adopt=True)
+
+
 def test_user_lock_keeps_preroll_window(paths, operator):
     """Nach ``ariadne lock`` gilt das Vorlauf-Fenster (kein Ausfallpuffer)."""
 

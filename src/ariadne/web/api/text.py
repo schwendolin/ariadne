@@ -22,6 +22,8 @@ from ariadne.termsafe import visible
 __all__ = [
     "MASK",
     "Bag",
+    "MissingSecrets",
+    "mask_known",
     "visible_text",
     "deep_visible",
     "iso",
@@ -52,19 +54,41 @@ def _char_visible(ch: str) -> str:
     return visible_text(ch)
 
 
+class MissingSecrets(RuntimeError):
+    """Programmfehler: ein Befehlstext sollte ausgeliefert werden, ohne dass die bekannten Secrets
+    geladen waren (:meth:`Bag.cmd` vor :meth:`Bag.with_known`). Ergibt 500, nie Klartext."""
+
+
+def mask_known(text: str, known: Sequence[str]) -> str:
+    """Bekannte Secret-Werte (längste zuerst) durch :data:`MASK` ersetzen, ohne Längenangabe."""
+    for s in known:
+        if s and s in text:
+            text = text.replace(s, MASK)
+    return text
+
+
 class Bag:
     """Sammelt pro Objekt, ob ein Text Steuerzeichen enthielt (``ctrl``).
 
     ``redactor`` (optional, ``Redactor``): ersetzt eigene Secrets im Rohtext, bevor Steuerzeichen
     sichtbar werden (sonst würde ein durch Escape-Folgen zerstückeltes Secret nicht mehr erkannt).
     Der Redaktor liest dabei nur seine Muster; das ist auch im Thread der Auswertung sicher.
+
+    ``known``: bekannte Secret-Werte aus Zieldaten (``secret_value``, im Präsentationsmodus dazu
+    die Secret-Bereiche aus Prompt-Zeilen). Sie gelten für Befehlstexte und daraus abgeleitete
+    Titel (:meth:`cmd`), die sonst ungefiltert aus ``unit.cmd_text`` kämen (SEC-W1).
+    ``presentation`` merkt sich, ob die Secret-Liste für den Präsentationsmodus geladen wird.
     """
 
-    __slots__ = ("ctrl", "_red")
+    __slots__ = ("ctrl", "_red", "_known", "presentation")
 
-    def __init__(self, redactor: Any = None) -> None:
+    def __init__(
+        self, redactor: Any = None, known: Sequence[str] | None = None, *, presentation: bool = False
+    ) -> None:
         self.ctrl = False
         self._red = redactor
+        self._known = tuple(known) if known is not None else None
+        self.presentation = bool(presentation)
 
     def __call__(self, value: Any) -> str | None:
         if value is None:
@@ -77,12 +101,31 @@ class Bag:
             self.ctrl = True
         return out
 
+    def cmd(self, value: Any) -> str | None:
+        """Befehlstext (oder ein Titel daraus): bekannte Secrets maskiert, dann wie :meth:`__call__`.
+
+        Ohne geladene Secret-Liste ist das ein Programmfehler (:class:`MissingSecrets`)."""
+        if value is None:
+            return None
+        if self._known is None:
+            raise MissingSecrets("bekannte Secrets nicht geladen")
+        s = value if isinstance(value, str) else str(value)
+        return self(mask_known(s, self._known))
+
+    @property
+    def known(self) -> tuple[str, ...] | None:
+        return self._known
+
     def many(self, values: Iterable[Any] | None) -> list[str]:
         return [x for x in (self(v) for v in (values or ())) if x is not None]
 
     def new(self) -> Bag:
-        """Eine frische Tasche mit demselben Redaktor (für verschachtelte Objekte)."""
-        return Bag(self._red)
+        """Eine frische Tasche mit demselben Redaktor und denselben Secrets (verschachtelte Objekte)."""
+        return Bag(self._red, self._known, presentation=self.presentation)
+
+    def with_known(self, known: Sequence[str]) -> Bag:
+        """Eine frische Tasche mit diesen bekannten Secrets (längste zuerst sortiert)."""
+        return Bag(self._red, sorted(set(known), key=len, reverse=True), presentation=self.presentation)
 
 
 def deep_visible(obj: Any) -> Any:

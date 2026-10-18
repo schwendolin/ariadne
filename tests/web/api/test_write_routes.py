@@ -199,6 +199,10 @@ def test_unit_distrust_effect_revoke_and_conflicts(paths, operator):
         assert res["effect"]["rejected"] >= 50 and res["decision_id"] and res["seq"] is None
         recs = list(d.project.journal.iter_events(kinds=["d.unit.distrust"]))
         assert recs[-1].origin == "webui" and recs[-1].header["cmd_id"] == nmap["cmd"]["cmd_id"]
+        # zweimal «Rückgängig pro Befehl» (Doppelklick, F7): 409, kein zweiter Entscheid
+        r = await c.post(f"{P}/decisions", json=_dec("d.unit.distrust", {"cmd_id": nmap["cmd"]["cmd_ref"]}))
+        assert r.status_code == 409 and r.json()["error"]["code"] == "conflict"
+        assert len(list(d.project.journal.iter_events(kinds=["d.unit.distrust"]))) == len(recs)
         await sync(d)
         tl = (await c.get(f"{P}/timeline")).json()["items"]
         nmap2 = next(i for i in tl if i["id"] == nmap["id"])
@@ -208,7 +212,7 @@ def test_unit_distrust_effect_revoke_and_conflicts(paths, operator):
         assert r.status_code == 201
         await sync(d)
         tl = (await c.get(f"{P}/timeline")).json()["items"]
-        assert next(i for i in tl if i["id"] == nmap["id"])["distrusted"] is None
+        assert next(i for i in tl if i["id"] == nmap["id"])["distrusted"] is None  # ein Klick reicht
         assert (await c.get(f"{P}/graph")).json()["summary"]["services"] == 23
         r = await c.post(f"{P}/decisions", json=_dec("d.revoke", {"decision_id": res["decision_id"]}))
         assert r.status_code == 409  # schon aufgehoben
@@ -256,6 +260,8 @@ def test_context_routes_and_suggestion(paths, operator):
             r = await c.post(url, json=bad)
             assert r.status_code == 422, (bad, r.text)
         assert (await c.post(f"{BASE}/terminals/{'0' * 36}/context", json={"op": "pop"})).status_code == 404
+        retro = {"op": "set", "host": TARGET, "from_off": 0}  # unbekanntes Terminal (F8): 404
+        assert (await c.post(f"{BASE}/terminals/{'0' * 36}/context", json=retro)).status_code == 404
         assert (await c.post(f"{BASE}/terminals/zz/context", json={"op": "pop"})).status_code == 404
         # Kontextvorschlag aus «Als Nächstes» übernehmen
         nx = (await c.get(f"{BASE}/p/{fx.pid}/next")).json()
@@ -270,6 +276,10 @@ def test_context_routes_and_suggestion(paths, operator):
         rec = list(d.project.journal.iter_events(kinds=["d.ctx.set"], terminal_id=tid))[-1]
         assert rec.origin == "webui" and rec.header["from_off"] == sug["from_off"]
         assert rec.header["host"] == "ip:default/10.10.10.99"
+        # die Sitzung läuft noch (nc ohne Ende): der Live-Stapel zeigt den Zielhost
+        live = (await c.get(f"{BASE}/terminals")).json()["terminals"]
+        stack = next(t for t in live if t["terminal_id"] == tid)["stack"]
+        assert stack[-1]["host_id"] == "ip:default/10.10.10.99"
         r = await c.post(
             f"{BASE}/terminals/{tid}/context", json={"op": "accept", "item_key": sug["item_key"]}
         )
@@ -279,6 +289,46 @@ def test_context_routes_and_suggestion(paths, operator):
         detach()
 
     run_api(paths, operator, body, extra=True)
+
+
+def test_accept_after_the_session_ended_leaves_the_live_stack_in_kali(paths, operator):
+    """Befund F2: Ist das Terminal wieder in Kali (Prompt der Kali-Shell nach ``from_off``), gilt der
+    übernommene Vorschlag nur rückwirkend; der Live-Stapel bleibt Kali, der nächste lokale Befehl
+    gilt als lokal (Companion-Dateien von ``nmap -oA`` werden erfasst)."""
+
+    async def body(d, c, fx, bus, ctx):
+        from tests.core.fakeshim import FakeShim
+        from tests.integration.helpers import Term
+
+        s5 = await FakeShim(paths.term_sock).connect(proto=2)
+        fx.shims.append(s5)
+        await s5.wait_state(rec="on")
+        t5 = Term(s5)
+        await t5.command(
+            "nc -lvnp 4446",
+            b"listening on [any] 4446 ...\r\n"
+            b"connect to [10.10.14.5] from (UNKNOWN) [10.10.10.98] 40000\r\n"
+            b"whoami\r\nwww-data\r\n",
+            cwd=str(fx.ws),
+        )  # Sitzung beendet, zurück in Kali
+        await t5.command("id", b"uid=1000(kali)\r\n", cwd=str(fx.ws))
+        await t5.acked()
+        await sync(d)
+        tid = s5.terminal_id
+        nx = (await c.get(f"{BASE}/p/{fx.pid}/next")).json()
+        sug = [i for i in nx["clarify"] if i["kind"] == "ctx_suggestion" and i["terminal_id"] == tid]
+        assert sug
+        acc = {"op": "accept", "item_key": sug[0]["item_key"]}
+        r = await c.post(f"{BASE}/terminals/{tid}/context", json=acc)
+        assert r.status_code == 200 and r.json()["stored"] is True
+        shown = (await c.get(f"{BASE}/terminals")).json()["terminals"]
+        assert [st["kind"] for st in next(t for t in shown if t["terminal_id"] == tid)["stack"]] == ["local"]
+        assert d.terminals[tid].stack.is_local()  # MarkContext.local_before des nächsten Befehls stimmt
+        await sync(d)
+        rec = list(d.project.journal.iter_events(kinds=["d.ctx.set"], terminal_id=tid))[-1]
+        assert rec.header["from_off"] == sug[0]["from_off"]  # rückwirkend gespeichert
+
+    run_api(paths, operator, body)
 
 
 def test_pause_resume_presentation_and_reveal(paths, operator):

@@ -7,7 +7,12 @@
   einer Verbindung nichts, bis der Peer feststeht: Client-Socket in ``/proc/net/tcp(6)`` mit
   der eigenen UID, sonst Verbindung ohne Antwort zu (R2). Der Peer (:class:`PeerInfo`) gilt
   für die ganze Verbindung und steht in jedem ``scope["state"]``. Die Suche läuft in einem
-  eigenen kleinen Thread-Pool, nie im Loop.
+  eigenen kleinen Thread-Pool, nie im Loop. Höchstens :data:`MAX_PENDING_LOOKUPS` Suchen warten
+  gleichzeitig; jede weitere neue Verbindung wird sofort geschlossen, und Ablehnungen meldet das
+  Log nur zusammengefasst (Befund SEC-W2: eine Flut eines fremden Benutzers darf den Loop, der
+  auch ``ctl.sock`` und die Shims bedient, nicht aufhalten).
+* Der Socket ist ausdrücklich ``IPPROTO_TCP``; nur dann setzt asyncio ``TCP_NODELAY`` auf die
+  angenommenen Verbindungen (sonst wartet jede Keep-alive-Antwort etwa 40 ms, Befund RT-1).
 * :class:`WebServer` startet uvicorn mit ``sockets=[sock]`` als Aufgabe im Loop
   (``lifespan="off"``, kein Access-Log, keine eigene Logging-Konfiguration, keine
   Proxy-Header, kein WebSocket, keine Signal-Handler) und beendet es in höchstens 2 s.
@@ -22,6 +27,7 @@ import ipaddress
 import logging
 import os
 import socket
+import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -31,15 +37,25 @@ import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
 from ariadne.web.config import ALLOWED_BINDS
-from ariadne.web.peer import PeerInfo, resolve_peer
+from ariadne.web.peer import DiagUnavailable, PeerInfo, diag_lookup, resolve_peer
 from ariadne.web.security import _STATIC_HEADERS, OTHER_CSP, PEER_KEY, ASGIApp, error_body
 
-__all__ = ["BindError", "bind_socket", "check_sockname", "PeerGate", "WebServer", "MAX_CONNECTIONS"]
+__all__ = [
+    "BindError",
+    "bind_socket",
+    "check_sockname",
+    "PeerGate",
+    "WebServer",
+    "MAX_CONNECTIONS",
+    "MAX_PENDING_LOOKUPS",
+]
 
 log = logging.getLogger("ariadne.web")
 
 MAX_CONNECTIONS = 128
+MAX_PENDING_LOOKUPS = 16  # gleichzeitig wartende Peer-Suchen; darüber wird sofort geschlossen
 PEER_TIMEOUT_S = 5.0
+WARN_EVERY_S = 10.0  # Ablehnungen höchstens so oft ins Log, mit Zahl
 
 Resolver = Callable[[tuple[str, int], tuple[str, int]], PeerInfo | None]
 
@@ -67,7 +83,8 @@ def bind_socket(host: str, port: int) -> socket.socket:
     if host not in ALLOWED_BINDS:
         raise BindError("nur 127.0.0.1 oder ::1")
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
-    sock = socket.socket(family, socket.SOCK_STREAM)
+    # IPPROTO_TCP ausdrücklich: asyncio setzt TCP_NODELAY nur bei sock.proto == IPPROTO_TCP (RT-1)
+    sock = socket.socket(family, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     try:
         sock.set_inheritable(False)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -88,19 +105,59 @@ class PeerGate:
 
     def __init__(self, resolver: Resolver | None = None, *, uid: int | None = None) -> None:
         self.uid = os.getuid() if uid is None else uid
-        self.resolver: Resolver = resolver or functools.partial(_default_resolve, uid=self.uid)
+        self._default: Resolver = functools.partial(_default_resolve, uid=self.uid)
+        self.resolver: Resolver = resolver or self._default
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ariadne-peer")
         self.tasks: set[asyncio.Task[None]] = set()
         self.closed = False
+        self.pending = 0  # laufende Peer-Suchen
+        self.rejected_total = 0
+        self._unreported = 0
+        self._last_warn = -WARN_EVERY_S
+        self._clock = time.monotonic
+
+    def quick_reject(self, client: Any, server: Any) -> bool:
+        """Sofort im Loop: gehört der Client-Socket einem fremden Benutzer oder gibt es ihn nicht?
+
+        Eine gezielte Netlink-Abfrage (etwa 15 µs, kein Thread) weist eine Flut fremder
+        Verbindungen ab, bevor eine Suche in den fd-Tabellen beginnt. Mit einem eigenen Resolver
+        (Tests) oder ohne Netlink entscheidet erst :meth:`lookup`."""
+        if self.resolver is not self._default or client is None or server is None or server[1] is None:
+            return False
+        try:
+            entry = diag_lookup((client[0], client[1]), (server[0], int(server[1])))
+        except DiagUnavailable:
+            return False
+        except (ValueError, TypeError, OSError):
+            return True
+        return entry is None or entry.uid != self.uid
+
+    def busy(self) -> bool:
+        """Zu viele Suchen warten schon: neue Verbindungen sofort schliessen (Überlast)."""
+        return self.pending >= MAX_PENDING_LOOKUPS
+
+    def rejected(self, why: str) -> None:
+        """Eine Verbindung wurde abgewiesen; das Log bekommt höchstens alle 10 s eine Zeile."""
+        self.rejected_total += 1
+        self._unreported += 1
+        now = self._clock()
+        if now - self._last_warn >= WARN_EVERY_S:
+            log.warning("%d Verbindung(en) ohne passenden Peer geschlossen (zuletzt: %s)",
+                        self._unreported, why)
+            self._unreported = 0
+            self._last_warn = now
 
     async def lookup(self, client: tuple[str, int], server: tuple[str, int]) -> PeerInfo | None:
         loop = asyncio.get_running_loop()
+        self.pending += 1
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(self._pool, self.resolver, client, server), PEER_TIMEOUT_S)
         except Exception as exc:
-            log.warning("Peer der Verbindung nicht bestimmbar (%s)", type(exc).__name__)
+            self.rejected(f"Peer nicht bestimmbar, {type(exc).__name__}")
             return None
+        finally:
+            self.pending -= 1
 
     def close(self) -> None:
         self.closed = True
@@ -127,6 +184,14 @@ def make_protocol(gate: PeerGate) -> type[H11Protocol]:
             if gate.closed or len(self.connections) > MAX_CONNECTIONS:
                 transport.close()
                 return
+            if gate.quick_reject(self.client, self.server):
+                transport.close()  # fremder Benutzer oder kein Eintrag: ohne Antwort (R2)
+                gate.rejected("fremder Benutzer oder kein Eintrag")
+                return
+            if gate.busy():
+                transport.close()
+                gate.rejected("Überlast")
+                return
             transport.pause_reading()  # nichts lesen, bevor der Peer feststeht
             task = self.loop.create_task(self._check_peer(transport))
             gate.tasks.add(task)
@@ -140,8 +205,8 @@ def make_protocol(gate: PeerGate) -> type[H11Protocol]:
             if transport.is_closing():
                 return
             if peer is None or peer.uid != gate.uid:
-                log.warning("Verbindung ohne passenden Peer geschlossen")
                 transport.close()  # ohne Antwort (R2)
+                gate.rejected("fremder Benutzer" if peer is not None else "kein Eintrag")
                 return
             self.app_state[PEER_KEY] = peer
             transport.resume_reading()
@@ -202,6 +267,9 @@ class WebServer:
             access_log=False, log_config=None, proxy_headers=False, server_header=False,
             date_header=True, timeout_keep_alive=5, timeout_graceful_shutdown=1,
             h11_max_incomplete_event_size=64 * 1024,
+            # uvicorn ruft listen() erneut auf; 64 statt 2048 hält auch die Zahl der pro Durchgang
+            # angenommenen Verbindungen klein (asyncio nimmt bis zu ``backlog`` auf einmal an)
+            backlog=64,
         )
         server = _QuietServer(config)
         self._server = server

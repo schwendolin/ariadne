@@ -94,7 +94,9 @@ def read_secret(prompt: str, fd: int | None, *, confirm: bool = False,
 # --------------------------------------------------------------------------- #
 
 
-def _client(paths: Paths, *, start: bool = True) -> CtlClient:
+def _client(paths: Paths, *, start: bool = True, timeout: float = 3.0) -> CtlClient:
+    """Verbindung zum Daemon; startet ihn, wenn nötig, und wartet höchstens ``timeout`` s darauf
+    (``remote serve code`` wartet länger: ariadne-mac start versucht es nur einmal, RT-3)."""
     client = CtlClient(paths.ctl_sock)
     if client.ping():
         return client
@@ -102,7 +104,7 @@ def _client(paths: Paths, *, start: bool = True) -> CtlClient:
         raise CliError("Daemon läuft nicht")
     from ariadne.daemon.main import spawn_detached
 
-    if not spawn_detached(paths, timeout=3.0):
+    if not spawn_detached(paths, timeout=timeout):
         raise CliError(f"Daemon liess sich nicht starten (siehe {paths.daemon_log})")
     return client
 

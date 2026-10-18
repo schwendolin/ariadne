@@ -89,6 +89,7 @@ def _manifest(sel: Selection, backup_id: str, created: str) -> dict[str, Any]:
         "files": [{"path": e.arc, "size": e.size, "sha256": e.sha256, "mode": e.mode, "mtime": e.mtime}
                   for e in sel.entries if not e.is_dir],
         "skipped": sel.skipped,
+        "unreadable": sel.unreadable,
     }
 
 
@@ -135,7 +136,7 @@ def backup_to_stream(out: BinaryIO, paths: Paths, *, projects: list[str] | None 
         manifest_sha256=manifest_sha, registry_id=registry_id,
         head_seqs={p.slug: int(p.head["head_seq"]) for p in sel.projects if p.head},
         files=len(files), plain_bytes=sum(e.size for e in files), skipped=sel.skipped,
-        recipients=len(recips.recipients),
+        recipients=len(recips.recipients), unreadable=sel.unreadable, grown=sel.grown,
     )
 
 
@@ -180,6 +181,13 @@ def backup_summary_lines(res: BackupResult) -> list[str]:
     lines += _heads(res.chain_heads, res.head_seqs, res.projects)
     if res.skipped:
         lines.append(f"  Übersprungen: {res.skipped} Links, Sockets oder Geräte (nie mitgesichert).")
+    if res.unreadable:
+        lines.append(f"  WARNUNG: {res.unreadable} Dateien oder Ordner im Arbeitsbereich nicht gesichert "
+                     f"(nicht lesbar oder einem anderen Benutzer). Mitsichern: sudo chown -R \"$USER\" "
+                     f"~/ariadne/SLUG, dann neu sichern.")
+    if res.grown:
+        lines.append(f"  Hinweis: {res.grown} Dateien im Arbeitsbereich wuchsen während der Sicherung "
+                     f"(ein Werkzeug schreibt noch); gesichert ist ihr Stand beim ersten Lesen.")
     if res.registry_id is None:
         lines.append("  Hinweis: Eintrag in der Registry gescheitert (die Sicherung selbst ist gültig).")
     return lines
@@ -204,8 +212,11 @@ def restore_summary_lines(res: RestoreResult, *, remote: bool = False) -> list[s
                 lines.append(f"  Kette {slug}: {'in Ordnung' if res.verified[slug] else 'FEHLER'}")
     else:
         first = res.projects[0] if res.projects else "SLUG"
-        unlock = "ssh -t kali-sl unlock" if remote else "ariadne unlock"
-        lines.append(f"Ketten noch nicht geprüft. Weiter mit {unlock}, dann in der Kali "
-                     f"ariadne project open {first} und ariadne verify; den Kettenkopf mit dem Wert "
-                     f"oben vergleichen.")
+        unlock = "ariadne-mac unlock (oder ssh -t kali-sl unlock)" if remote else "ariadne unlock"
+        lines.append("Den Kettenkopf oben mit dem Wert vergleichen, den ariadne-mac stop bzw. ariadne "
+                     "backup beim Sichern zeigte.")
+        lines.append(f"Ketten noch nicht geprüft. Weiter mit {unlock}, dann in der Kali ariadne start "
+                     f"{first} und ariadne verify: verify nennt diesen Kopf als «Kettenkopf beim letzten "
+                     f"Schliessen … in der Kette» und muss «in Ordnung» melden (der aktuelle Kettenkopf "
+                     f"ist nach dem Öffnen immer neuer).")
     return lines

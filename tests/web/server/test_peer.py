@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 
 from ariadne.web.peer import (
+    DiagUnavailable,
     PeerInfo,
+    diag_lookup,
     find_holders,
     find_socket,
     parse_proc_net,
@@ -115,6 +117,29 @@ def test_real_tcp_connection_resolves_to_this_process():
         assert peer is not None and peer.uid == os.getuid() and os.getpid() in peer.pids
         # die Server-Seite ist nicht der Client
         assert find_socket(conn.getsockname(), conn.getpeername()).inode != peer.inode
+    finally:
+        for s in (cli, conn, srv):
+            s.close()
+
+
+def test_diag_lookup_finds_exactly_this_socket_and_nothing_after_close():
+    """SEC-W2: gezielte Suche über Netlink (4-Tupel) statt der ganzen Tabelle; gleiches Ergebnis."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    cli = socket.create_connection(srv.getsockname())
+    conn, _ = srv.accept()
+    try:
+        try:
+            e = diag_lookup(cli.getsockname(), srv.getsockname())
+        except DiagUnavailable:
+            pytest.skip("Netlink sock_diag hier nicht verfügbar")
+        assert e is not None and e.inode == os.fstat(cli.fileno()).st_ino and e.uid == os.getuid()
+        assert find_socket(cli.getsockname(), srv.getsockname(), use_diag=False) == e
+        assert diag_lookup(("127.0.0.1", 1), srv.getsockname()) is None
+        addr = cli.getsockname()
+        cli.close()
+        assert diag_lookup(addr, srv.getsockname()) is None  # TIME_WAIT oder weg: kein Inode
     finally:
         for s in (cli, conn, srv):
             s.close()

@@ -327,6 +327,17 @@ class SessionStore:
             self._end(sid)
         return len(ids)
 
+    def revoke_bound(self, pid: int, start: int) -> int:
+        """Widerruft alle Sitzungen und offenen Codes, die an den Prozess ``pid`` mit Startzeit
+        ``start`` gebunden sind (Ende von ``remote serve code``, Befund SEC-R1/F4). Gibt die Zahl
+        der beendeten Sitzungen zurück."""
+        self._codes[:] = [c for c in self._codes
+                          if c.sshd is None or (c.sshd.pid, c.sshd.start) != (pid, start)]
+        ids = [sid for sid, s in self._sessions.items() if (s.proc.pid, s.proc.start) == (pid, start)]
+        for sid in ids:
+            self._end(sid)
+        return len(ids)
+
     def clear(self) -> int:
         """Alles verwerfen: Sitzungen und offene Codes (Sperre, Stopp, Daemon-Ende)."""
         self._codes.clear()

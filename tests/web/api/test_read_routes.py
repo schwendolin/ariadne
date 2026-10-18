@@ -207,6 +207,9 @@ def test_timeline_inputs_evidence_search(paths, operator):
             (True, "no_echo_seen", MASK),
         ]
         assert all(i["revealed"] is False and i["terminal_id"] == fx.shim2.terminal_id for i in r)
+        # keine Passwortlänge über HTTP (SEC-W3), auch nicht in der Zeitachse
+        assert [i["length"] for i in r] == [3, None, None]
+        assert [i["input"]["length"] for i in ins] == [None, None, 3]
         assert len((await c.get(f"{P}/inputs", params={"limit": 1})).json()["items"]) == 1
         assert (await c.get(f"{P}/inputs", params={"terminal": fx.shim.terminal_id})).json()["items"] == []
         assert (await c.get(f"{P}/inputs", params={"limit": 5000})).status_code == 422

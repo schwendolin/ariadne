@@ -266,8 +266,13 @@ class WebExtension:
             if sshd is None:
                 raise OpError("not_sshd", "Aufrufer stammt nicht von einer SSH-Verbindung ab")
         code, ttl = sessions.issue_code(typed=typed, via=via, sshd=sshd)
-        return {"code": code, "display": format_typed(code) if typed else code, "expires_in": ttl,
-                "url": None if typed else f"{ctx.origin}/#c={code}", "port": ctx.port, "via": via}
+        res: dict[str, Any] = {"code": code, "display": format_typed(code) if typed else code,
+                               "expires_in": ttl, "url": None if typed else f"{ctx.origin}/#c={code}",
+                               "port": ctx.port, "via": via}
+        if sshd is not None:
+            # damit remote serve code bei seinem Ende genau diese Bindung widerrufen kann (SEC-R1)
+            res["bound"] = {"pid": sshd.pid, "start": sshd.start}
+        return res
 
     def _op_sessions(self, daemon: Daemon, args: dict[str, Any]) -> dict[str, Any]:
         if self.sessions is None:
@@ -276,9 +281,20 @@ class WebExtension:
         return {"sessions": self.sessions.listing()}
 
     def _op_revoke(self, daemon: Daemon, args: dict[str, Any]) -> dict[str, Any]:
+        """``session_id``: eine Sitzung; ``bound_pid`` mit ``bound_start``: alle Sitzungen und Codes,
+        die an diesen sshd-Prozess gebunden sind (Ende von ``remote serve code``); sonst alle."""
         sid = args.get("session_id")
         if sid is not None and (not isinstance(sid, str) or not 1 <= len(sid) <= 32):
             raise OpError("invalid", "session_id ungültig")
+        if "bound_pid" in args or "bound_start" in args:
+            pid, start = args.get("bound_pid"), args.get("bound_start")
+            if (sid is not None or type(pid) is not int or type(start) is not int or pid <= 0
+                    or start < 0):
+                raise OpError("invalid", "bound_pid und bound_start müssen Zahlen sein")
+            n = self.sessions.revoke_bound(pid, start) if self.sessions is not None else 0
+            if n:
+                log.info("Web-Sitzungen beendet: remote serve code endete (%d)", n)
+            return {"revoked": n}
         if self.sessions is None:
             if sid is not None:
                 raise OpError("not_found", "Sitzung unbekannt")

@@ -235,3 +235,21 @@ def test_revoke_counts_only_sessions_that_still_live():
     assert store.revoke() == 1
     assert sorted(ended) == sorted([a.session_id, b.session_id]) and len(store) == 0
     assert store.revoke(a.session_id) == 0
+
+
+def test_revoke_bound_ends_only_the_sessions_and_codes_of_that_sshd():
+    """SEC-R1/F4: Endet ``remote serve code``, widerruft es genau die Bindung seiner Verbindung
+    (sshd-PID und Startzeit), auch wenn der sshd-Prozess noch lebt; andere bleiben."""
+    store, _, procs = _store()
+    a = procs.add(900, "sshd-session", start=7)
+    b = procs.add(901, "sshd-session", start=8)
+    code_a, _ = store.issue_code(typed=False, via="sshd", sshd=a)
+    token_a, _ = store.exchange(code_a, _peer())
+    spare_a, _ = store.issue_code(typed=False, via="sshd", sshd=a)  # noch nicht eingetauscht
+    code_b, _ = store.issue_code(typed=False, via="sshd", sshd=b)
+    token_b, _ = store.exchange(code_b, _peer())
+    assert store.revoke_bound(900, 99) == 0  # andere Startzeit: wiederverwendete PID
+    assert store.revoke_bound(900, 7) == 1
+    assert store.authenticate(token_a, _peer()) is None and store.authenticate(token_b, _peer()) is not None
+    with pytest.raises(AuthError):
+        store.exchange(spare_a, _peer())  # auch der offene Code dieser Verbindung ist weg

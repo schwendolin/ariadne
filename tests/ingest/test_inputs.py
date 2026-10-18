@@ -193,6 +193,8 @@ def test_collect_inputs_hides_password_prompts_and_never_reveals():
         (True, "no_echo_seen", I.MASK),
     ]
     assert all(x["revealed"] is False for x in items)
+    # verdeckt heisst auch: keine Länge (SEC-W3), sichtbare Eingaben behalten sie
+    assert [x["length"] for x in items] == [3, 8, None, None]
     assert "Geheim" not in repr(items) and "remote-pw" not in repr(items)
     assert [x["text"] for x in I.collect_inputs(j, limit=1)] == [I.MASK]
 
@@ -202,5 +204,6 @@ def test_input_by_seq_reveals_only_on_request():
     seq = I.collect_inputs(j)[2]["seq"]
     assert I.input_by_seq(j, seq)["text"] == I.MASK
     item = I.input_by_seq(j, seq, reveal=True)
-    assert item["text"] == "Geheim-4711" and item["revealed"] is True
+    assert item["text"] == "Geheim-4711" and item["revealed"] is True and item["length"] == 12
+    assert I.input_by_seq(j, seq)["length"] is None
     assert I.input_by_seq(j, 1) is None  # kein term.input

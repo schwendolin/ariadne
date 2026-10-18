@@ -64,6 +64,8 @@ WORKSPACE_DIRS = ("scans", "loot", "imports", "screenshots", "exports")
 MANIFEST_FORMAT = "ariadne.project-manifest/1"
 SLOT_FORMAT = "ariadne.project-slot/1"
 HEAD_FORMAT = "ariadne.chain-head/1"  # .vault/head.json, beim Schliessen geschrieben
+# Markierung, solange eine Sicherung den flock hält (nur für die Fehlermeldung, Befund RT-7)
+BACKUP_MARKER = ".backup-running"
 
 
 class ProjectError(RuntimeError):
@@ -80,6 +82,21 @@ class ProjectNotFound(ProjectError):
 
 class ProjectLocked(ProjectError):
     """Das Projekt ist bereits von einem anderen Prozess geöffnet."""
+
+
+def locked_message(vault: Path, slug: str) -> str:
+    """Grund, warum der flock auf ``.vault/.lock`` besetzt ist: eine laufende Sicherung (Markierung
+    mit lebender PID) oder ein anderer Prozess. Nie «schon geöffnet», wenn es das nicht ist."""
+    try:
+        pid = int((vault / BACKUP_MARKER).read_text(encoding="ascii").split()[0])
+        alive = pid > 0 and os.path.exists(f"/proc/{pid}")
+    except (OSError, ValueError, IndexError):
+        alive = False
+    if alive:
+        return (f"Projekt {slug}: Gerade läuft eine Sicherung. Nach ihrem Ende öffnet ariadne start "
+                f"(oder ariadne unlock) das Projekt.")
+    return (f"Projekt {slug} ist gesperrt: Ein anderer Prozess hält es offen (laufende Sicherung oder "
+            f"ein zweiter Daemon). Danach: ariadne start.")
 
 
 class GuardrailError(ProjectError):
@@ -177,6 +194,23 @@ class OpenProject:
         self.settings = parse_settings(str(last.header["toml"]))
         self.settings_version = int(last.header["version"])
         return self.settings
+
+    def saved_head(self) -> dict[str, Any] | None:
+        """Kettenkopf aus ``.vault/head.json`` (vom letzten Schliessen, nach einem Restore der aus
+        der Sicherung) oder ``None``. ``ariadne verify`` prüft, ob die Kette ihn enthält."""
+        try:
+            data = json.loads(read_private(self.info.vault / "head.json", max_size=4096).decode("utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError, UnsafePathError):
+            return None
+        if not isinstance(data, dict) or data.get("format") != HEAD_FORMAT:
+            return None
+        seq, h = data.get("head_seq"), data.get("head_hash")
+        if data.get("project_id") != self.info.id or type(seq) is not int or seq < 0:
+            return None
+        if not isinstance(h, str):
+            return None
+        closed = data.get("closed_utc")
+        return {"seq": seq, "hash": h, "closed_utc": closed if isinstance(closed, str) else None}
 
     def _write_head(self, seq: int, head_hash: str) -> None:
         """Kettenkopf beim Schliessen nach ``.vault/head.json`` (0600, ohne Geheimnisse): Sicherung
@@ -341,7 +375,7 @@ class ProjectService:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise ProjectLocked(f"Projekt ist bereits geöffnet: {slug}") from None
+                raise ProjectLocked(locked_message(vault, slug)) from None
             manifest = self._read_manifest(vault)
             if manifest.get("slug") != slug:
                 raise ProjectError("Manifest passt nicht zum Ordner")

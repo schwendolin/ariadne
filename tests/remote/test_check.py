@@ -61,7 +61,7 @@ def test_good_setup_has_no_fail_and_quick_ok(kali, tmp_path, paths):
     assert "Hostkeys selbst erzeugt" in titles
     assert "authorized_keys: ein eingeschränkter Schlüssel" in titles
     assert "Drop-in 10-ariadne.conf vollständig" in titles
-    assert "Port 22 nur über den erlaubten Weg" in titles
+    assert "Port 22: Filter-Unit aktiv" in titles  # mit --full, die Tabelle prüft nft
     assert "sshd -T: alle Werte wie erwartet" in titles
     assert "Filter ariadne_ssh geladen" in titles
     assert "Weg B" in titles
@@ -73,10 +73,67 @@ def test_good_setup_has_no_fail_and_quick_ok(kali, tmp_path, paths):
     assert sshd[3:5] == ["-T", "-C"] and sshd[5].startswith("user=kali,host=pruefung,addr=")
 
 
-def test_quick_ok_needs_no_programs(kali, tmp_path, paths):
+def test_quick_ok_runs_only_programs_without_root(kali, tmp_path, paths):
+    """Die Sperre vor ``code`` nutzt nur Programme ohne root (systemctl, tailscale). Fehlen sie oder
+    läuft systemd nicht (Container), warnt sie; lauscht sshd dann auf Port 22 ausserhalb von
+    Loopback, ist der Filter nicht bestätigt: fail (fail-closed)."""
     system, runner = system_for(kali, tmp_path)
     assert check.quick_ok(paths, system)
-    assert runner.calls == []
+    assert runner.calls and all(c[0] in ("systemctl", "tailscale") for c in runner.calls)
+    offline = RunResult(1, "", "System has not been booted with systemd as init system (PID 1).\n")
+    for missing in (None, offline):
+        system, runner = system_for(kali, tmp_path)
+        for key in list(runner.responses):
+            if key[0] == "systemctl":
+                runner.responses[key] = missing
+        checks = check.quick_checks(paths, system)
+        assert "systemctl fehlt: Filter und ssh.socket nicht geprüft" in levels(checks, WARN)
+        assert "Port 22 offen ohne Filter" in levels(checks, FAIL) and not check.quick_ok(paths, system)
+
+
+def test_port_22_without_full_is_only_a_warning(kali, tmp_path, paths):
+    """F10 (Anleitung): Die Filter-Unit bleibt «active», auch wenn ``nft flush ruleset`` die Tabelle
+    löschte. Ohne ``--full`` (ohne root) ist «aktiv» darum kein ok, sondern eine Warnung."""
+    system, _ = system_for(kali, tmp_path)
+    checks = check.run_checks(paths, system=system)
+    assert "Port 22: Filter-Unit aktiv, Tabelle nicht geprüft" in levels(checks, WARN)
+    assert not any(t.startswith("Port 22") for t in levels(checks, OK))
+
+
+@pytest.mark.parametrize(
+    ("change", "title"),
+    [
+        ("dropin_password", "Drop-in unvollständig"),
+        ("dropin_streamlocal", "Drop-in unvollständig"),
+        ("routes", "Tailscale gibt Routen frei"),
+        ("ssh_socket", "ssh.socket aktiv"),
+        ("requires", "sshd startet auch ohne Filter"),
+        ("earlier_dropin", "Drop-in wird überstimmt"),
+    ],
+)
+def test_r10_quick_ok_refuses_every_fail_without_root(kali, tmp_path, paths, change, title):
+    """SEC-R2/F4: R10 «kein Code, solange die Prüfung ohne root fail meldet» gilt für alle Prüfungen
+    ohne root, nicht nur für Bindung, Marker und ``authorized_keys``."""
+    system, runner = system_for(kali, tmp_path)
+    dropin = system.path(check.DROPIN)
+    if change == "dropin_password":
+        text = dropin.read_text().replace("PasswordAuthentication no", "PasswordAuthentication yes")
+        dropin.write_text(text)
+    elif change == "dropin_streamlocal":
+        dropin.write_text(dropin.read_text().replace("AllowStreamLocalForwarding no",
+                                                     "AllowStreamLocalForwarding yes"))
+    elif change == "routes":
+        runner.responses[("tailscale", "debug", "prefs")] = RunResult(
+            0, json.dumps(dict(GOOD_PREFS, AdvertiseRoutes=["192.168.110.0/24"])))
+    elif change == "ssh_socket":
+        runner.responses[("systemctl", "is-active", "ssh.socket")] = RunResult(0, "active\n")
+    elif change == "requires":
+        runner.responses[("systemctl", "show", "ssh.service", "-p", "Requires", "--value")] = RunResult(
+            0, "system.slice\n")
+    else:
+        (dropin.parent / "05-andere.conf").write_text("PasswordAuthentication yes\n")
+    assert title in levels(check.quick_checks(paths, system), FAIL)
+    assert not check.quick_ok(paths, system)
 
 
 @pytest.mark.parametrize(
@@ -249,6 +306,9 @@ def test_authorized_keys_follows_configured_port(kali, tmp_path, paths):
     assert not check.quick_ok(paths, system)  # Zeile erlaubt 7330, Daemon nutzt 7331
     ak = paths.home / ".ssh" / "authorized_keys"
     ak.write_text(ak.read_text().replace("127.0.0.1:7330", "127.0.0.1:7331"))
+    assert not check.quick_ok(paths, system)  # das Drop-in erlaubt (PermitOpen) noch 7330
+    dropin = system.path(check.DROPIN)
+    dropin.write_text(dropin.read_text().replace("127.0.0.1:7330", "127.0.0.1:7331"))
     assert check.quick_ok(paths, system)
 
 

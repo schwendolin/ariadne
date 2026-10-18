@@ -21,8 +21,12 @@ Ohne root (immer):
 Mit ``--full`` (einmal ``sudo``): ``sshd -T -C user=…,host=pruefung,addr=…`` und
 ``nft list table inet ariadne_ssh``.
 
-:func:`quick_ok` ist die schnelle Prüfung vor ``remote serve code`` (ohne root, ohne Programme):
-Bindung, Marker, ``authorized_keys``. Alle Programme laufen über einen austauschbaren
+:func:`quick_ok` ist die Sperre vor ``remote serve code`` (R10: kein Code, solange eine Prüfung
+ohne root ``fail`` meldet): Bindung, Marker, ``authorized_keys``, Drop-in (nur Dateien), Port 22
+mit Filter-Unit und ``ssh.socket`` (``systemctl``) und Tailscale (``tailscale debug prefs``), beide
+mit dem Zeitlimit des Runners; fehlt ein Programm, gibt es nur eine Warnung (Befund SEC-R2/F4).
+Ohne root lässt sich die nft-Tabelle nicht lesen: Die Zeile zu Port 22 ist dann eine Warnung, die
+Tabelle prüft erst ``--full`` (Befund F10). Alle Programme laufen über einen austauschbaren
 :data:`Runner`, alle Dateien unter :attr:`System.root` (Tests mit Fixtures, nie root nötig).
 ``ARIADNE_SETUP_ROOT`` setzt diese Wurzel wie beim Einrichtungsskript (nur für Tests in einem
 Wegwerf-Root; sshd reicht Variablen des Clients nur nach ``AcceptEnv`` durch, das ``--full`` prüft).
@@ -396,15 +400,24 @@ def sshd_dropin(system: System, weg: str | None, port: int) -> list[Check]:
     return out
 
 
+_NO_SYSTEMD = ("not been booted with systemd", "Failed to connect to bus", "Host is down")
+
+
 def _systemctl(system: System, *args: str) -> str | None:
+    """Ausgabe von ``systemctl``; ``None``, wenn es fehlt oder systemd nicht läuft (Container)."""
     res = system.run(["systemctl", *args])
     if res is None:
+        return None
+    if res.code != 0 and not res.out.strip() and any(t in res.err for t in _NO_SYSTEMD):
         return None
     return res.out.strip()
 
 
-def ssh_port(system: System, weg: str | None) -> list[Check]:
-    """Port 22 gegen den Filter (R10, P1, P2): Weg A und B nur mit aktivem Filter, Weg C nur Loopback."""
+def ssh_port(system: System, weg: str | None, *, full: bool = False) -> list[Check]:
+    """Port 22 gegen den Filter (R10, P1, P2): Weg A und B nur mit aktivem Filter, Weg C nur Loopback.
+
+    Die Unit ist «oneshot» mit ``RemainAfterExit``: Sie bleibt «active», auch wenn ``nft flush
+    ruleset`` die Tabelle löscht. Ohne ``full`` heisst «aktiv» darum nur Warnung, nicht ok."""
     out: list[Check] = []
     listeners = P.tcp_listeners(system.proc("net/tcp"), system.proc("net/tcp6"), 22)
     outside = [a for a in listeners if not P.is_loopback(a)]
@@ -419,8 +432,12 @@ def ssh_port(system: System, weg: str | None) -> list[Check]:
         else:
             out.append(Check(OK, "sshd nur auf Loopback (Weg C)"))
     elif outside:
-        if active == "active":
-            out.append(Check(OK, "Port 22 nur über den erlaubten Weg", "Filter ariadne-ssh-filter aktiv"))
+        if active == "active" and full:
+            out.append(Check(OK, "Port 22: Filter-Unit aktiv", "Tabelle prüft die nächste Zeile (nft)"))
+        elif active == "active":
+            out.append(Check(WARN, "Port 22: Filter-Unit aktiv, Tabelle nicht geprüft",
+                             "ohne root nicht lesbar; nft flush ruleset löscht sie, ohne dass die Unit es "
+                             "merkt: ariadne remote check --full"))
         else:
             out.append(Check(FAIL, "Port 22 offen ohne Filter", ", ".join(outside[:5])
                              + " (sudo systemctl enable --now ariadne-ssh-filter)"))
@@ -599,10 +616,14 @@ def nft_filter(system: System, weg: str | None) -> list[Check]:
 
 
 def quick_checks(paths: Paths, system: System | None = None) -> list[Check]:
-    """Schnellprüfung ohne root und ohne Programme: Bindung, Marker, ``authorized_keys``."""
+    """Alle Prüfungen ohne root für die Sperre vor ``code`` (R10): Bindung, Marker,
+    ``authorized_keys``, Drop-in, Port 22 und Tailscale. Langsam ist höchstens ein Programm, das
+    hängt; der Runner bricht nach 8 s ab."""
     system = system or System.from_env()
+    weg = _weg(system)
     port = _ui_port(paths)[0]
-    return [*web_binding(paths, system), *hostkey_marker(system), *authorized_keys(paths, system, port)]
+    return [*web_binding(paths, system), *hostkey_marker(system), *authorized_keys(paths, system, port),
+            *sshd_dropin(system, weg, port), *ssh_port(system, weg), *tailscale(system, weg)]
 
 
 def quick_ok(paths: Paths, system: System | None = None) -> bool:
@@ -628,7 +649,7 @@ def run_checks(paths: Paths, *, full: bool = False, system: System | None = None
     out += hostkey_marker(system)
     out += authorized_keys(paths, system, port)
     out += sshd_dropin(system, weg, port)
-    out += ssh_port(system, weg)
+    out += ssh_port(system, weg, full=full)
     out += openssh_version(system)
     out += tailscale(system, weg, full=full)
     out += runtime_dir(system)

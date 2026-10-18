@@ -172,6 +172,56 @@ def test_t7_lock_stop_close_revoke_end_sessions_immediately(paths, operator):
     run_web(paths, operator, scenario)
 
 
+def test_t7_stop_after_lock_ends_a_session_made_while_locked(paths, operator):
+    """Befund F5: lock, neu anmelden (Dashboard «gesperrt»), dann ``stop``: Die Sitzung endet, obwohl
+    weder ein Projekt offen noch der Tresor entsperrt war, und gilt im nächsten Projekt nicht."""
+
+    async def scenario(web: Web) -> None:
+        sock = paths.ctl_sock
+        await ctl_ok(sock, "start", slug="lame", targets=["10.10.10.3"])
+        await ctl_ok(sock, "lock")
+        token = await web.login()
+        web.ext.check_now()  # die Prüfung kennt «gesperrt» schon
+        assert (await web.req("GET", "/api/v1/test/whoami", token=token)).status_code == 200
+        stream = Stream(web, token)
+        await stream.wait_open()
+        await ctl_ok(sock, "stop")
+        assert await stream.ends_within(1.0)
+        await stream.close()
+        assert (await web.req("GET", "/api/v1/test/whoami", token=token)).status_code == 401
+        await ctl_ok(sock, "start", slug="other", targets=["10.10.10.4"],
+                     passphrase="Korrekt-Pferd-Batterie-9")
+        assert (await web.req("GET", "/api/v1/test/whoami", token=token)).status_code == 401
+
+    run_web(paths, operator, scenario)
+
+
+def test_rt5_token_from_before_a_daemon_restart_is_401(paths, operator):
+    """K2, E92, R7: Sitzungen leben nur im Speicher des Daemons. Ein Token aus dem ersten Lauf gilt
+    im zweiten nicht, auch nicht für den Strom mit ``Last-Event-ID`` (kein Nachholen)."""
+    saved: dict[str, str] = {}
+
+    async def first(web: Web) -> None:
+        saved["token"] = await web.login()
+        stream = Stream(web, saved["token"])
+        await stream.wait_open()
+        assert stream.status == 200
+        await stream.close()
+
+    async def second(web: Web) -> None:
+        token = saved["token"]
+        assert (await web.req("GET", "/api/v1/test/whoami", token=token)).status_code == 401
+        assert (await web.req("GET", "/api/v1/session", token=token)).status_code == 401
+        stream = Stream(web, token, last_event_id="5")
+        await stream.wait_open()
+        assert stream.status == 401 and await stream.ends_within(1.0)
+        await stream.close()
+        assert await _sessions(web) == []
+
+    run_web(paths, operator, first)
+    run_web(paths, operator, second)
+
+
 def test_t7_switch_keeps_session_idle_ends_it(paths, operator):
     async def scenario(web: Web) -> None:
         sock = paths.ctl_sock

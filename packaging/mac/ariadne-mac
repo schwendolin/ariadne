@@ -4,14 +4,19 @@
 #
 #   ariadne-mac check            Mac prüfen (FileVault, Schlüssel, Hostkey, Port 7330, Sicherung)
 #   ariadne-mac start            Tunnel auf, Code holen, Dashboard im Standardbrowser öffnen
+#                                (läuft der eigene Tunnel schon: neu aufbauen, ohne zu sperren)
 #   ariadne-mac stop             Sitzungen widerrufen, sperren, Sicherung holen, Tunnel zu
 #   ariadne-mac unlock           Passphrase im Mac-Terminal eingeben (ssh -t kali-sl unlock)
 #   ariadne-mac backup           verschlüsselte Sicherung der Kali in den Sicherungsordner
 #   ariadne-mac restore DATEI    Sicherung in eine frische Kali zurückspielen
 #
-# Sicherheit: ssh immer nur mit -F ~/.ssh/ariadne.conf, ControlMaster=no und ControlPath=none
-# (keine globalen Einstellungen, kein Hintergrundtunnel nach stop), nie -g. Der Code steht nie
-# in argv: Er kommt über dieselbe SSH-Verbindung, die den Tunnel trägt (ssh -n -L … kali-sl code),
+# Sicherheit: ssh immer nur mit -F ~/.ssh/ariadne.conf, ControlMaster=no, ControlPath=none und
+# StrictHostKeyChecking=yes (keine globalen Einstellungen, kein Hintergrundtunnel nach stop, nie
+# ein unbekannter Hostkey), nie -g. Vor start, unlock, backup und restore prüft das Skript die
+# SSH-Einstellungen (R13). Der Tunnel im Hintergrund fragt nie selbst nach der Passphrase
+# (BatchMode=yes): Ist der Schlüssel nicht im Agent, lädt ihn ssh-add vorher im Vordergrund.
+# Der Code steht nie in argv: Er kommt über dieselbe SSH-Verbindung, die den Tunnel trägt
+# (ssh -n -L … kali-sl code),
 # landet in einer Datei mit 0600 in $TMPDIR (sofort gelöscht) und erreicht den Browser nur im
 # Fragment einer Startdatei (0600, nach 10 s gelöscht). Endet die Verbindung, endet die Anmeldung.
 #
@@ -19,7 +24,8 @@
 # (~/.ssh/ariadne.conf), ARIADNE_MAC_BACKUP_DIR (~/Ariadne-Backups), ARIADNE_MAC_KEY
 # (~/.config/ariadne-backup/mac.key.age), ARIADNE_MAC_STATE_DIR, ARIADNE_MAC_PORT (7330, wie
 # [ui] port der Kali; der Mac nimmt denselben Port, sonst lehnt die Kali den Host ab). Für Tests:
-# ARIADNE_MAC_SHIM_DIR kommt vorne in den PATH (Attrappen für open, fdesetup, lsof, ssh, sleep),
+# ARIADNE_MAC_SHIM_DIR kommt vorne in den PATH (Attrappen für open, fdesetup, lsof, ssh, ssh-add,
+# sleep),
 # ARIADNE_MAC_LOCAL_PORT setzt einen anderen Port auf dem Mac (Mac und Kali auf einem Rechner).
 
 set -eu
@@ -37,7 +43,7 @@ TMPDIR=${TMPDIR%/}
 if [[ -n ${ARIADNE_MAC_SHIM_DIR:-} ]]; then
     path=("$ARIADNE_MAC_SHIM_DIR" $path)
 fi
-SSH_BASE=(ssh -F "$SSH_CONF" -o ControlMaster=no -o ControlPath=none)
+SSH_BASE=(ssh -F "$SSH_CONF" -o ControlMaster=no -o ControlPath=none -o StrictHostKeyChecking=yes)
 for p in $PORT $LPORT; do
     if [[ $p != <1024-65535> ]]; then
         print -r -- "Fehler: Port $p ungültig (ARIADNE_MAC_PORT: 1024 bis 65535)" >&2
@@ -137,7 +143,7 @@ check_ssh_config() {
     if (( found )); then
         ok "Hostkey der Kali bekannt ($alias)"
     else
-        bad "Hostkey der Kali unbekannt ($alias): einmal ${SSH_BASE[*]} -o StrictHostKeyChecking=ask $HOST check und den Fingerprint mit der Konsole vergleichen"
+        bad "Hostkey der Kali unbekannt ($alias): einmal ssh -F $SSH_CONF -o StrictHostKeyChecking=ask $HOST check und den Fingerprint mit der Konsole vergleichen"
     fi
     local idf=${SSHCFG[identityfile]:-}
     idf=$(expand_home "${idf%% *}")
@@ -217,6 +223,32 @@ preflight_start() {
     (( FAILS == 0 )) || die "$FAILS Prüfungen fehlgeschlagen, kein Tunnel (ariadne-mac check)"
 }
 
+# Vor unlock (Passphrase), restore (Klartext der Sicherung) und backup: dieselben SSH-Prüfungen
+# wie vor start (R13, Befund SEC-M1), sonst Abbruch ohne Verbindung.
+preflight_remote() {
+    FAILS=0
+    check_ssh_config >/dev/null
+    if (( FAILS )); then
+        check_ssh_config | grep '^\[!!\]' >&2 || true
+        die "$FAILS SSH-Prüfungen fehlgeschlagen, keine Verbindung zur Kali (ariadne-mac check)"
+    fi
+}
+
+# Der Tunnel läuft im Hintergrund mit BatchMode=yes und fragt nie selbst nach der Passphrase:
+# Sonst liefe die Frist für den Code schon während der Abfrage, und nach dem Abbruch landete die
+# Passphrase im Klartext in der Shell (Befund F2). Ist der Schlüssel nicht im Agent, lädt ssh-add
+# ihn hier im Vordergrund (4 h, wie AddKeysToAgent in ariadne.conf).
+ensure_agent_key() {
+    local idf=${SSHCFG[identityfile]:-}
+    idf=$(expand_home "${idf%% *}")
+    [[ -n $idf && -f $idf ]] || return 0
+    if [[ -f $idf.pub ]] && command ssh-add -T "$idf.pub" >/dev/null 2>&1; then
+        return 0
+    fi
+    say "Schlüssel noch nicht im Agent: Passphrase des Mac-Schlüssels (danach 4 h im Agent)."
+    command ssh-add -t 4h "$idf" || die "Schlüssel nicht geladen (ssh-add): kein Tunnel"
+}
+
 # --------------------------------------------------------------------------- #
 # Befehle
 # --------------------------------------------------------------------------- #
@@ -262,16 +294,21 @@ start_html() {
 cmd_start() {
     local pid
     if pid=$(tunnel_pid); then
-        die "Tunnel läuft schon (PID $pid). Neu anmelden: ariadne-mac stop, dann ariadne-mac start"
+        # Neuanmeldung (nach lock, Projektende, 12 h): nur den eigenen Tunnel neu aufbauen, ohne
+        # revoke und lock (stop würde sperren; Befund F1 der Anleitung)
+        say "Tunnel läuft schon (PID $pid): wird für eine neue Anmeldung neu aufgebaut (ohne Sperren)."
+        stop_tunnel >/dev/null
     fi
     preflight_start
+    ensure_agent_key
     umask 077
     mkdir -p "$STATE_DIR"
     local out
     out=$(mktemp "$TMPDIR/ariadne-code.XXXXXX")
     # Eine Verbindung trägt Code und Tunnel: Endet sie, endet die Anmeldung (R6).
-    ( trap '' HUP; exec "${SSH_BASE[@]}" -n -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 \
-        -L "127.0.0.1:$LPORT:127.0.0.1:$PORT" "$HOST" code >"$out" 2>>"$LOG_FILE" </dev/null ) &!
+    ( trap '' HUP; exec "${SSH_BASE[@]}" -n -o BatchMode=yes -o ExitOnForwardFailure=yes \
+        -o ServerAliveInterval=15 -L "127.0.0.1:$LPORT:127.0.0.1:$PORT" "$HOST" code \
+        >"$out" 2>>"$LOG_FILE" </dev/null ) &!
     pid=$!
     print -r -- "$pid" > "$PID_FILE"
     local code="" i
@@ -313,6 +350,7 @@ cmd_start() {
 
 cmd_backup() {
     backup_dir_ok || die "Sicherungsordner $BACKUP_DIR liegt in iCloud, Schreibtisch, Dokumente oder CloudStorage (R13)"
+    preflight_remote
     umask 077
     mkdir -p "$BACKUP_DIR"
     chmod 700 "$BACKUP_DIR"
@@ -343,6 +381,7 @@ cmd_stop() {
 }
 
 cmd_unlock() {
+    preflight_remote
     exec "${SSH_BASE[@]}" -t -o ClearAllForwardings=yes "$HOST" unlock
 }
 
@@ -353,6 +392,7 @@ cmd_restore() {
     [[ -f $MAC_KEY ]] || die "Sicherungsschlüssel fehlt: $MAC_KEY"
     [[ $(command head -c 21 "$MAC_KEY" 2>/dev/null) == "age-encryption.org/v1" ]] \
         || die "Sicherungsschlüssel liegt im Klartext (R13): erst mit age -p verschlüsseln"
+    preflight_remote
     say "Wichtig: Der Hostkey der neuen Kali muss geprüft sein (ssh-keygen -R, dann einmal mit"
     say "StrictHostKeyChecking=ask und Fingerprint-Vergleich). Sonst geht deine Sicherung im Klartext"
     say "an den, der sich mit diesem Hostkey meldet."
@@ -363,7 +403,8 @@ cmd_restore() {
         [[ $answer == (j|J|ja|Ja|y|yes) ]] || die "abgebrochen"
     fi
     command age -d -i "$MAC_KEY" "$file" | kssh -o ClearAllForwardings=yes "$HOST" restore
-    say "Weiter: ariadne-mac unlock, dann in der Kali ariadne project open SLUG und ariadne verify"
+    say "Weiter: Kettenkopf oben mit dem Wert aus ariadne-mac stop vergleichen, dann ariadne-mac unlock"
+    say "und in der Kali ariadne start SLUG und ariadne verify (muss «in Ordnung» melden)."
 }
 
 usage() {

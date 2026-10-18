@@ -149,7 +149,10 @@ class Api:
 
     # ------------------------------------------------------------------ Ausgang
     def bag(self) -> Bag:
-        return Bag(self.daemon.redactor)
+        """Tasche mit dem Redaktor; merkt sich den Präsentationsmodus beim Beginn der Anfrage, damit
+        :func:`~ariadne.web.api.views.with_secrets` dort mehr verdeckt."""
+        d = self.daemon
+        return Bag(d.redactor, presentation=bool(d.presentation))
 
     async def respond(
         self, obj: Any, status: int = 200, headers: dict[str, str] | None = None

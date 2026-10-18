@@ -18,7 +18,7 @@ Der SSH-Schlüssel des Macs kann genau das und nicht mehr: den Tunnel zu Port 73
 
 Alles andere, auch `scp`, `sftp` und `ssh kali-sl id`, lehnt die Kali mit «Abgelehnt» ab. Verwalten (Pakete, Konfiguration) tust du weiter über die Webkonsole.
 
-> **Stand 2026-10-17.** Server, Anmeldung, Tunnel, Sicherung und alle Befehle dieser Anleitung sind gebaut und Ende zu Ende getestet (unter Linux; macOS selbst und die echte SmartLearn-Kali sind noch nicht geprüft). Die Oberfläche im Browser ist noch der erste Entwurf und zeigt darum noch nicht alles richtig an; die Oberfläche nach dem Design v0.1 folgt. Bis dahin zeigt dir `ariadne status` und `ariadne show …` in der Kali dasselbe.
+> **Stand 2026-10-18.** Server, Anmeldung, Tunnel, Sicherung und alle Befehle dieser Anleitung sind gebaut und Ende zu Ende getestet (unter Linux; macOS selbst und die echte SmartLearn-Kali sind noch nicht geprüft). Die Oberfläche im Browser ist noch der erste Entwurf und zeigt darum noch nicht alles richtig an; die Oberfläche nach dem Design v0.1 folgt. Bis dahin zeigt dir `ariadne status` und `ariadne show …` in der Kali dasselbe.
 
 ## 0 Bevor du anfängst
 
@@ -79,7 +79,13 @@ ssh-keygen -t ed25519 -a 100 -f ~/.ssh/id_ed25519_kali_sl -C mac-kali-smartlearn
 
 Erzeugt den Schlüssel für die Kali. Gib eine Passphrase ein; `ariadne-mac` startet ohne sie gar nicht. Lege den Schlüssel **nicht** in den Schlüsselbund (kein `--apple-use-keychain`, kein `UseKeychain yes`), sonst kann jedes Programm auf dem Mac ihn ohne Passphrase benutzen.
 
-Die Datei `~/.ssh/id_ed25519_kali_sl.pub` muss in die Kali. Am einfachsten über dein GitHub-Konto (Schlüssel dort hinterlegen, in der Kali `curl -fsS https://github.com/DEIN-NAME.keys`), sonst über die Datei-Übertragung von SmartLearn oder Abtippen. Speichere sie in der Kali als `~/mac.pub`.
+Die Datei `~/.ssh/id_ed25519_kali_sl.pub` muss in die Kali, als `~/mac.pub`. Am einfachsten über dein GitHub-Konto (Schlüssel dort hinterlegen), sonst über die Datei-Übertragung von SmartLearn oder Abtippen:
+
+```bash
+curl -fsS https://github.com/DEIN-NAME.keys > ~/mac.pub
+```
+
+GitHub liefert **alle** Schlüssel deines Kontos, ohne Kommentar. Behalte in `~/mac.pub` nur die Zeile des Mac-Schlüssels. Welche das ist, zeigt der Fingerprint: auf dem Mac `ssh-keygen -lf ~/.ssh/id_ed25519_kali_sl.pub`, in der Kali `ssh-keygen -lf ~/mac.pub` (eine Zeile pro Schlüssel). `kali-setup.sh` bricht ab, wenn in der Datei mehr als ein Schlüssel steht, und zeigt den Fingerprint des Schlüssels, den es einträgt; vergleiche ihn mit dem auf dem Mac. Ein anderer Schlüssel (etwa ein Alltagsschlüssel ohne Passphrase oder im Schlüsselbund) würde sonst Dashboard, `unlock` und Sicherung öffnen.
 
 ## 4 Sicherungsschlüssel auf dem Mac
 
@@ -125,7 +131,7 @@ Danach prüfen:
 ariadne remote check --full
 ```
 
-Fragt einmal nach dem sudo-Passwort und zeigt jede Prüfung mit `[ok]`, `[--]` (Warnung) oder `[!!]` (Fehler). Solange ein `[!!]` dasteht, gibt die Kali dem Mac keinen Code. Eine Warnung zu OpenSSH unter 9.8 ist kein Abbruch, die Kali bekommt das Update mit `apt`.
+Fragt einmal nach dem sudo-Passwort und zeigt jede Prüfung mit `[ok]`, `[--]` (Warnung) oder `[!!]` (Fehler). Solange eine Prüfung, die ohne root geht, `[!!]` meldet (Bindung, Hostkey-Marker, `authorized_keys`, Drop-in, Port 22 mit Filter-Unit und `ssh.socket`, Tailscale), gibt die Kali dem Mac keinen Code (R10). Nur `sshd -T` und die Filter-Tabelle selbst prüft erst `--full` mit sudo; ohne `--full` steht darum bei Port 22 immer die Warnung «Filter-Unit aktiv, Tabelle nicht geprüft» (die Unit bleibt «aktiv», auch wenn `nft flush ruleset` die Tabelle gelöscht hat, etwa bei einer Firewall-Übung). Nach solchen Übungen also `ariadne remote check --full`. Eine Warnung zu OpenSSH unter 9.8 ist kein Abbruch, die Kali bekommt das Update mit `apt`.
 
 **Andere Wege.** Weg A (offizieller Weg der Schule) geht mit `--weg a --allow 'ip saddr NETZ/MASKE'`, Weg C (eigener Server) mit `--weg c --server tunnel@DEIN-SERVER`; Details im Konzept 4.3 und 4.5.
 
@@ -151,6 +157,7 @@ Host kali-sl
   HostKeyAlias kali-smartlearn
   HostKeyAlgorithms ssh-ed25519
   StrictHostKeyChecking yes
+  ExitOnForwardFailure yes
   ControlMaster no
   ControlPath none
   ForwardAgent no
@@ -159,7 +166,7 @@ Host kali-sl
   ServerAliveCountMax 3
 ```
 
-`HostName` ist die Tailscale-Adresse der Kali aus Schritt 2, `User` dein Benutzer in der Kali. `ariadne-mac` liest nur diese Datei (`ssh -F ~/.ssh/ariadne.conf`), deine übrige SSH-Konfiguration spielt keine Rolle. Willst du auch von Hand `ssh kali-sl …` tippen, setzt du ganz oben in `~/.ssh/config` die Zeile `Include ariadne.conf`.
+`HostName` ist die Tailscale-Adresse der Kali aus Schritt 2, `User` dein Benutzer in der Kali. `ExitOnForwardFailure yes` lässt `ssh` abbrechen, wenn Port 7330 auf dem Mac schon belegt ist; sonst zeigte es den Code trotzdem, und ein fremdes Programm auf diesem Port bekäme die Eingaben im Browser. `ariadne-mac` liest nur diese Datei (`ssh -F ~/.ssh/ariadne.conf`), deine übrige SSH-Konfiguration spielt keine Rolle. Willst du auch von Hand `ssh kali-sl …` tippen, setzt du ganz oben in `~/.ssh/config` die Zeile `Include ariadne.conf`.
 
 **Erster Login, einmal mit Rückfrage:**
 
@@ -173,17 +180,19 @@ SSH zeigt den Fingerprint des Hostkeys. Nur wenn er Zeichen für Zeichen mit dem
 ariadne-mac check
 ```
 
-Prüft den Mac (FileVault, Schlüssel mit Passphrase, Hostkey bekannt, `StrictHostKeyChecking yes`, Port 7330 frei, Sicherungsordner, Sicherungsschlüssel verschlüsselt) und danach die Kali.
+Prüft den Mac (FileVault, Schlüssel mit Passphrase, Hostkey bekannt, `StrictHostKeyChecking yes`, Port 7330 frei, Sicherungsordner, Sicherungsschlüssel verschlüsselt) und danach die Kali. Dieselben SSH-Prüfungen laufen auch vor `start`, `unlock`, `backup` und `restore`; jeder `ssh`-Aufruf von `ariadne-mac` setzt zudem selbst `StrictHostKeyChecking=yes`.
 
 ## 7 Alltag
 
-**Session beginnen.** In der Kali wie immer `ariadne start …` in der Webkonsole. Ist die Kali neu gestartet und das Projekt noch aktiv, geht es auch vom Mac aus:
+**Session beginnen, immer zuerst vom Mac:**
 
 ```bash
 ariadne-mac unlock
 ```
 
-Fragt nach der Passphrase von Ariadne, im Terminal des Macs. Das aktive Projekt öffnet sich und die Aufnahme läuft wieder (E101, E102).
+Fragt nach der Passphrase von Ariadne, im Terminal des Macs, nie in der Webkonsole (E74). `ariadne-mac stop` hat am Ende der letzten Session gesperrt; `unlock` entsperrt wieder, das aktive Projekt öffnet sich, und die Aufnahme läuft (E101, E102). Das gilt auch nach einem Neustart der VM.
+
+Nur für ein **neues oder anderes Projekt** tippst du danach in der Webkonsole `ariadne start SLUG --target ZIEL` (bzw. `ariadne start SLUG` für ein vorhandenes). Weil Ariadne schon entsperrt ist, fragt `start` dann nicht mehr nach der Passphrase. Tippe die Passphrase nie in die Webkonsole: Dort können die Plattform und Erweiterungen im Konsolen-Browser mitlesen.
 
 **Dashboard öffnen:**
 
@@ -191,11 +200,13 @@ Fragt nach der Passphrase von Ariadne, im Terminal des Macs. Das aktive Projekt 
 ariadne-mac start
 ```
 
-Prüft den Mac, baut **eine** SSH-Verbindung auf, die den Code holt und den Tunnel trägt, prüft, dass Port 7330 jetzt wirklich diesem `ssh` gehört, und öffnet das Dashboard in deinem Standardbrowser. Der Code ist 60 Sekunden gültig und nur einmal; er steht nur in einer Startdatei mit Rechten 0600, die nach 10 Sekunden verschwindet. Die Anmeldung ist an genau diese SSH-Verbindung gebunden und hat die Herkunft «über sshd» (`ariadne ui --sessions` in der Kali zeigt sie).
+Prüft den Mac, lädt den Schlüssel in den Agent, falls er dort fehlt (die Passphrase des Schlüssels fragt dann `ssh-add` im Vordergrund; der Tunnel im Hintergrund fragt nie selbst), baut **eine** SSH-Verbindung auf, die den Code holt und den Tunnel trägt, prüft, dass Port 7330 jetzt wirklich diesem `ssh` gehört, und öffnet das Dashboard in deinem Standardbrowser. Der Code ist 60 Sekunden gültig und nur einmal; er steht nur in einer Startdatei mit Rechten 0600, die nach 10 Sekunden verschwindet. Die Anmeldung ist an genau diese SSH-Verbindung gebunden und hat die Herkunft «über sshd» (`ariadne ui --sessions` in der Kali zeigt sie).
 
 Der Browser ist dein normaler Browser (E93). Erweiterungen mit Zugriff auf alle Seiten können das Dashboard lesen; Secrets zeigt es darum verdeckt, und vor einer Bildschirmfreigabe schaltest du den Präsentationsmodus ein.
 
-**Pause.** Gehst du weg: in der Kali `ariadne lock` oder vom Mac `ssh -F ~/.ssh/ariadne.conf kali-sl lock`. Das beendet auch die Anmeldung im Dashboard.
+**Pause.** Gehst du weg: in der Kali `ariadne lock` oder vom Mac `ssh -F ~/.ssh/ariadne.conf kali-sl lock`. Das beendet auch die Anmeldung im Dashboard. Zurück: `ariadne-mac unlock`, dann `ariadne-mac start` (siehe «Neu anmelden»).
+
+**Neu anmelden.** Nach `lock`, nach dem Ende eines Projekts oder nach 12 Stunden zeigt das Dashboard wieder die Anmeldung, obwohl der Tunnel noch steht. Dann einfach wieder `ariadne-mac start`: Läuft der eigene Tunnel noch, baut es ihn neu auf und holt einen neuen Code, **ohne** zu sperren. `ariadne-mac stop` ist dafür falsch, es sperrt Ariadne.
 
 **Session beenden:**
 
@@ -207,7 +218,7 @@ Widerruft alle Anmeldungen, sperrt Ariadne (das Projekt bleibt aktiv), holt die 
 
 **Tunnel weg.** Klappst du den Mac zu oder wechselt das WLAN, endet die SSH-Verbindung und mit ihr die Anmeldung (E92). Das Dashboard zeigt dann wieder die Anmeldung. `ariadne-mac start` meldet dich neu an.
 
-**Ohne Helfer, von Hand:** `ssh -F ~/.ssh/ariadne.conf -t -L 127.0.0.1:7330:127.0.0.1:7330 kali-sl code` zeigt einen kurzen Tippcode (`ABCDE-FGHJK`). Dann im Browser `http://127.0.0.1:7330` öffnen und den Code eingeben. Ctrl-C im Terminal beendet Tunnel und Anmeldung.
+**Ohne Helfer, von Hand:** `ssh -F ~/.ssh/ariadne.conf -o ExitOnForwardFailure=yes -t -L 127.0.0.1:7330:127.0.0.1:7330 kali-sl code` zeigt einen kurzen Tippcode (`ABCDE-FGHJK`). Dann im Browser `http://127.0.0.1:7330` öffnen und den Code eingeben. Ctrl-C im Terminal beendet die Anmeldung sofort, auch wenn das Dashboard noch offen ist; der Tunnel schliesst sich, sobald der Browser seine Verbindungen schliesst (danach nur noch 401). Meldet `ssh` «Could not request local forwarding», ist Port 7330 auf dem Mac belegt: nichts eintippen, zuerst den Port frei machen.
 
 ## 8 Wiederherstellen nach einem VM-Reset
 
@@ -231,9 +242,9 @@ Die erste Zeile vergisst den alten Hostkey. Bei der zweiten nur `yes`, wenn der 
 ariadne-mac restore ~/Ariadne-Backups/kali-sl-DATUM.age
 ```
 
-Fragt, ob du den Hostkey geprüft hast, dann nach der Passphrase von `mac.key.age`. Der entschlüsselte Strom existiert nur in der Pipe. Die Kali prüft Manifest, Version und alle Hashes und schreibt erst, wenn alles stimmt.
+Fragt, ob du den Hostkey geprüft hast, dann nach der Passphrase von `mac.key.age`. Der entschlüsselte Strom existiert nur in der Pipe. Die Kali prüft Manifest, Version und alle Hashes und schreibt erst, wenn alles stimmt. Die Ausgabe zeigt pro Projekt «Kettenkopf SLUG: seq N HASH»: **Diesen Wert vergleichst du mit dem, den `ariadne-mac stop` bei der Sicherung angezeigt hat.** Kam `config.toml` mit zurück und lief der Daemon schon, gelten deren Einstellungen (etwa `[ui] port`) erst nach `ariadne daemon stop` in der Kali; die Ausgabe sagt es dann.
 
-6. **Ketten prüfen:** `ariadne-mac unlock`, dann in der Kali `ariadne project open SLUG` und `ariadne verify`. Den Kettenkopf vergleichst du mit dem Wert, den `ariadne-mac stop` bei der Sicherung angezeigt hat.
+6. **Ketten prüfen:** `ariadne-mac unlock`, dann in der Kali `ariadne start SLUG` (ohne `--target`, das Projekt gibt es ja) und `ariadne verify`. `verify` muss «in Ordnung» melden und zeigt «Kettenkopf beim letzten Schliessen … (in der Kette)»: Das ist der gesicherte Kopf, und er muss derselbe sein wie oben. Der Kettenkopf in der ersten Zeile von `verify` ist dagegen immer neuer, weil das Öffnen Einträge anhängt; ihn vergleichst du nicht.
 
 **Ohne Netzweg** (Tailscale geht noch nicht): Die `.age`-Datei per Datei-Übertragung in die VM bringen und dort aufrufen:
 
@@ -254,13 +265,18 @@ ariadne restore --from-file DATEI.age --identity -
 | `[!!] Hostkey der Kali unbekannt` | der erste Login fehlt | Schritt 6, «Erster Login» |
 | `Permission denied (publickey)` | Schlüssel nicht eingetragen, falscher `User`, oder die Verbindung kommt nicht aus dem Tailnet | `HostName` muss die `100.…`-Adresse sein; in der Kali `ariadne remote check` |
 | `ssh: connect to host … timed out` | Tailscale auf Mac oder Kali nicht verbunden | `tailscale status` auf beiden Seiten |
-| `[!!] Port 7330 belegt` | ein anderes Programm oder ein alter Tunnel hält den Port | `lsof -nP -iTCP:7330 -sTCP:LISTEN` zeigt wer; alten Tunnel mit `ariadne-mac stop --no-backup` schliessen |
+| `[!!] Port 7330 belegt` | ein anderes Programm oder ein Tunnel, den `ariadne-mac` nicht kennt (von Hand gestartet), hält den Port | `lsof -nP -iTCP:7330 -sTCP:LISTEN` zeigt wer; das Programm bzw. den `ssh` von Hand beenden. Den eigenen Tunnel baut `ariadne-mac start` selbst neu auf |
 | `kein Code von der Kali` | die Verbindung kam nicht zustande oder die Kali gab keinen Code | die letzten Zeilen darunter lesen; Protokoll in `~/Library/Application Support/ariadne-mac/tunnel.log` |
-| `Kein Code: Web-Oberfläche aus: …` | der Web-Server im Daemon läuft nicht, der Grund steht dahinter | in der Kali `ariadne status`; `[ui]` in `config.toml` prüfen |
+| `Kein Code: Web-Oberfläche aus: …` | der Web-Server im Daemon läuft nicht, der Grund steht dahinter | in der Kali `ariadne status` (Zeile «Web:» mit Adresse oder Grund); `[ui]` in `config.toml` prüfen, danach `ariadne daemon stop` |
 | `Kein Runtime-Ordner (XDG_RUNTIME_DIR fehlt …)` | kein `/run/user/UID`, weil niemand in der Kali angemeldet ist | in der Webkonsole anmelden oder einmal `sudo loginctl enable-linger $USER` |
 | `Daemon nicht erreichbar` | der Daemon startet nicht | in der Kali `ariadne status` und das Daemon-Log unter `~/.local/state/ariadne/` |
-| Dashboard zeigt wieder die Anmeldung | die Anmeldung endete: `lock`, Tunnel weg, Projekt beendet oder 12 Stunden um | `ariadne-mac start` |
-| `421` im Browser | falscher Host, zum Beispiel `localhost` statt `127.0.0.1` | immer `http://127.0.0.1:7330` |
+| Dashboard zeigt wieder die Anmeldung | die Anmeldung endete: `lock`, Tunnel weg, Projekt beendet, 12 Stunden um oder Ctrl-C bei `code` | gesperrt? zuerst `ariadne-mac unlock`; dann `ariadne-mac start` (baut einen laufenden Tunnel ohne Sperren neu auf) |
+| `421` im Browser | der Port im Browser ist nicht der `[ui] port` der Kali (`ARIADNE_MAC_PORT` auf dem Mac, `--port` bei `kali-setup.sh`), oder ein fremder Name statt `127.0.0.1`, `localhost` oder `[::1]` | `http://127.0.0.1:PORT` mit demselben Port wie in der Kali |
+| `Schlüssel nicht geladen (ssh-add)` | die Passphrase des Mac-Schlüssels war falsch oder die Abfrage wurde abgebrochen | `ariadne-mac start` noch einmal; die Passphrase fragt `ssh-add`, nie der Tunnel im Hintergrund |
+| `--key: genau ein Schlüssel nötig` (kali-setup.sh) | in `~/mac.pub` stehen mehrere Schlüssel, etwa alle aus GitHub | nur die Zeile mit dem Fingerprint des Mac-Schlüssels behalten (Schritt 3) |
+| `WARNUNG: N Dateien oder Ordner im Arbeitsbereich nicht gesichert` | Dateien eines anderen Benutzers oder ohne Leserecht (z. B. ein Ordner von root mit 0700) | `sudo chown -R "$USER" ~/ariadne/SLUG`, dann neu sichern. Dateien von root mit Leserecht (`sudo nmap -oA`) sichert Ariadne mit |
+| `Eine Datei im Arbeitsbereich von SLUG wurde während der Sicherung ersetzt, gekürzt oder am Anfang geändert` | ein Werkzeug schreibt die Datei neu (Wachsen allein ist erlaubt: gesichert wird der Stand beim ersten Lesen) | das Werkzeug beenden, dann `ariadne-mac backup` |
+| `Projekt SLUG: Gerade läuft eine Sicherung` | `unlock` oder `start` kam, während `ariadne-mac stop` bzw. `backup` noch sichert | warten, bis die Sicherung fertig ist, dann `ariadne start` |
 | `Sicherung fehlgeschlagen (project_open)` | ein Projekt ist offen | `ariadne-mac stop` sperrt vorher; von Hand `ssh -F ~/.ssh/ariadne.conf kali-sl lock` |
 | `Sicherung fehlgeschlagen (no_recipients)` | in der Kali sind keine Empfänger eingetragen | `kali-setup.sh … --recipient age1…` |
 | `Sicherungsordner … liegt in iCloud …` | der Ordner würde synchronisiert | anderen Ordner, zum Beispiel `~/Ariadne-Backups` (`ARIADNE_MAC_BACKUP_DIR`) |

@@ -212,6 +212,62 @@ def test_bad_arguments_change_nothing(root, args):
     assert snapshot(root) == before
 
 
+INJECT = "\nAllowStreamLocalForwarding yes\nPermitOpen any"
+
+
+@pytest.mark.parametrize("which", ["user", "home", "ariadne", "allow", "server", "key-line", "recipient",
+                                   "port", "tab"])
+def test_sec_s1_newline_in_any_argument_is_refused(root, mac_pub, which):
+    """SEC-S1: Die Prüfungen mit grep arbeiten zeilenweise; ein Wert mit Zeilenumbruch darf nie
+    durchkommen (sonst stünden eigene sshd-Zeilen im Drop-in oder ein zweiter Schlüssel ohne
+    restrict in authorized_keys). Abbruch vor jeder Änderung."""
+    evil_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEvilEvilEvilEvilEvilEvilEvilEvilEvilEvilEv evil"
+    kw: dict[str, str] = {}
+    args = ["--key-line", mac_pub]
+    if which == "user":
+        kw["user"] = "kali" + INJECT
+    elif which == "home":
+        kw["home"] = "/home/kali" + INJECT
+    elif which == "ariadne":
+        args += ["--ariadne", "/home/kali/.local/bin/ariadne\n" + evil_key]
+    elif which == "allow":
+        args += ["--weg", "a", "--allow", "ip saddr 10.0.0.0/8" + INJECT]
+    elif which == "server":
+        args += ["--weg", "c", "--server", "tunnel@example.org" + INJECT]
+    elif which == "key-line":
+        args = ["--key-line", mac_pub + "\n" + evil_key]
+    elif which == "recipient":
+        args += ["--recipient", age_recipient() + "\n" + age_recipient()]
+    elif which == "port":
+        args += ["--port", "7330\n7331"]
+    else:
+        kw["user"] = "kali\tx"
+    before = snapshot(root)
+    res = run_setup(root, *args, **kw)
+    assert res.returncode != 0
+    assert "Zeilenumbruch" in res.stderr or "Steuerzeichen" in res.stderr, res.stderr
+    assert snapshot(root) == before
+
+
+def test_f5_several_keys_in_key_file_are_refused_with_fingerprints(root, mac_pub, tmp_path):
+    """F5 (Anleitung): ``curl …/NAME.keys`` liefert alle Schlüssel des Kontos. Das Skript nimmt nie
+    still den ersten, sondern zeigt die Fingerprints und bricht ab; mit genau einem Schlüssel
+    zeigt es dessen Fingerprint zum Vergleich auf dem Mac."""
+    old = keypair(tmp_path / "alltag")
+    both = tmp_path / "github.keys"
+    both.write_text(f"{old}\n{mac_pub}\n")
+    before = snapshot(root)
+    res = run_setup(root, "--key", str(both))
+    assert res.returncode == 1 and "genau ein Schlüssel" in res.stderr
+    assert _fp(tmp_path / "alltag.pub") in res.stdout and _fp(tmp_path / "mac.pub") in res.stdout
+    assert snapshot(root) == before
+    one = tmp_path / "mac-only.pub"
+    one.write_text(mac_pub + "\n")
+    res = run_setup(root, "--key", str(one))
+    assert res.returncode == 0, res.stderr
+    assert f"Schlüssel des Macs: {_fp(tmp_path / 'mac.pub')}" in res.stdout
+
+
 def test_missing_include_is_an_error(root, mac_pub):
     (root / "etc/ssh/sshd_config").write_text("PasswordAuthentication yes\n")
     res = run_setup(root, "--key-line", mac_pub)

@@ -50,6 +50,7 @@ async def _all_reads(c: Any, pid: str) -> list[tuple[str, Any]]:
         "/search?q=admin",
         "/search?q=banner",
         "/search?q=sudo",
+        "/search?q=cracked",
         "/files/pending",
         "/ui/positions",
     ):
@@ -82,11 +83,29 @@ def _check_responses(responses: list[tuple[str, Any]]) -> None:
             assert clean(s), (path, s)
 
 
+async def _secret_in_command(d: Any, paths: Any, fx: Any) -> None:
+    """Befehl mit dem bekannten Secret CRYPT im Befehlstext (Pass-the-Hash, SEC-W1)."""
+    from tests.core.fakeshim import FakeShim
+    from tests.integration.helpers import Term
+
+    s = await FakeShim(paths.term_sock).connect(proto=2)
+    fx.shims.append(s)
+    await s.wait_state(rec="on")
+    t = Term(s)
+    await t.command(f"john --show '{CRYPT}'", b"cracked 1 password\r\n", cwd=str(fx.ws))
+    await t.acked()
+    await sync(d)
+
+
 def test_t8_t10_t11_no_secret_no_control_chars_anywhere(paths, operator):
     async def body(d, c, fx, bus, ctx):
         from ariadne.web.api import attach_sources
 
         detach = attach_sources(ctx)
+        await _secret_in_command(d, paths, fx)
+        tl = (await c.get(f"{BASE}/p/{fx.pid}/timeline?types=command&limit=1000")).json()["items"]
+        john = [it for it in tl if "john --show" in (it["cmd"]["text"] or "")]
+        assert john and "••••••••" in john[0]["cmd"]["text"]  # der Befehl ist da, das Secret verdeckt
         calls: list[str] = []
         orig = d.call
 
@@ -239,3 +258,32 @@ def test_later_routes_answer_501(paths, operator):
         assert r.status_code == 501
 
     run_api(paths, operator, body, fixture=False)
+
+
+def test_search_is_no_oracle_for_own_secrets_and_rejects_controls(paths, operator):
+    """SEC-W4: Ein Treffer, der nur dank eines eigenen Secrets entsteht, fällt weg (sonst verriete
+    die Suche, ob ein geratenes Wort ein eigenes Secret ist). SEC-W5: NUL und Steuerzeichen in
+    ``q`` ergeben 422, eine Sequenz über 2^63 beim Aufdecken ebenso (nie 500)."""
+
+    async def body(d, c, fx, bus, ctx):
+        P = f"{BASE}/p/{fx.pid}"
+        word = OWN_SECRET.split("-")[1]  # «Geheim», ein Teil des eigenen Secrets
+        for q in (OWN_SECRET, word, "Sudo-Geheim-4712", "Falsch-Wort-1"):
+            r = await c.get(f"{P}/search", params={"q": q})
+            assert r.status_code == 200 and r.json()["items"] == [], (q, r.text)
+        r = await c.get(f"{P}/search", params={"q": "sudo"})  # das Wort vor dem Secret bleibt findbar
+        assert [i["text"] for i in r.json()["items"]] == ["sudo ••••••••"]
+        for raw in ("%00", "a%00b", "a%09b", "%7F"):
+            r = await c.get(f"{P}/search?q={raw}")
+            assert r.status_code == 422 and r.json()["error"]["code"] == "validation", raw
+        for seq in (2**63, 10**20):
+            r = await c.post(f"{P}/secrets/reveal", json={"ref": "input", "seq": seq})
+            assert r.status_code == 422, (seq, r.text)
+        r = await c.post(f"{BASE}/terminals/{fx.shim.terminal_id}/context",
+                         json={"op": "set", "user": "x", "from_off": 2**64})
+        assert r.status_code == 422
+        from ariadne.web.api.decisions import _ints_fit
+
+        assert _ints_fit({"a": [1, -(2**63), 2**63 - 1, True]}) and not _ints_fit({"a": [{"b": 2**63}]})
+
+    run_api(paths, operator, body)

@@ -4,10 +4,18 @@
 
 Treffer zeigen die Zeile so, wie ``/units/{unit_id}/lines`` sie zeigt: bekannte und eigene Secrets
 verdeckt, SGR-verdeckter Text verdeckt, im Präsentationsmodus jeder Secret-Bereich.
+
+Die Volltextsuche läuft über die ungeschwärzten Zeilen (E72). Ein Treffer, der nur dank eines eigenen
+Secrets zustande kommt, würde verraten, ob ein geratenes Wort ein eigenes Secret ist (SEC-W4). Darum
+fallen Treffer weg, deren Zeile nach dem Ersetzen der eigenen Secrets die Suchphrase nicht mehr
+enthält (Wörter wie beim Tokenizer ``unicode61``: Buchstaben und Ziffern, Gross-/Kleinschreibung und
+Akzente egal).
 """
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -15,20 +23,47 @@ from starlette.responses import Response
 
 from ariadne.ingest import queries
 from ariadne.web.api.common import Api
+from ariadne.web.api.errors import ApiError
 from ariadne.web.api.evidence import render_rows, secret_spans
 from ariadne.web.api.text import Bag, iso
-from ariadne.web.api.timeline import secret_values
+from ariadne.web.api.views import with_secrets
 
-__all__ = ["add_routes", "search_view", "PENDING_MAX"]
+__all__ = ["add_routes", "search_view", "own_secret_hit", "PENDING_MAX"]
 
 PENDING_MAX = 200
+_WORD = re.compile(r"[^\W_]+")
+
+
+def _tokens(text: str) -> list[str]:
+    """Wörter etwa wie FTS5 ``unicode61`` (ohne Akzente, ohne Gross-/Kleinschreibung)."""
+    folded = unicodedata.normalize("NFKD", text.casefold())
+    plain = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return _WORD.findall(plain)
+
+
+def _has_phrase(words: list[str], phrase: list[str]) -> bool:
+    if not phrase:
+        return False
+    n = len(phrase)
+    return any(words[i : i + n] == phrase for i in range(len(words) - n + 1))
+
+
+def own_secret_hit(text: str, q: str, redactor: Any) -> bool:
+    """Wahr, wenn die Zeile die Phrase nur mit eigenen Secrets enthält (Treffer verwerfen)."""
+    if redactor is None:
+        return False
+    red, _labels = redactor.redact_for_exit(text)
+    if red == text:
+        return False
+    return not _has_phrase(_tokens(str(red)), _tokens(q))
 
 
 def search_view(
     conn: Any, q: str, limit: int, *, presentation: bool, redactor: Any, bag: Bag
 ) -> dict[str, Any]:
     hits = queries.search(conn, q, limit + 1)
-    secrets = secret_values(conn)
+    bag = with_secrets(bag, conn)
+    secrets = list(bag.known or ())
     spans: dict[str, dict[int, list[tuple[int, int]]]] = {}
     items: list[dict[str, Any]] = []
     for h in hits[:limit]:
@@ -36,7 +71,7 @@ def search_view(
             "SELECT pos, idx, text, flags, sgr FROM unit_line WHERE unit_id = ? AND n = ?",
             (h["unit_id"], h["n"]),
         ).fetchone()
-        if row is None:
+        if row is None or own_secret_hit(str(row[2]), q, redactor):
             continue
         uid = str(h["unit_id"])
         if presentation and uid not in spans:
@@ -50,7 +85,7 @@ def search_view(
             "kind": h.get("kind"),
             "context_label": b(h.get("context")) or "",
             "host_id": b(h.get("host")) if h.get("host") != "local" else None,
-            "cmd": b(h.get("cmd")),
+            "cmd": b.cmd(h.get("cmd")),
             "ts": iso(h.get("ts")),
         }
         item["ctrl"] = bool(line["ctrl"]) or b.ctrl
@@ -70,6 +105,8 @@ def add_routes(router: APIRouter, api: Api) -> None:
         d = api.daemon
         presentation = bool(d.presentation)
         red = d.redactor
+        if any(ch < " " or ch == "\x7f" for ch in q):  # NUL und Steuerzeichen: 422, nie 500 (SEC-W5)
+            raise ApiError("validation", [{"loc": ["query", "q"], "type": "control_char"}])
         if not q.strip():
             return await api.respond({"items": [], "truncated": False})
         res = await api.query(

@@ -407,6 +407,9 @@ def resolve_distrust(conn: Any, ref: str) -> str:
     cmd_id = resolve_cmd(conn, ref)
     if conn.execute("SELECT 1 FROM claim_source WHERE group_key = ? LIMIT 1", (cmd_id,)).fetchone() is None:
         raise NothingToUndo("aus diesem Befehl stammen keine Werte, nichts rückgängig zu machen")
+    if conn.execute("SELECT 1 FROM unit_distrust WHERE cmd_id = ?", (cmd_id,)).fetchone() is not None:
+        # Ein zweiter Entscheid hiesse: «Aufheben» mit der angezeigten decision_id hebt nur einen auf
+        raise NothingToUndo("dieser Befehl ist schon rückgängig gemacht (aufheben: d.revoke)")
     return cmd_id
 
 

@@ -448,14 +448,18 @@ def display_text(data: bytes, verdict: InputVerdict, *, reveal: bool = False) ->
 
 def input_view(rec: Any, output: bytes | None, *, reveal: bool = False) -> dict[str, Any]:
     """JSON-taugliche Sicht auf ein ``term.input``-Event (``EventRecord``). Mit ``reveal`` steht
-    der Klartext auch bei verdeckten Eingaben drin (``revealed = true``)."""
+    der Klartext auch bei verdeckten Eingaben drin (``revealed = true``).
+
+    ``length`` ist bei einer verdeckten, nicht aufgedeckten Eingabe ``None``: Die Bytezahl eines
+    Passworts plus Enter wäre sonst seine Länge (E104, web-api.md 1.3 «ohne Längenangabe»)."""
     h: Mapping[str, Any] = rec.header
     data = rec.body or b""
     verdict = classify(data, tty_no_echo=bool(h.get("no_echo")), output=output)
+    length = h.get("length", len(data)) if not verdict.hidden or reveal else None
     return {
         "seq": rec.seq, "terminal_id": rec.terminal_id, "stream_off": h.get("stream_off"),
         "out_end": h.get("out_end"), "t_shim_ns": h.get("t_shim_ns"), "mono_ns": h.get("mono_ns"),
-        "boot_id": rec.boot_id, "length": h.get("length", len(data)), "paste": bool(h.get("paste")),
+        "boot_id": rec.boot_id, "length": length, "paste": bool(h.get("paste")),
         "redacted": rec.body is None, "hidden": verdict.hidden, "reason": verdict.reason,
         "revealed": bool(reveal and verdict.hidden), "text": display_text(data, verdict, reveal=reveal),
     }

@@ -3,7 +3,9 @@
 Die Funktionen laufen im Thread der Auswertung (``ingest.query``) und bekommen eine offene
 Verbindung auf ``derived.db``. Sie lesen nur Sichten und Tabellen ohne Secret-Klartext
 (``v_claim`` maskiert Secret-Werte, ``secret_value`` liest nur das Aufdecken und die Maskierung
-von Logzeilen). Jeder Text aus Zieldaten geht durch eine :class:`~ariadne.web.api.text.Bag`.
+von Logzeilen und Befehlstexten). Jeder Text aus Zieldaten geht durch eine
+:class:`~ariadne.web.api.text.Bag`; Befehlstexte und daraus abgeleitete Titel zusätzlich durch
+:meth:`~ariadne.web.api.text.Bag.cmd` mit den bekannten Secrets (:func:`with_secrets`, SEC-W1).
 """
 
 from __future__ import annotations
@@ -19,6 +21,9 @@ from ariadne.web.api.text import Bag, iso
 
 __all__ = [
     "loads",
+    "secret_values",
+    "prompt_secret_texts",
+    "with_secrets",
     "stage_view",
     "stack_views",
     "breadcrumb",
@@ -69,6 +74,59 @@ def level(conf: Any) -> str | None:
     if isinstance(conf, int | float) and not isinstance(conf, bool):
         return confidence_level(float(conf))
     return None
+
+
+# --------------------------------------------------------------------------- bekannte Secrets
+
+
+def secret_values(conn: Any) -> list[str]:
+    """Bekannte Secret-Werte (``secret_value``), längste zuerst, nur zum Maskieren."""
+    vals = [
+        str(r[0]) for r in conn.execute("SELECT value FROM secret_value LIMIT 10000") if isinstance(r[0], str)
+    ]
+    return sorted((v for v in vals if len(v) >= 4), key=len, reverse=True)
+
+
+def prompt_secret_texts(conn: Any, limit: int = 20000) -> list[str]:
+    """Texte aller Secret-Bereiche, die Parser auf Prompt-Zeilen (Befehlsecho) gemeldet haben.
+
+    Für den Präsentationsmodus (Architektur 7.8): Was dort als Secret markiert ist, steht auch im
+    Befehlstext der Einheit und wird dort ebenfalls verdeckt."""
+    out: set[str] = set()
+    rows = conn.execute(
+        "SELECT unit_id, span_json FROM observation WHERE is_secret = 1 "
+        "UNION ALL SELECT unit_id, span_json FROM mention WHERE is_secret = 1 LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    for unit_id, span_json in rows:
+        span = loads(span_json, None)
+        if not isinstance(span, Mapping) or not isinstance(unit_id, str):
+            continue
+        a, b = span.get("line_start"), span.get("line_end")
+        if not isinstance(a, int) or not isinstance(b, int) or b < a or b - a > 10000:
+            continue
+        cs, ce = span.get("col_start"), span.get("col_end")
+        for idx, text in conn.execute(
+            "SELECT idx, text FROM unit_line WHERE unit_id = ? AND idx BETWEEN ? AND ? AND (flags & 1) = 1 "
+            "LIMIT 10001",
+            (unit_id, a, b),
+        ):
+            text = str(text)
+            start = cs if idx == a and isinstance(cs, int) else 0
+            end = ce if idx == b and isinstance(ce, int) and ce >= 0 else len(text)
+            piece = text[max(0, start) : max(0, end)].strip()
+            if len(piece) >= 4:
+                out.add(piece)
+    return sorted(out, key=len, reverse=True)
+
+
+def with_secrets(bag: Bag, conn: Any) -> Bag:
+    """Tasche mit den bekannten Secrets für Befehlstexte; im Präsentationsmodus dazu die
+    Secret-Bereiche aus Prompt-Zeilen."""
+    known = secret_values(conn)
+    if bag.presentation:
+        known += prompt_secret_texts(conn)
+    return bag.with_known(known)
 
 
 # --------------------------------------------------------------------------- Kontext
@@ -132,7 +190,7 @@ def command_ref(u: Mapping[str, Any], bag: Bag, src_ip: Any = None) -> dict[str,
     return {
         "cmd_id": cid,
         "cmd_ref": cmd_ref(cid),
-        "text": bag(u.get("cmd_text")),
+        "text": bag.cmd(u.get("cmd_text")),
         "started_at": iso(u.get("ts_utc_ns")),
         "ended_at": None if running else iso(u.get("ts_end_ns")),
         "exit": u.get("exit_code") if isinstance(u.get("exit_code"), int) else None,
@@ -157,7 +215,7 @@ def unit_brief(u: Mapping[str, Any] | None, bag: Bag, *, parser: Any = None) -> 
         "kind": kind,
         "cmd_id": u.get("cmd_id"),
         "cmd_ref": cmd_ref(u.get("cmd_id")),
-        "title": sub(title) or "",
+        "title": sub.cmd(title) or "",
         "terminal_id": u.get("terminal_id"),
         "parser": parser,
         "ts": iso(u.get("ts_utc_ns") or u.get("ts")),

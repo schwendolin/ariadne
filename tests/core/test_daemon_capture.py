@@ -287,6 +287,41 @@ def test_pause_expires_and_ctl_pause_resume_all(paths, operator):
     run(paths, operator, scenario, wall_clock=clock.wall)
 
 
+def test_web_pause_budget_30_minutes_per_hour_terminal_resets(paths, operator):
+    """Befund F9: Über das Web höchstens 30 Minuten Pause pro Stunde, auch über Verlängern oder
+    resume und neue Pause; eine Pause aus dem Terminal (CLI, Hotkey) setzt das Budget zurück."""
+    clock = Clock()
+
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "start", slug="lame", targets=["10.10.10.3"])
+        a = await FakeShim(paths.term_sock).connect(proto=2)
+        await a.wait_state(rec="on")
+        tid = a.terminal_id
+
+        async def web(minutes: int) -> dict[str, Any]:
+            return await ctl(paths.ctl_sock, "term.pause", terminal_id=tid, minutes=minutes, source="webui")
+
+        assert (await web(30))["ok"]
+        clock.shift += 29 * MIN
+        resp = await web(30)  # alle 29 Minuten verlängern: abgelehnt
+        assert resp["error"]["code"] == "policy" and "30 Minuten" in resp["error"]["message"]
+        await ctl_ok(paths.ctl_sock, "term.resume", terminal_id=tid, source="webui")
+        assert (await web(2))["error"]["code"] == "policy"  # resume und neue Pause: ebenso
+        await ctl_ok(paths.ctl_sock, "term.resume", terminal_id=tid, source="webui")
+        clock.shift += 31 * MIN  # die 29 Minuten Web-Pause liegen jetzt 31 bis 60 Minuten zurück
+        assert (await web(30))["ok"]
+        await ctl_ok(paths.ctl_sock, "term.resume", terminal_id=tid, source="webui")
+        assert (await web(30))["error"]["code"] == "policy"
+        await ctl_ok(paths.ctl_sock, "term.pause", terminal_id=tid, minutes=5)  # im Terminal (CLI)
+        assert (await web(30))["ok"]  # Bestätigung im Terminal: Budget von vorn
+        clock.shift += 26 * MIN
+        res = await ctl(paths.ctl_sock, "term.pause", all=True, minutes=5, source="webui")
+        assert res["error"]["code"] == "policy"  # 26 + 5 Minuten: abgelehnt, für alle oder keinen
+        await a.close()
+
+    run(paths, operator, scenario, wall_clock=clock.wall, mono_clock=clock.mono)
+
+
 def test_pause_survives_daemon_restart_via_hello(paths, operator):
     until = time.time_ns() + 5 * MIN
 

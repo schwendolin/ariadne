@@ -173,7 +173,9 @@ def test_restore_from_pipe_without_vault(paths, io_streams, monkeypatch):
     assert serve.main(paths, env("restore")) == 0
     assert seen == [b"klartext-strom"]
     assert "htb-lame" in out.getvalue() and "ssh -t kali-sl unlock" in out.getvalue()
-    assert "ariadne project open htb-lame" in out.getvalue()
+    assert "ariadne start htb-lame" in out.getvalue() and "ariadne verify" in out.getvalue()
+    assert "ariadne-mac stop" in out.getvalue()  # Vergleich mit dem Wert beim Sichern (F3)
+    assert "config.toml" not in out.getvalue()
     monkeypatch.setattr(sys, "stdin", Stream(tty=True))
     assert serve.main(paths, env("restore")) == serve.EXIT_REFUSED
 
@@ -223,7 +225,7 @@ def test_backup_stream_on_stdout_messages_on_stderr(paths, io_streams, monkeypat
 def test_lock_and_revoke(paths, io_streams, monkeypatch):
     out, _, _ = io_streams()
     client = FakeClient(result={"closed_project": True})
-    monkeypatch.setattr("ariadne.cli.common._client", lambda p, start=True: client)
+    monkeypatch.setattr("ariadne.cli.common._client", lambda p, start=True, timeout=3.0: client)
     assert serve.main(paths, env("lock")) == 0
     client.result = {"revoked": 2}
     assert serve.main(paths, env("revoke")) == 0
@@ -256,7 +258,7 @@ def test_check_prints_like_doctor(paths, io_streams, monkeypatch):
 def _code_setup(monkeypatch, client: FakeClient, *, ok: bool = True) -> list[int]:
     held: list[int] = []
     monkeypatch.setattr(check, "quick_ok", lambda p, system=None: ok)
-    monkeypatch.setattr("ariadne.cli.common._client", lambda p, start=True: client)
+    monkeypatch.setattr("ariadne.cli.common._client", lambda p, start=True, timeout=3.0: client)
     monkeypatch.setattr(serve, "HOLD", lambda ppid: held.append(ppid) or 0)
     return held
 
@@ -297,8 +299,21 @@ def test_t12_code_with_terminal_is_typed(paths, io_streams, monkeypatch):
     held = _code_setup(monkeypatch, client)
     assert serve.main(paths, env("code")) == 0
     assert client.calls == [("ui.code", {"typed": True, "via": "sshd"})]
-    assert "Code: ABCDE-FGHJK" in out.getvalue() and "Ctrl-C beendet den Zugang" in out.getvalue()
+    assert "Code: ABCDE-FGHJK" in out.getvalue() and "Ctrl-C beendet Tunnel und Anmeldung" in out.getvalue()
     assert len(held) == 1
+
+
+def test_code_end_revokes_the_sessions_of_this_connection(paths, io_streams, monkeypatch):
+    """SEC-R1/F4: Nach dem Halten (Ctrl-C, SIGTERM, Ende der Verbindung) widerruft ``code`` die an
+    diesen sshd-Prozess gebundenen Sitzungen und Codes; ein offener SSE-Strom hielte sie sonst."""
+    io_streams()
+    client = FakeClient(result={"code": "A" * 22, "expires_in": 60, "port": 7330, "via": "sshd",
+                                "bound": {"pid": 4242, "start": 777}})
+    _code_setup(monkeypatch, client)
+    monkeypatch.setattr(serve, "_silence_stdout", lambda: None)
+    assert serve.main(paths, env("code")) == 0
+    assert client.calls == [("ui.code", {"typed": False, "via": "sshd"}),
+                            ("ui.revoke", {"bound_pid": 4242, "bound_start": 777})]
 
 
 def test_t12_code_refused_when_quick_check_fails(paths, io_streams, monkeypatch):
@@ -314,7 +329,7 @@ def test_t12_code_refused_when_quick_check_fails(paths, io_streams, monkeypatch)
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setattr(sys, "stderr", err2)
     monkeypatch.setattr(sys, "stdin", Stream())
-    monkeypatch.setattr("ariadne.cli.common._client", lambda p, start=True: client)
+    monkeypatch.setattr("ariadne.cli.common._client", lambda p, start=True, timeout=3.0: client)
     assert serve.main(paths, env("code", ARIADNE_SETUP_ROOT="/nonexistent")) == serve.EXIT_UNREADY
     assert "Hostkey-Marker fehlt" in err2.getvalue() and client.calls == []
 
@@ -434,7 +449,7 @@ async def _wait_exit(pid: int, seconds: float) -> bool:
 
 
 @pytest.mark.web
-@pytest.mark.parametrize("end", ["parent", "sighup"])
+@pytest.mark.parametrize("end", ["parent", "sighup", "sigint_sshd_alive"])
 def test_t12_code_real_daemon_bound_to_sshd_and_holds(paths, operator, xdg, tmp_path, end):
     port = free_port()
     root = _ready_setup(tmp_path, paths, port)
@@ -473,9 +488,14 @@ def test_t12_code_real_daemon_bound_to_sshd_and_holds(paths, operator, xdg, tmp_
             if end == "parent":
                 os.kill(proc.pid, signal.SIGKILL)  # die Eltern-sshd endet (Tunnel zu)
             else:
-                os.kill(serve_pid, signal.SIGHUP)
+                os.kill(serve_pid, signal.SIGHUP if end == "sighup" else signal.SIGINT)
             assert await _wait_exit(serve_pid, 3), "remote serve code hält nach Ende der Verbindung weiter"
-            if end == "sighup":
+            if end == "sigint_sshd_alive":
+                # Ctrl-C unter ssh -t: sshd lebt weiter (ein SSE-Strom hielte den Tunnel), die
+                # Sitzung endet trotzdem sofort, ohne die 2-s-Prüfung (SEC-R1/F4)
+                rows = (await d.call("ui.sessions", {}))["result"]["sessions"]
+                assert rows == [], rows
+            if end != "parent":
                 os.kill(proc.pid, signal.SIGKILL)
             await asyncio.sleep(2.5)
             ext.check_now()
@@ -538,3 +558,21 @@ def test_t12_code_with_terminal_real_daemon(paths, operator, xdg, tmp_path):
             os.close(master)
 
     run(paths, operator, scenario, extensions=[ext], ingest=False)
+
+
+def test_restore_with_config_added_names_the_daemon_restart(paths, io_streams, monkeypatch):
+    """Befund F9 (Anleitung): Kam ``config.toml`` zurück, sagt ``restore`` vom Mac, dass ein schon
+    laufender Daemon sie erst nach einem Neustart liest (etwa ``[ui] port``)."""
+    from ariadne.backup.api import RestoreResult
+
+    out, err, _ = io_streams()
+    monkeypatch.setattr(sys, "stdin", Stream(data=b"strom"))
+    monkeypatch.setattr(
+        "ariadne.backup.api.restore_from_stream",
+        lambda inp, p: RestoreResult(projects=("lame",), operator_restored=True,
+                                     config_added=("config.toml",)),
+    )
+    monkeypatch.setattr("ariadne.daemon.client.CtlClient.ping", lambda self: True)
+    assert serve.main(paths, env("restore")) == 0, err.getvalue()
+    assert "gelten erst nach einem Neustart des Daemons" in out.getvalue()
+    assert "ariadne daemon stop" in out.getvalue()

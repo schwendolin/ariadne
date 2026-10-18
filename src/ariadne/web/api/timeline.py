@@ -19,9 +19,17 @@ from ariadne.ingest.seg_stream import record_time
 from ariadne.web.api.common import Api, valid_tid
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import MASK, Bag, decode_cursor, encode_cursor, iso, ns_str
-from ariadne.web.api.views import chunks, command_ref, loads
+from ariadne.web.api.views import chunks, command_ref, loads, secret_values, with_secrets
 
-__all__ = ["add_routes", "TYPES", "DEFAULT_TYPES", "timeline_page", "input_view", "UNITS_MAX"]
+__all__ = [
+    "add_routes",
+    "TYPES",
+    "DEFAULT_TYPES",
+    "timeline_page",
+    "input_view",
+    "secret_values",
+    "UNITS_MAX",
+]
 
 TYPES = ("command", "segment", "file", "keystep", "context", "decision", "gap", "project", "input")
 DEFAULT_TYPES = frozenset(TYPES) - {"input"}
@@ -84,7 +92,10 @@ def input_view(v: Mapping[str, Any], bag: Bag, secrets: list[str]) -> dict[str, 
         "out_end": v.get("out_end"),
         "ts": iso(v.get("t_shim_ns")),
         "ts_ns": ns_str(v.get("t_shim_ns")),
-        "length": int(v.get("length") or 0),
+        # verdeckt und nicht aufgedeckt: keine Länge (SEC-W3, E104)
+        "length": None
+        if v.get("hidden") and not v.get("revealed")
+        else int(v.get("length") or 0),
         "paste": bool(v.get("paste")),
         "redacted": bool(v.get("redacted")),
         "hidden": bool(v.get("hidden")),
@@ -101,14 +112,6 @@ def input_view(v: Mapping[str, Any], bag: Bag, secrets: list[str]) -> dict[str, 
         )
     )
     return out
-
-
-def secret_values(conn: Any) -> list[str]:
-    """Bekannte Secret-Werte (``secret_value``), längste zuerst, nur zum Maskieren."""
-    vals = [
-        str(r[0]) for r in conn.execute("SELECT value FROM secret_value LIMIT 10000") if isinstance(r[0], str)
-    ]
-    return sorted((v for v in vals if len(v) >= 4), key=len, reverse=True)
 
 
 def _entities(conn: Any) -> dict[str, str]:
@@ -521,6 +524,7 @@ def timeline_page(
     limit: int,
     bag: Bag,
 ) -> dict[str, Any]:
+    bag = with_secrets(bag, conn)  # Befehlstexte maskiert (SEC-W1)
     entries = _collect(conn, journal, types, terminal)
     queries.sort_time(entries, queries.boot_ranks(conn))  # dieselbe Ordnung wie ariadne show timeline (E96)
     entries.reverse()  # neueste zuerst

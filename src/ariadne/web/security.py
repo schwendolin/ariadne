@@ -93,7 +93,8 @@ _TOKEN_CHARS = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0
 
 # Feste deutsche Texte pro Code (web-api.md 1.5); nie Zieldaten, nie Text aus Ausnahmen.
 ERROR_TEXT: dict[str, str] = {
-    "unauthorized": "Nicht angemeldet oder Sitzung beendet. Neu anmelden: ariadne ui.",
+    "unauthorized": "Nicht angemeldet oder Sitzung beendet. Neu anmelden: in der Kali ariadne ui, "
+                    "vom Mac ariadne-mac start.",
     "forbidden": "Anfrage abgelehnt.",
     "policy": "Im Terminal erledigen; über das Web nicht erlaubt.",
     "not_found": "Nicht gefunden.",

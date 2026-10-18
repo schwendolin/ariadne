@@ -30,7 +30,7 @@ from ariadne.ingest.identity import host_identifier, normalize_identifier
 from ariadne.store.api import AppendItem
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError, validation_detail
-from ariadne.web.api.models import ConfirmGroupRequest, DecisionRequest
+from ariadne.web.api.models import INT64_MAX, ConfirmGroupRequest, DecisionRequest
 from ariadne.web.api.views import loads
 
 __all__ = ["add_routes", "WRITABLE", "CRITICAL", "LATER", "IdempotencyCache"]
@@ -95,6 +95,21 @@ def _bad(i: int, field: str, typ: str) -> ApiError:
     return ApiError("validation", [{"loc": ["body", "decisions", i, field], "type": typ}])
 
 
+def _ints_fit(obj: Any, depth: int = 0) -> bool:
+    """Jede Ganzzahl der Nutzlast passt in 64 Bit (sonst 422 statt eines Fehlers in SQLite)."""
+    if depth > 32:
+        return False
+    if isinstance(obj, bool):
+        return True
+    if isinstance(obj, int):
+        return -INT64_MAX - 1 <= obj <= INT64_MAX
+    if isinstance(obj, dict):
+        return all(_ints_fit(v, depth + 1) for v in obj.values())
+    if isinstance(obj, list | tuple):
+        return all(_ints_fit(v, depth + 1) for v in obj)
+    return True
+
+
 def _validate(i: int, kind: str, payload: dict[str, Any], profile: str, alone: bool) -> dict[str, Any]:
     """Nutzlast prüfen und normalisieren. Reihenfolge der Fehler: 422, 403, 501."""
     if not kind.startswith("d.") or kind not in events.KINDS or kind in _CTX:
@@ -109,6 +124,8 @@ def _validate(i: int, kind: str, payload: dict[str, Any], profile: str, alone: b
         raise _bad(i, "kind", "kind")
     if kind == "d.unit.distrust" and not alone:
         raise _bad(i, "kind", "distrust_alone")
+    if not _ints_fit(payload):
+        raise _bad(i, "payload", "int_range")
     if kind == "d.keystep.mark":
         if "terminal_id" in payload or "stream_off" in payload:
             raise _bad(i, "payload", "extra_forbidden")

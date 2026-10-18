@@ -262,4 +262,5 @@ def decode_manifest(data: bytes, installed_version: str) -> dict[str, Any]:
     if "operator/vault.json" not in seen:
         raise _bad("Operator-Tresor fehlt")
     _int(doc.get("skipped", 0))
+    _int(doc.get("unreadable", 0))
     return doc

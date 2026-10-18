@@ -7,17 +7,20 @@ T5 Header auf jeder Antwortart (R12). Dazu Peer-UID (R2), Grösse (413) und kapu
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pwd
 import shutil
 import socket
 import sys
+import threading
+import time
 
 import pytest
 
 from ariadne.web.config import UiConfigError
 from ariadne.web.security import OTHER_CSP, SHELL_CSP
-from ariadne.web.server import BindError, bind_socket, check_sockname
+from ariadne.web.server import MAX_PENDING_LOOKUPS, BindError, bind_socket, check_sockname
 from ariadne.web.static import STATIC_DIR
 from tests.core.fakeshim import ctl_ok
 from tests.web.server.helpers import Web, run_web, use_test_api
@@ -454,6 +457,133 @@ def test_r2_connection_of_foreign_uid_is_closed_without_answer(paths, operator):
         assert proc.returncode == 0, err
         assert out.strip() == b"b''"  # keine Antwort, Verbindung zu
         assert (await web.req("GET", "/")).status_code == 200  # der eigene Benutzer kommt durch
+
+    run_web(paths, operator, scenario)
+
+
+FLOOD = r"""
+import socket, sys, threading, time
+port, secs = int(sys.argv[1]), float(sys.argv[2])
+end = time.monotonic() + secs
+n = [0]
+def run():
+    while time.monotonic() < end:
+        try:
+            s = socket.create_connection(("127.0.0.1", port), timeout=1)
+            s.close()
+            n[0] += 1
+        except OSError:
+            pass
+ts = [threading.Thread(target=run) for _ in range(12)]
+for t in ts: t.start()
+for t in ts: t.join()
+print(n[0])
+"""
+
+
+@pytest.mark.skipif(os.getuid() != 0, reason="braucht root, um einen Prozess einer fremden UID zu starten")
+def test_sec_w2_flood_of_foreign_uid_does_not_stall_the_daemon(paths, operator, caplog):
+    """SEC-W2: Eine Verbindungsflut einer fremden UID hält ``ctl.sock`` nicht auf (Latenz unter
+    300 ms statt Sekunden), der eigene Benutzer kommt weiter durch, und das Log fasst zusammen."""
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="ariadne.web")
+    try:
+        other = next(p for p in pwd.getpwall() if p.pw_uid >= 1000 and p.pw_uid != 65534)
+    except StopIteration:
+        pytest.skip("kein unprivilegierter Benutzer vorhanden")
+    py = shutil.which("python3", path="/usr/bin:/bin") or sys.executable
+
+    async def scenario(web: Web) -> None:  # mit dem echten Resolver des Servers
+        proc = await asyncio.create_subprocess_exec(
+            py, "-I", "-c", FLOOD, str(web.port), "4", user=other.pw_uid, cwd="/",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await asyncio.sleep(0.5)
+        worst = 0.0
+        own = []
+        end = time.monotonic() + 3.0
+        while time.monotonic() < end:
+            t0 = time.monotonic()
+            await ctl_ok(paths.ctl_sock, "status")
+            worst = max(worst, time.monotonic() - t0)
+            if len(own) < 3:
+                t1 = time.monotonic()
+                own.append(((await web.req("GET", "/")).status_code, time.monotonic() - t1))
+            await asyncio.sleep(0.05)
+        out, err = await asyncio.wait_for(proc.communicate(), 20)
+        assert proc.returncode == 0, err
+        assert int(out) > 500, out  # die Flut war echt
+        assert web.ext.gate.rejected_total > 500
+        assert worst < 0.3, worst
+        assert all(code == 200 and dt < 2.0 for code, dt in own), own
+        lines = [r for r in caplog.records if "ohne passenden Peer" in r.getMessage()]
+        assert 1 <= len(lines) <= 3  # zusammengefasst, nicht eine Zeile pro Verbindung
+
+    run_web(paths, operator, scenario)
+
+
+def test_sec_w2_pending_lookups_are_bounded(paths, operator):
+    """Hängen die Suchen, schliesst der Server jede weitere neue Verbindung sofort."""
+    gate_open = threading.Event()
+
+    async def scenario(web: Web) -> None:
+        uid = os.getuid()
+
+        def slow(client, server):
+            gate_open.wait(10)
+            return PeerInfo(uid=uid, inode=1, pids=(os.getpid(),))
+
+        web.ext.gate.resolver = slow
+        held = [await asyncio.open_connection("127.0.0.1", web.port) for _ in range(MAX_PENDING_LOOKUPS)]
+        for _ in range(100):
+            if web.ext.gate.pending >= MAX_PENDING_LOOKUPS:
+                break
+            await asyncio.sleep(0.01)
+        t0 = time.monotonic()
+        out = await web.raw(f"GET / HTTP/1.1\r\nHost: 127.0.0.1:{web.port}\r\n\r\n".encode(), timeout=3)
+        assert out == b"" and time.monotonic() - t0 < 1.0  # sofort zu, ohne Antwort
+        gate_open.set()
+        for _, w in held:
+            w.close()
+        for _ in range(200):
+            if web.ext.gate.pending == 0:
+                break
+            await asyncio.sleep(0.01)
+        web.real_resolver()
+        assert (await web.req("GET", "/")).status_code == 200
+
+    from ariadne.web.peer import PeerInfo
+
+    try:
+        run_web(paths, operator, scenario)
+    finally:
+        gate_open.set()
+
+
+def test_rt1_keepalive_answers_without_nagle_delay(paths, operator):
+    """RT-1: 20 Anfragen über eine Keep-alive-Verbindung brauchen zusammen unter 0,4 s (mit Nagle
+    und verzögertem ACK wären es etwa 0,9 s); der angenommene Socket hat TCP_NODELAY."""
+
+    async def scenario(web: Web) -> None:
+        token = await web.login()
+        reader, writer = await asyncio.open_connection("127.0.0.1", web.port)
+        req = (f"GET /api/v1/test/whoami HTTP/1.1\r\nHost: 127.0.0.1:{web.port}\r\n"
+               f"Authorization: Bearer {token}\r\n\r\n").encode()
+        try:
+            t0 = time.monotonic()
+            for _ in range(20):
+                writer.write(req)
+                await writer.drain()
+                head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+                assert head.startswith(b"HTTP/1.1 200")
+                length = next(int(ln.split(b":", 1)[1]) for ln in head.split(b"\r\n")
+                              if ln.lower().startswith(b"content-length:"))
+                await asyncio.wait_for(reader.readexactly(length), 5)
+            assert time.monotonic() - t0 < 0.4
+        finally:
+            writer.close()
+        sock = web.ext.server.sock
+        assert sock is not None and sock.proto == socket.IPPROTO_TCP
 
     run_web(paths, operator, scenario)
 

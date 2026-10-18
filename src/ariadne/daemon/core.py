@@ -210,6 +210,11 @@ IDLE_CHECK_NS = 10_000_000_000
 ADDR_CHECK_NS = 30_000_000_000
 ADDR_MARK_NS = 1_000_000_000
 MAX_PAUSE_MIN = 240
+# Über das Web höchstens 30 Minuten Pause je Terminal innerhalb einer Stunde; mehr nur im Terminal
+# (Briefing 9.10, Vertrag 1.4 Punkt 5). Eine Pause oder Fortsetzung aus dem Terminal (Hotkey, CLI)
+# setzt das Budget zurück.
+WEB_PAUSE_MAX_MIN = 30
+WEB_PAUSE_WINDOW_MIN = 60
 _V1_REC = {"on": "on", "preroll": "waiting", "locked": "waiting"}
 # Grund einer Lücke, die der Daemon als Offset-Sprung sieht, nachdem die Aufnahme so endete.
 # Was im Vorlauf lag und nicht übernommen wurde, fehlt wegen «kein Projekt».
@@ -568,11 +573,12 @@ class Daemon:
             secrets.extend(self.operator.own_secrets)
         self.redactor.update_secrets(secrets)
 
-    def _lock_operator(self, *, notify: bool = True) -> None:
+    def _lock_operator(self, *, notify: bool = True, always: bool = False) -> None:
         """Tresor sperren. War er entsperrt, geht das Ereignis ``locked`` an die Listener (auch bei
         ``stop``, Leerlauf-Ende und gescheitertem ``start``; der Web-Server beendet dann alle
-        Sitzungen, E92)."""
-        was = self.operator is not None
+        Sitzungen, E92). ``always``: auch wenn er schon gesperrt war (``stop`` nach ``lock``:
+        eine danach angemeldete Web-Sitzung endet trotzdem, Befund F5)."""
+        was = self.operator is not None or always
         if self.operator is not None:
             self.operator.wipe()
         self.operator = None
@@ -1148,6 +1154,8 @@ class Daemon:
                 self._end_pause(t, off)
             if mark == "C" and local_before and t.recording:
                 self._check_local_addrs(on_mark=True)
+            if mark in ("A", "D") and header.get("fg_shell") and t.stack.is_local() and isinstance(off, int):
+                t.local_prompt_off = max(t.local_prompt_off, off)
         elif kind == "term.resize":
             t.rows, t.cols = int(header["rows"]), int(header["cols"])
         elif kind == "term.close":
@@ -1224,12 +1232,36 @@ class Daemon:
             t.pause_until_ns = t.pause_mono_until = None
             self._refresh(t)
 
+    def _web_pause_ok(self, t: Terminal, minutes: int) -> bool:
+        """Passt eine Web-Pause von ``minutes`` ins Budget (höchstens 30 Minuten Web-Pause im Fenster
+        einer Stunde, das mit dem Ende der neuen Pause endet)? Eine laufende Pause zählt nur bis
+        jetzt, denn die neue ersetzt sie."""
+        now = self._mono()
+        want = minutes * 60_000_000_000
+        end = now + want
+        lo = end - WEB_PAUSE_WINDOW_MIN * 60_000_000_000
+        used = sum(max(0, min(b, now, end) - max(a, lo)) for a, b in t.web_pauses)
+        return used + want <= WEB_PAUSE_MAX_MIN * 60_000_000_000
+
+    def _note_web_pause(self, t: Terminal, minutes: int, source: str) -> None:
+        now = self._mono()
+        if source != "webui":
+            t.web_pauses.clear()  # Bestätigung im Terminal: Budget von vorn
+            return
+        for iv in t.web_pauses:
+            iv[1] = min(iv[1], now)  # laufende Web-Pause endet jetzt (ersetzt oder fortgesetzt)
+        keep = now - WEB_PAUSE_WINDOW_MIN * 60_000_000_000
+        t.web_pauses[:] = [iv for iv in t.web_pauses if iv[1] > keep][-64:]
+        if minutes > 0:
+            t.web_pauses.append([now, now + minutes * 60_000_000_000])
+
     def _set_pause(self, t: Terminal, minutes: int | None, source: str) -> int | None:
         """``None`` schaltet um, 0 setzt fort, sonst Pause (neu oder verlängert). Gibt das Ende zurück."""
         now = self._wall()
         paused = self._user_paused(t)
         if minutes is None:
             minutes = 0 if paused else self.config.pause_minutes
+        self._note_web_pause(t, max(0, min(minutes, MAX_PAUSE_MIN)), source)
         if minutes <= 0:
             t.pause_until_ns = t.pause_mono_until = None
             self._refresh(t)
@@ -1297,6 +1329,21 @@ class Daemon:
             return 0
         return max(1, math.ceil((until - self._wall()) / 60_000_000_000))
 
+    @staticmethod
+    def _retro_touches_live(t: Terminal, from_off: int | None) -> bool:
+        """Ändert ein ``set`` ab ``from_off`` den Live-Stapel? Ohne ``from_off`` immer. Sonst nur,
+        wenn ``from_off`` in der obersten aktiven Stufe liegt: über einer erkannten Stufe ab ihrem
+        Beginn; auf der Kali-Basis nur, wenn seit ``from_off`` kein Prompt der Kali-Shell kam (das
+        Terminal steckt dann noch in der unerkannten Sitzung). Kam einer, ist die Sitzung vorbei:
+        der Entscheid gilt nur rückwirkend (Befund F2; sonst stünde der Zielhost im Titel, und der
+        nächste lokale Befehl gälte als entfernt)."""
+        if from_off is None:
+            return True
+        idx = t.stack._top_index()
+        if idx > 0:
+            return from_off >= t.stack.stages[idx].opened_at
+        return t.local_prompt_off <= from_off
+
     def _ctx_decision(self, t: Terminal, op: str, *, host: Any = None, user: Any = None,
                       stage_kind: Any = None, origin: str, source: str,
                       shim_off: Any = None, from_off: Any = None) -> dict[str, Any]:
@@ -1321,7 +1368,7 @@ class Daemon:
                 raise ValueError("nichts zu setzen")
             if from_off is not None and from_off > off:
                 raise ValueError("from_off liegt in der Zukunft")
-            if from_off is None or from_off >= t.stack.top().opened_at:
+            if self._retro_touches_live(t, from_off):
                 t.stack.set_top(host=host_n, user=user_n, kind=stage_kind, source=source, offset=off)
             start = off if from_off is None else from_off
             kind, header = "d.ctx.set", {"terminal_id": tid, "from_off": start, "host": host_n,
@@ -1522,15 +1569,19 @@ class Daemon:
         a = self.active
         if a is not None and not a["stopped"]:
             self._set_active(a["slug"], a["project_id"], stopped=True, end_reason=reason)
-        self._lock_operator()
+        self._lock_operator(always=True)
         self._refresh_all()
         return slug, head
 
-    def _adopt_preroll(self, p: OpenProject, *, outage_only: bool = False) -> dict[str, Any]:
+    def _adopt_preroll(self, p: OpenProject, *, outage_only: bool = False,
+                       outage_as_ask: bool = False) -> dict[str, Any]:
         """Vorlauf ins offene Projekt schreiben (E95). Gibt Terminals, Sekunden und Bytes zurück.
 
         ``outage_only``: nur Ausfallpuffer übernehmen (E102), den übrigen Vorlauf verwerfen.
-        ``outage_terminals`` zählt die übernommenen Ausfallpuffer.
+        ``outage_terminals`` zählt die übernommenen Ausfallpuffer. ``outage_as_ask``: ``p`` ist
+        nicht das Projekt, für das der Ausfallpuffer entstand; er gilt dann wie Vorlauf (nur mit
+        Zustimmung, und nur was an kein Projekt gebunden ist, E70). ``discarded_outage_terminals``
+        zählt die Ausfallpuffer, die dabei verworfen wurden (Befund F3).
         """
         bufs = []
         for tid in list(self.preroll.terminals()):
@@ -1538,16 +1589,19 @@ class Daemon:
             if buf is not None:
                 bufs.append(buf)
         bufs.sort(key=lambda b: b.oldest_mono() or 0)
-        done = {"terminals": 0, "seconds": 0, "bytes": 0, "outage_terminals": 0}
+        done = {"terminals": 0, "seconds": 0, "bytes": 0, "outage_terminals": 0,
+                "discarded_outage_terminals": 0}
         now = self._mono()
         for buf in bufs:
             tid = buf.terminal_id
             t = self.terminals.get(tid) or self._departed.get(tid)
             entries = [e for e in buf.entries if e.bound in (None, p.info.id)]
             departed = tid not in self.terminals
-            outage = buf.outage
+            outage = buf.outage and not outage_as_ask
             if (t is None or not entries or t.recording or (outage_only and not outage)
                     or (not departed and self.state_of(t) != "on")):
+                if buf.outage and buf.entries:
+                    done["discarded_outage_terminals"] += 1
                 buf.wipe()
                 continue
             try:
@@ -1873,14 +1927,18 @@ class Daemon:
         elif targets:
             targets_ignored = True
         before = self.project.info.slug if self.project is not None else None
+        active_before = self._active_id()
         outage = [t for t in self.terminals.values() if self._outage(t)]
         p = self._open_project(slug, refresh=False)
+        # Der Ausfallpuffer gehört zum Projekt, das beim Neustart aktiv war (E102). Ein anderes
+        # Projekt übernimmt ihn nie ohne Frage (E70, Befund F3): dann gilt er wie Vorlauf.
+        other = active_before is not None and active_before != p.info.id
         switched = before if before is not None and before != p.info.slug else None
         for t in outage:
             t.gap_hint = t.gap_hint or "daemon_down"  # was der Ausfallpuffer nicht mehr hat
         # Ausfallpuffer immer (E102), den übrigen Vorlauf nur auf Wunsch (E95, E103)
         info = self.preroll.info()
-        pre = self._adopt_preroll(p, outage_only=not adopt)
+        pre = self._adopt_preroll(p, outage_only=not adopt, outage_as_ask=other)
         pre["adopted"] = pre["terminals"] > 0
         if not adopt:
             pre["discarded_terminals"] = info["ask_terminals"]
@@ -1925,9 +1983,13 @@ class Daemon:
     def op_term_pause(self, args: dict[str, Any]) -> dict[str, Any]:
         minutes = _arg_int(args, "minutes", 1, MAX_PAUSE_MIN, self.config.pause_minutes)
         source = args.get("source") if args.get("source") in ("cli", "webui") else "cli"
+        targets = self._pause_targets(args)
+        if source == "webui" and not all(self._web_pause_ok(t, minutes) for t in targets):
+            raise OpError("policy", f"Über das Web höchstens {WEB_PAUSE_MAX_MIN} Minuten Pause pro Stunde; "
+                                    "länger im Terminal: ariadne pause")
         self._activity()
         out = []
-        for t in self._pause_targets(args):
+        for t in targets:
             until = self._set_pause(t, minutes, str(source))
             self._flash(t, f"Pause {minutes} min")
             out.append({"terminal_id": t.terminal_id, "until_ns": until})
@@ -2020,10 +2082,20 @@ class Daemon:
             raise OpError("invalid", str(exc)) from None
 
     def _ctx_retro(self, tid: str, args: dict[str, Any], from_off: Any, source: str) -> dict[str, Any]:
-        """Rückwirkendes ``d.ctx.set`` für ein Terminal, das nicht mehr verbunden ist."""
-        self._require_project()
+        """Rückwirkendes ``d.ctx.set`` für ein Terminal, das nicht mehr verbunden ist.
+
+        Nur für ein Terminal, das in diesem Projekt aufgenommen wurde (``term.open``), und nur für
+        einen Offset im aufgenommenen Strom (Befund F8: sonst verwaiste Einträge im Journal)."""
+        p = self._require_project()
         if type(from_off) is not int or from_off < 0:
             raise OpError("invalid", "from_off ungültig")
+        self.writer.flush_now()  # was noch im Writer liegt, zählt zum Strom
+        if not self._opened_before(p, tid):
+            raise OpError("unknown_terminal", "Terminal in diesem Projekt unbekannt")
+        ext = getattr(p.journal, "stream_extent", None)
+        end = int(ext(tid)) if callable(ext) else p.journal.stream_end(tid)
+        if from_off > end:
+            raise OpError("invalid", "from_off liegt hinter dem aufgenommenen Strom")
         host, user, kind = args.get("host"), args.get("user"), args.get("kind")
         try:
             host_n = normalize_host(host) if isinstance(host, str) and host.strip() else None
@@ -2070,8 +2142,18 @@ class Daemon:
         rep = p.journal.verify()
         blob_problems = p.blobs.verify()
         problems = rep.problems + blob_problems
-        return {"ok": rep.ok and not blob_problems, "events": rep.events, "head_seq": rep.head_seq,
-                "head_hash": rep.head_hash, "problems": problems[:100], "problem_count": len(problems)}
+        # Kettenkopf aus head.json (letztes Schliessen bzw. die Sicherung nach einem Restore): Steht
+        # genau dieses Event in der Kette? Nur diesen Wert vergleicht der Nutzer mit dem aus
+        # ariadne-mac stop; der aktuelle Kopf ist nach dem Öffnen immer neuer (Befund F3 Anleitung).
+        saved = p.saved_head() if callable(getattr(p, "saved_head", None)) else None
+        if saved is not None:
+            rec = p.journal.get(int(saved["seq"])) if saved["seq"] > 0 else None
+            saved["ok"] = rec is not None and rec.hash.hex() == saved["hash"]
+            if not saved["ok"]:
+                problems.append("Kettenkopf aus head.json (letztes Schliessen, Sicherung) fehlt in der Kette")
+        return {"ok": rep.ok and not blob_problems and (saved is None or saved["ok"]), "events": rep.events,
+                "head_seq": rep.head_seq, "head_hash": rep.head_hash, "saved_head": saved,
+                "problems": problems[:100], "problem_count": len(problems)}
 
     def op_redact(self, args: dict[str, Any]) -> dict[str, Any]:
         p = self._require_project()

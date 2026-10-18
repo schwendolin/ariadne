@@ -103,6 +103,33 @@ done
 # Prüfen der Angaben
 # --------------------------------------------------------------------------- #
 
+# Kein Wert darf einen Zeilenumbruch oder ein anderes Steuerzeichen enthalten: Die Prüfungen mit
+# grep arbeiten zeilenweise, und ein Wert mit Zeilenumbruch landete sonst als eigene Zeile im
+# Drop-in oder in authorized_keys (Befund SEC-S1).
+NL='
+'
+CR=$(printf '\r')
+no_ctrl() {
+    case $2 in
+        *"$NL"*|*"$CR"*) die "$1: Zeilenumbruch im Wert, abgebrochen" ;;
+    esac
+    if printf '%s' "$2" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+        die "$1: Steuerzeichen im Wert, abgebrochen"
+    fi
+}
+no_ctrl ARIADNE_SETUP_ROOT "$R"
+no_ctrl --weg "$WEG"
+no_ctrl --user "$USER_NAME"
+no_ctrl --home "$USER_HOME"
+no_ctrl --key "$KEY_FILE"
+no_ctrl --key-line "$KEY_LINE"
+no_ctrl --ariadne "$ARIADNE_BIN"
+no_ctrl --port "$PORT"
+no_ctrl --allow "$ALLOW"
+no_ctrl --recipient "$RECIPIENTS"
+no_ctrl --server "$SERVER"
+no_ctrl --server-port "$SERVER_PORT"
+
 if [ -n "$R" ]; then
     case $R in /*) ;; *) die "ARIADNE_SETUP_ROOT muss ein absoluter Pfad sein" ;; esac
     [ -d "$R" ] || die "ARIADNE_SETUP_ROOT ist kein Ordner: $R"
@@ -119,6 +146,7 @@ printf '%s' "$USER_NAME" | grep -Eq '^[a-z_][a-z0-9_.-]{0,31}$' || die "ungülti
 if [ -z "$USER_HOME" ]; then
     USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6) || true
     [ -n "$USER_HOME" ] || die "Benutzer $USER_NAME unbekannt (--home angeben)"
+    no_ctrl "Home aus /etc/passwd" "$USER_HOME"
 fi
 case $USER_HOME in /*) ;; *) die "--home muss absolut sein" ;; esac
 printf '%s' "$USER_HOME" | grep -Eq '^/[A-Za-z0-9/._-]+$' || die "Home-Pfad mit ungewöhnlichen Zeichen"
@@ -414,6 +442,12 @@ key_from_line() {
     }'
 }
 
+# Fingerprint (SHA256:...) eines Schlüssels "typ base64"; "?" ohne ssh-keygen.
+key_fp() {
+    fp=$(printf '%s %s\n' "$1" "$2" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}') || fp=""
+    printf '%s' "${fp:-?}"
+}
+
 # Schlüssel aus --key, --key-line oder der vorhandenen authorized_keys; prüft vor jeder Änderung.
 # Ergebnis in KEY_PARTS ("typ base64 kommentar") oder leer.
 resolve_key() {
@@ -421,6 +455,15 @@ resolve_key() {
     src=""
     if [ -n "$KEY_FILE" ]; then
         [ -f "$KEY_FILE" ] || die "--key: Datei fehlt: $KEY_FILE"
+        n=$(grep -cE '^(ssh-ed25519|sk-ssh-ed25519@openssh\.com) ' "$KEY_FILE") || n=0
+        if [ "$n" -gt 1 ]; then
+            # etwa alle Schlüssel eines GitHub-Kontos: nie still den ersten nehmen (Befund F5)
+            say "In $KEY_FILE stehen $n Schlüssel:"
+            grep -E '^(ssh-ed25519|sk-ssh-ed25519@openssh\.com) ' "$KEY_FILE" | while read -r t b _rest; do
+                say "  $(key_fp "$t" "$b")"
+            done
+            die "--key: genau ein Schlüssel nötig. Nur die Zeile behalten, deren Fingerprint auf dem Mac ssh-keygen -lf ~/.ssh/id_ed25519_kali_sl.pub zeigt."
+        fi
         src=$(grep -E '^(ssh-ed25519|sk-ssh-ed25519@openssh\.com) ' "$KEY_FILE" | head -n 1) || true
         [ -n "$src" ] || die "--key: keine Zeile mit ssh-ed25519 in $KEY_FILE"
     elif [ -n "$KEY_LINE" ]; then
@@ -454,6 +497,8 @@ step_keys() {
     fi
     # shellcheck disable=SC2086
     set -- $KEY_PARTS
+    say "Schlüssel des Macs: $(key_fp "$1" "$2") (auf dem Mac vergleichen:"
+    say "  ssh-keygen -lf ~/.ssh/id_ed25519_kali_sl.pub)"
     line="restrict,pty,port-forwarding,permitopen=\"127.0.0.1:$PORT\",command=\"$ARIADNE_BIN remote serve\" $1 $2"
     if [ -n "${3:-}" ]; then
         line="$line $3"

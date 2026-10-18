@@ -81,6 +81,48 @@ def test_bag_sets_ctrl_and_redacts_before_escaping():
     assert b.new().ctrl is False
 
 
+def test_bag_cmd_masks_known_secrets_and_refuses_without_list():
+    """SEC-W1: Befehlstexte nur mit geladener Secret-Liste, bekannte Werte ohne Längenangabe."""
+    from ariadne.web.api.text import MissingSecrets, mask_known
+
+    with pytest.raises(MissingSecrets):
+        Bag().cmd("crackmapexec -H 8846f7eaee8fb117ad06bdd830b7586c")
+    b = Bag(presentation=True).with_known(["8846f7ea", "8846f7eaee8fb117ad06bdd830b7586c"])
+    assert b.presentation and b.new().known == b.known
+    assert b.cmd("cme -H 8846f7eaee8fb117ad06bdd830b7586c x") == f"cme -H {MASK} x"
+    assert b.cmd(None) is None and mask_known("abc", ["b"]) == f"a{MASK}c"
+
+
+def test_prompt_secret_texts_and_with_secrets_in_presentation():
+    """Im Präsentationsmodus verdecken Secret-Bereiche aus Prompt-Zeilen auch den Befehlstext."""
+    import sqlite3
+
+    from ariadne.web.api.views import prompt_secret_texts, secret_values, with_secrets
+
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        "CREATE TABLE secret_value (secret_ident, kind, value);"
+        "CREATE TABLE observation (unit_id, span_json, is_secret);"
+        "CREATE TABLE mention (unit_id, span_json, is_secret);"
+        "CREATE TABLE unit_line (unit_id, idx, text, flags);"
+    )
+    conn.execute("INSERT INTO secret_value VALUES ('s1', 'hash', 'aad3b435b51404ee'), ('s2', 'x', 'abc')")
+    line = "kali$ cme smb 10.0.0.1 -H 8846f7eaee8fb117ad06bdd830b7586c"
+    col = line.index("8846")
+    conn.execute(
+        "INSERT INTO mention VALUES ('u1', ?, 1)",
+        (json.dumps({"line_start": 0, "line_end": 0, "col_start": col, "col_end": col + 32}),),
+    )
+    conn.execute("INSERT INTO mention VALUES ('u1', ?, 0)", (json.dumps({"line_start": 0, "line_end": 0}),))
+    conn.execute("INSERT INTO unit_line VALUES ('u1', 0, ?, 1)", (line,))
+    conn.execute("INSERT INTO unit_line VALUES ('u1', 1, 'ausgabe 8846f7eaee8fb117ad06bdd830b7586c', 0)")
+    assert secret_values(conn) == ["aad3b435b51404ee"]  # kürzer als 4 Zeichen zählt nicht
+    assert prompt_secret_texts(conn) == ["8846f7eaee8fb117ad06bdd830b7586c"]
+    cmd = "cme smb 10.0.0.1 -H 8846f7eaee8fb117ad06bdd830b7586c"
+    assert with_secrets(Bag(), conn).cmd(cmd) == cmd  # ohne Präsentationsmodus: nur secret_value
+    assert with_secrets(Bag(presentation=True), conn).cmd(cmd) == f"cme smb 10.0.0.1 -H {MASK}"
+
+
 def test_deep_visible_reaches_keys_and_nested_values():
     out = deep_visible({"k\x1b": ["v\u202e", {"x": "\x07"}], "n": 1, "t": None})
     assert out == {"k<ESC>": ["v<U+202E>", {"x": "<BEL>"}], "n": 1, "t": None}

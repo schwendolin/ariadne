@@ -88,10 +88,10 @@ Alles, was ein Ziel beeinflussen kann (Hostnamen, Banner, Titel, Versionen, Befe
 
 - **Nur als JSON-String**, nie als HTML, Markdown oder URL zum Anklicken. Ziel-URLs stehen als Text da.
 - **Steuerzeichen sichtbar**: Der Server ersetzt C0, C1, DEL, Bidi-, Zero-Width- und Tag-Zeichen in jedem String aus Zieldaten wie `term_safe` (`<ESC>`, `<BEL>`, `<U+202E>`) und setzt am Objekt `ctrl: true`. Die UI wendet `displaySafe()` trotzdem an (zweite Schicht, ändert sichtbaren Text nicht). Gekürzt wird nur, wo die Route es nennt; der volle Wert steht im Detail.
-- **Secrets maskiert**: Secret-Werte als `"••••••••"` ohne Längenangabe. Klartext gibt es nur über eine ausdrückliche Aufdeck-Aktion für genau einen Wert (13.3), nur im Profil lab und nicht im Präsentationsmodus.
+- **Secrets maskiert**: Secret-Werte als `"••••••••"` ohne Längenangabe. Klartext gibt es nur über eine ausdrückliche Aufdeck-Aktion für genau einen Wert (13.3), nur im Profil lab und nicht im Präsentationsmodus. Das gilt auch für Befehlstexte und daraus abgeleitete Titel (`CommandRef.text`, `UnitBrief.title`, `cmd` der Suche, `last_command` der Terminals, Gruppen der Arbeitsliste): Bekannte Secret-Werte, die ein Parser irgendwo als Secret erkannt hat (etwa ein NTLM-Hash in einem Pass-the-Hash-Befehl), stehen dort als `"••••••••"` (geändert im Bau v0.1-Server, Korrektur SEC-W1).
 - **Eigene Secrets** (sudo-Passwort, Passphrase, Recovery-Code) ersetzt der Server an jedem Ausgang mit `Redactor.redact_json` (E72), auch in aufgedeckten Werten. Über HTTP gibt es sie nie im Klartext.
-- **Präsentationsmodus** (Architektur 7.8): Der Server maskiert zusätzlich alle Secret-Bereiche in Logzeilen und Eingaben und verweigert jedes Aufdecken (403 `policy`).
-- **Eingaben ohne Echo** (E104) erscheinen als `"••••••••"` (Abschnitt 10.3).
+- **Präsentationsmodus** (Architektur 7.8): Der Server maskiert zusätzlich alle Secret-Bereiche in Logzeilen und Eingaben, in Befehlstexten auch den Text jedes Secret-Bereichs, den ein Parser in einer Prompt-Zeile gemeldet hat, und verweigert jedes Aufdecken (403 `policy`).
+- **Eingaben ohne Echo** (E104) erscheinen als `"••••••••"`, mit `length: null` (Abschnitt 10.3).
 
 ### 1.4 Bezeichner
 
@@ -327,7 +327,7 @@ interface PauseRequest { minutes?: number }   // Standard 10, höchstens 30
 interface Accepted { accepted: true }
 ```
 
-Eine Pause über 30 Minuten gibt es über das Web nicht (Briefing 9.10, kritische Operation): 403 `policy`; im Terminal geht sie mit `ariadne pause --minutes N` (bis 240). Den neuen Zustand zeigt die UI erst nach dem SSE-Ereignis `terminal` (bis dahin «wartet auf Bestätigung»; nach 5 s ohne Ereignis lädt sie `/status`). Fehler: 404 (Terminal unbekannt), 422.
+Eine Pause über 30 Minuten gibt es über das Web nicht (Briefing 9.10, kritische Operation): 403 `policy`; im Terminal geht sie mit `ariadne pause --minutes N` (bis 240). Das gilt auch für die Summe: Pro Terminal zählt der Daemon die Web-Pausen der letzten Stunde (bis zum Ende der neuen Pause); mehr als 30 Minuten darin ergeben ebenfalls 403 `policy`, auch über Verlängern oder `resume` und neue Pause. Eine Pause oder Fortsetzung im Terminal (Hotkey, CLI) setzt diese Summe zurück (geändert im Bau v0.1-Server, Korrektur F9). Den neuen Zustand zeigt die UI erst nach dem SSE-Ereignis `terminal` (bis dahin «wartet auf Bestätigung»; nach 5 s ohne Ereignis lädt sie `/status`). Fehler: 404 (Terminal unbekannt), 422.
 
 ### POST /api/v1/terminals/{tid}/resume [v0.1]
 
@@ -650,7 +650,7 @@ interface InputView {
   terminal_id: string;
   stream_off: number; out_end: number;
   ts: string; ts_ns: string;
-  length: number;                     // Bytes
+  length: number | null;              // Bytes; null, solange hidden und nicht aufgedeckt (geändert im Bau v0.1-Server, Korrektur SEC-W3)
   paste: boolean;
   redacted: boolean;                  // Body geschwärzt (ariadne redact)
   hidden: boolean;                    // ohne Echo: nur verdeckt
@@ -778,7 +778,7 @@ Im Profil lab ist «Bestätigen» leer; die Route gibt es trotzdem. Fehler: 404 
 
 ### GET /api/v1/p/{pid}/search?q=&limit= [v0.1]
 
-Volltextsuche über die aufgenommene Ausgabe (ohne Prompt-Echo), als Phrase; bekannte Secrets maskiert (`queries.search`). `q` 1 bis 200 Zeichen, `limit` Standard 50, höchstens 200. Die Befehlspalette sucht Ansichten, Hosts und Befehle in den geladenen Daten selbst und ruft diese Route nur für den Rohlog.
+Volltextsuche über die aufgenommene Ausgabe (ohne Prompt-Echo), als Phrase; bekannte Secrets maskiert (`queries.search`). `q` 1 bis 200 Zeichen ohne Steuerzeichen (NUL, Tab, DEL: 422), `limit` Standard 50, höchstens 200. Treffer, deren Zeile die Phrase nur mit einem eigenen Secret enthält, fallen weg: Die Suche verrät so nie, ob ein geratenes Wort ein eigenes Secret ist (geändert im Bau v0.1-Server, Korrektur SEC-W4). Das Feld `cmd` ist wie jeder Befehlstext maskiert (1.3). Die Befehlspalette sucht Ansichten, Hosts und Befehle in den geladenen Daten selbst und ruft diese Route nur für den Rohlog.
 
 ```ts
 interface SearchResult { items: { unit_id: string; line: number; text: string; ctrl: boolean;

@@ -219,3 +219,25 @@ def test_ui_against_a_real_daemon_process(tmp_path_factory):
         end = time.monotonic() + 10
         while time.monotonic() < end and CtlClient(paths.ctl_sock, timeout=1).ping():
             time.sleep(0.05)
+
+
+def test_status_line_names_web_address_or_reason(monkeypatch, paths):
+    """Befund F11: ``ariadne status`` zeigt die Web-Oberfläche (Adresse oder Grund, warum aus)."""
+    from ariadne.cli import main as cli_main
+
+    answers = iter([
+        {"running": True, "host": "127.0.0.1", "port": 7330, "error": None, "sessions": 1},
+        {"running": True, "host": "::1", "port": 7444, "error": None, "sessions": 2},
+        {"running": False, "host": "127.0.0.1", "port": None, "error": "Port belegt \x1b[2J", "sessions": 0},
+    ])
+    monkeypatch.setattr(cli_main, "_call", lambda paths, op, **kw: next(answers))
+    assert cli_main._web_line(paths) == "Web:      läuft auf http://127.0.0.1:7330 (1 Sitzung)"
+    assert cli_main._web_line(paths) == "Web:      läuft auf http://[::1]:7444 (2 Sitzungen)"
+    line = cli_main._web_line(paths)
+    assert line.startswith("Web:      aus (Port belegt") and "\x1b" not in line
+
+    def boom(paths, op, **kw):
+        raise CliError("Daemon läuft nicht")
+
+    monkeypatch.setattr(cli_main, "_call", boom)
+    assert cli_main._web_line(paths).startswith("Web:      aus (im Daemon nicht geladen")

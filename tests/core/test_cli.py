@@ -130,6 +130,7 @@ def test_cli_full_flow_and_canary(cli_env, tmp_path):
 
     res = _cli(env, "status")
     assert "entsperrt (tester)" in res.stdout and "Projekt:  -" in res.stdout
+    assert "Web:      aus (im Daemon nicht geladen" in res.stdout  # ARIADNE_WEB=0 in den Tests
 
     res = _cli(env, "secrets", "add", "eigen", secret=own, fd_flag="--value-fd")
     assert res.returncode == 0 and "eigen" in res.stdout and own not in res.stdout
@@ -395,3 +396,19 @@ def test_cli_start_stop_messages_from_review(tmp_path):
             if proc.stdout:
                 proc.stdout.close()
         _daemon_down(paths)
+
+
+def test_preroll_choice_counts_outage_only_for_another_project(monkeypatch, tmp_path):
+    """Befund F3: Startet ``ariadne start other`` ein anderes Projekt als das aktive, fragt die CLI
+    auch nach dem Ausfallpuffer (er gilt dann wie Vorlauf); beim aktiven Projekt nicht (E102)."""
+    from ariadne.cli import main as cli_main
+
+    info = {"ask_terminals": 0, "ask_seconds": 0, "outage_terminals": 1, "outage_seconds": 300}
+    monkeypatch.setattr(cli_main, "_call", lambda paths, op, **kw: dict(info))
+    assert cli_main._preroll_choice(None, "yes") == (False, False)
+    assert cli_main._preroll_choice(None, "yes", other_project=True) == (True, False)
+    assert cli_main._preroll_choice(None, "no", other_project=True) == (False, False)
+    out: list[str] = []
+    monkeypatch.setattr(cli_main, "say", out.append)
+    cli_main._say_preroll({"discarded_outage_terminals": 2}, "ask", False)
+    assert out and out[0].startswith("Ausfallpuffer verworfen: 2 Terminals")

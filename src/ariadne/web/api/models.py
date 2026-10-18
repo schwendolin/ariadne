@@ -29,6 +29,7 @@ __all__ = [
 ]
 
 MAX_WEB_PAUSE_MIN = 30  # länger nur im Terminal (Briefing 9.10, Vertrag 1.4 Punkt 5)
+INT64_MAX = 2**63 - 1  # grösste Ganzzahl, die SQLite und das Journal speichern (SEC-W5)
 
 
 class _In(BaseModel):
@@ -52,7 +53,7 @@ class SetOp(_In):
     host: _Host | None = None
     user: _User | None = None
     kind: StageKind | None = None
-    from_off: int | None = Field(default=None, ge=0)
+    from_off: int | None = Field(default=None, ge=0, le=INT64_MAX)
 
 
 class PushOp(_In):
@@ -90,7 +91,7 @@ class ConfirmGroupRequest(_In):
 
 class RevealInput(_In):
     ref: Literal["input"]
-    seq: int = Field(ge=1)
+    seq: int = Field(ge=1, le=INT64_MAX)
 
 
 class RevealClaim(_In):

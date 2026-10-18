@@ -121,6 +121,11 @@ class Terminal:
     pause_until_ns: int | None = None  # Pause des Nutzers (E22), Wanduhr
     pause_mono_until: int | None = None  # dieselbe Frist auf der monotonen Uhr des Daemons
     pause_source: str = "hotkey"
+    # Stromposition des letzten Prompts der Kali-Shell (Marker A/D, fg_shell) bei lokalem Stapel:
+    # danach war das Terminal sicher wieder in Kali (rückwirkendes ``set``, Befund F2)
+    local_prompt_off: int = -1
+    # Web-Pausen (monotone Uhr: Beginn, Ende) für das Budget «30 Minuten pro Stunde» (Befund F9)
+    web_pauses: list[list[int]] = field(default_factory=list)
     mux: bool = False  # Multiplexer-Client im Vordergrund (nur Anzeige)
     last_mono: int | None = None  # monotone Shim-Zeit des letzten Rahmens (time_suspect)
     frame_offs: list[int] = field(default_factory=list)

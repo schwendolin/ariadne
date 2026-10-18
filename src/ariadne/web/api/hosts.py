@@ -28,7 +28,15 @@ from ariadne.web.api.graph import (
     thread_edges,
 )
 from ariadne.web.api.text import Bag, iso
-from ariadne.web.api.views import claim_rows, command_ref, conflict_rows, conflict_view, fact_view, loads
+from ariadne.web.api.views import (
+    claim_rows,
+    command_ref,
+    conflict_rows,
+    conflict_view,
+    fact_view,
+    loads,
+    with_secrets,
+)
 
 __all__ = ["add_routes", "services_view", "FACTS_MAX", "COMMANDS_MAX"]
 
@@ -149,6 +157,7 @@ def _open_items(conn: Any, host: str, idents: set[str]) -> list[str]:
 
 def _commands(conn: Any, host: str, idents: set[str], bag: Bag) -> list[dict[str, Any]]:
     """Befehle in diesem Kontext (Stufe mit diesem Host, auch Auto-Host), neueste zuerst."""
+    bag = with_secrets(bag, conn)  # Befehlstexte maskiert (SEC-W1)
     auto = {
         (str(r[0]), int(r[1])): str(r[2])
         for r in conn.execute("SELECT terminal_id, opened_at, host FROM ctx_auto")

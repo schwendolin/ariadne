@@ -362,9 +362,12 @@ def _read_code(proc: subprocess.Popen[bytes], seconds: float = 40) -> str:
     return line.decode("ascii", "replace").rstrip("\n")
 
 
-def _tunnel(kali: Kali, local: int) -> tuple[subprocess.Popen[bytes], str]:
-    """Eine Verbindung für Code und Tunnel, wie ariadne-mac start (Vertrag 1.4 Punkt 10)."""
-    for _ in range(2):  # der erste Aufruf startet den Daemon; braucht er länger, hilft ein zweiter
+def _tunnel(kali: Kali, local: int, *, retry: bool = True) -> tuple[subprocess.Popen[bytes], str]:
+    """Eine Verbindung für Code und Tunnel, wie ariadne-mac start (Vertrag 1.4 Punkt 10).
+
+    ``retry=False`` für den Kaltstart: ariadne-mac start versucht es auch nur einmal, darum muss
+    der erste Code nach dem Start des Daemons ohne Wiederholung kommen (Befund RT-3)."""
+    for _ in range(2 if retry else 1):
         proc = kali.popen_ssh(
             "-n",
             "-o",
@@ -380,7 +383,7 @@ def _tunnel(kali: Kali, local: int) -> tuple[subprocess.Popen[bytes], str]:
         _stop(proc)
         assert proc.stderr is not None
         err = proc.stderr.read().decode(errors="replace")
-        if "Daemon" not in err:
+        if "Daemon" not in err or not retry:
             raise AssertionError(
                 f"kein Code: {code!r} {err} {kali.sshd_log.read_text(errors='replace')[-3000:]}"
             )
@@ -484,7 +487,8 @@ def test_t13_restricted_key_refuses_everything_but_the_tunnel(kali):
 
 def test_t13_code_tunnel_status_sse_and_end_with_tunnel(kali):
     local = free_port()
-    tunnel, code = _tunnel(kali, local)
+    assert not (kali.run_dir / "ariadne" / "ctl.sock").exists()  # Kaltstart wie nach einem VM-Neustart
+    tunnel, code = _tunnel(kali, local, retry=False)
     try:
         # remote serve code hat den Daemon gestartet: ohne geerbte Signalsperre (SIGTERM, SIGHUP wirken)
         mask = kali.daemon_signal_mask()
@@ -537,6 +541,65 @@ def test_t13_code_tunnel_status_sse_and_end_with_tunnel(kali):
             assert b"[ok] authorized_keys: ein eingeschr" in res.stdout
     finally:
         _stop(tunnel2)
+
+
+def _serve_pids(kali: Kali) -> list[int]:
+    out = []
+    for e in os.listdir("/proc"):
+        if not e.isdigit():
+            continue
+        try:
+            if os.stat(f"/proc/{e}").st_uid != kali.pw.pw_uid:
+                continue
+            with open(f"/proc/{e}/cmdline", "rb") as fh:
+                cmd = fh.read()
+        except OSError:
+            continue
+        if b"remote\0serve" in cmd:
+            out.append(int(e))
+    return out
+
+
+def test_t13_ctrl_c_on_code_ends_the_session_although_a_stream_keeps_the_tunnel(kali):
+    """SEC-R1/F4: Ctrl-C unter ``ssh -t … code`` (SIGINT an ``remote serve``) beendet die Anmeldung,
+    auch wenn ein offener SSE-Strom den Tunnel und den sshd-Prozess am Leben hält; danach 401
+    über eine neue Verbindung durch denselben Tunnel."""
+    local = free_port()
+    tunnel, code = _tunnel(kali, local)
+    try:
+        token = _login(kali, local, code)
+        auth = {"Authorization": f"Bearer {token}"}
+        ended = threading.Event()
+
+        def sse() -> None:
+            try:
+                with _client(kali, local) as c, c.stream(
+                    "GET", "/api/v1/events", headers=auth, timeout=httpx.Timeout(10, read=60)
+                ) as r:
+                    for _ in r.iter_text():
+                        pass
+            except Exception:  # noqa: BLE001, S110 - Ende des Stroms ist hier das Ziel
+                pass
+            ended.set()
+
+        t = threading.Thread(target=sse, daemon=True)
+        t.start()
+        time.sleep(1.0)
+        pids = _serve_pids(kali)
+        assert pids
+        for pid in pids:
+            os.kill(pid, signal.SIGINT)  # wie Ctrl-C im Terminal bei ssh -t … code
+        assert _wait(lambda: not _serve_pids(kali), 5)
+        assert ended.wait(5), "der Strom endet nicht nach dem Ende von code"
+        status = 0
+        if tunnel.poll() is None:  # der Tunnel lebt vielleicht noch kurz: dann 401 durch ihn
+            with contextlib.suppress(httpx.HTTPError), _client(kali, local) as c:
+                status = c.get("/api/v1/status", headers=auth).status_code
+            assert status in (0, 401), status
+        res = kali.ssh("kali-sl", "revoke")
+        assert res.returncode == 0 and b"Widerrufen: 0 Sitzungen." in res.stdout, res
+    finally:
+        _stop(tunnel)
 
 
 def _sse_presentation(kali: Kali, local: int, token: str) -> str:

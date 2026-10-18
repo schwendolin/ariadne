@@ -22,7 +22,6 @@ from starlette.responses import Response
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import Bag, iso, render_line
-from ariadne.web.api.timeline import secret_values
 from ariadne.web.api.views import (
     claim_rows,
     command_ref,
@@ -30,9 +29,11 @@ from ariadne.web.api.views import (
     fact_view,
     level,
     loads,
+    secret_values,
     stack_views,
     unit_brief,
     unit_rows,
+    with_secrets,
 )
 
 __all__ = [
@@ -100,6 +101,7 @@ def fact_sources(conn: Any, claim_key: str, bag: Bag) -> dict[str, Any] | None:
     rows = claim_rows(conn, "claim_key = ?", (claim_key,), 1)
     if not rows:
         return None
+    bag = with_secrets(bag, conn)
     srcs = conn.execute(
         "SELECT decision_id, unit_id, parser_id, trust, confidence, span_json, distrusted FROM claim_source "
         "WHERE claim_key = ? ORDER BY ts_utc_ns, journal_seq LIMIT ?",
@@ -164,6 +166,7 @@ def unit_detail(conn: Any, unit_id: str, chain_ok: bool, bag: Bag) -> dict[str, 
     rows = unit_rows(conn, "unit_id = ?", (unit_id,), 1)
     if not rows:
         return None
+    bag = with_secrets(bag, conn)
     u = rows[0]
     parser = conn.execute(
         "SELECT parser_id FROM observation WHERE unit_id = ? ORDER BY obs_id LIMIT 1", (unit_id,)

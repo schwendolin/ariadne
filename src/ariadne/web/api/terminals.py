@@ -25,7 +25,7 @@ from ariadne.web.api.errors import ApiError
 from ariadne.web.api.models import AcceptOp, ContextOp, PopOp, PushOp, SetOp
 from ariadne.web.api.status import terminal_state
 from ariadne.web.api.text import Bag, iso
-from ariadne.web.api.views import command_ref, loads, stack_views, unit_rows
+from ariadne.web.api.views import command_ref, loads, stack_views, unit_rows, with_secrets
 
 __all__ = ["add_routes", "terminal_extras", "host_warnings"]
 
@@ -52,6 +52,7 @@ def _suggestions(conn: Any) -> dict[str, list[tuple[str, dict[str, Any]]]]:
 
 def terminal_extras(conn: Any, tids: list[str], bag: Bag) -> dict[str, dict[str, Any]]:
     """Letzter Befehl, offenes Remote-Segment und Kontextvorschlag pro Terminal."""
+    bag = with_secrets(bag, conn)  # letzter Befehl mit maskierten Secrets (SEC-W1)
     sugg = _suggestions(conn)
     out: dict[str, dict[str, Any]] = {}
     for tid in tids:

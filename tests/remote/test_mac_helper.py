@@ -59,7 +59,12 @@ esac
 FAKE_LSOF = r"""#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_DIR/lsof.log"
 if [ -f "$FAKE_DIR/busy" ]; then cat "$FAKE_DIR/busy"; exit 0; fi
-if [ -f "$FAKE_DIR/ssh.pid" ] && kill -0 "$(cat "$FAKE_DIR/ssh.pid")" 2>/dev/null; then
+alive() {  # wie lsof: ein beendeter Prozess (auch ein Zombie) lauscht nicht mehr
+    kill -0 "$1" 2>/dev/null || return 1
+    st=$(sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f1)
+    [ "$st" != Z ]
+}
+if [ -f "$FAKE_DIR/ssh.pid" ] && alive "$(cat "$FAKE_DIR/ssh.pid")"; then
     if [ -f "$FAKE_DIR/steal" ]; then cat "$FAKE_DIR/steal"; else cat "$FAKE_DIR/ssh.pid"; fi
     exit 0
 fi
@@ -81,6 +86,15 @@ exit 0
 
 FAKE_FDESETUP = """#!/bin/sh
 echo "${FAKE_FILEVAULT:-FileVault is On.}"
+"""
+
+FAKE_SSH_ADD = r"""#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_DIR/ssh-add.log"
+case $1 in
+    -T) [ -f "$FAKE_DIR/agent-has-key" ] && exit 0; exit 1 ;;
+    -t) [ -n "${FAKE_SSH_ADD_FAIL:-}" ] && exit 1; : > "$FAKE_DIR/agent-has-key"; exit 0 ;;
+esac
+exit 2
 """
 
 FAKE_AGE = r"""#!/bin/sh
@@ -106,6 +120,7 @@ class Mac:
             ("sleep", FAKE_SLEEP),
             ("fdesetup", FAKE_FDESETUP),
             ("age", FAKE_AGE),
+            ("ssh-add", FAKE_SSH_ADD),
         ):
             p = self.shim / name
             p.write_text(text)
@@ -125,6 +140,7 @@ class Mac:
         self.mac_key.parent.mkdir(parents=True)
         self.mac_key.write_bytes(b"age-encryption.org/v1\n-> scrypt abc 18\n")
         self.ssh_g(strict="true")
+        (self.fake / "agent-has-key").write_text("")  # Schlüssel schon im Agent (Normalfall)
 
     def ssh_g(self, *, strict: str = "true", identity: Path | None = None, forward_agent: str = "no") -> None:
         (self.fake / "ssh-G").write_text(
@@ -217,6 +233,7 @@ def assert_safe_ssh(mac: Mac) -> None:
             continue
         joined = " ".join(c)
         assert "-o ControlMaster=no" in joined and "-o ControlPath=none" in joined, c
+        assert "-o StrictHostKeyChecking=yes" in joined, c  # SEC-M1: nie ein unbekannter Hostkey
         assert "-g" not in c and "GatewayPorts" not in joined, c
 
 
@@ -229,7 +246,7 @@ def test_t15_start_one_connection_start_file_and_stop(mac):
     c = remote[0]
     assert c[-2:] == ["kali-sl", "code"]
     assert "-n" in c and "-L" in c and c[c.index("-L") + 1] == "127.0.0.1:7330:127.0.0.1:7330"
-    assert "ExitOnForwardFailure=yes" in c
+    assert "ExitOnForwardFailure=yes" in c and "BatchMode=yes" in c  # fragt nie im Hintergrund (F2)
     assert_safe_ssh(mac)
     # Startdatei: 0600 in einem 0700-Ordner unter TMPDIR, Code nur im Fragment, nie in argv
     html = (mac.fake / "opened.html").read_text()
@@ -244,15 +261,20 @@ def test_t15_start_one_connection_start_file_and_stop(mac):
     pid = mac.tunnel_pid()
     assert pid and _alive(pid)
     assert (mac.state / "tunnel.pid").read_text().strip() == str(pid)
-    # ein zweites start lehnt ab, solange der Tunnel steht
+    # ein zweites start (Neuanmeldung nach lock oder 12 h, F1): Tunnel neu, ohne revoke und lock
     again = mac.run("start")
-    assert again.returncode == 1 and "Tunnel läuft schon" in again.stderr
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "neu aufgebaut (ohne Sperren)" in again.stdout
+    assert [c[-1] for c in mac.remote_calls()] == ["code", "code"]
+    assert _wait(lambda: not _alive(pid))
+    pid = mac.tunnel_pid()
+    assert pid and _alive(pid)
     # stop: widerrufen, sperren, sichern, Tunnel zu
     res = mac.run("stop")
     assert res.returncode == 0, res.stdout + res.stderr
     cmds = [c[-1] for c in mac.remote_calls()]
-    assert cmds == ["code", "revoke", "lock", "backup"]
-    for c in mac.remote_calls()[1:]:
+    assert cmds == ["code", "code", "revoke", "lock", "backup"]
+    for c in mac.remote_calls()[2:]:
         assert "ClearAllForwardings=yes" in c
     assert_safe_ssh(mac)
     files = list(mac.backups.glob("kali-sl-*.age"))
@@ -398,6 +420,40 @@ def test_restore_pipes_decrypted_stream(mac, tmp_path):
     mac.mac_key.write_text("AGE-SECRET-KEY-1QQQQQQ\n")
     res = mac.run("restore", str(backup), "--yes")
     assert res.returncode == 1 and "Klartext" in res.stderr
+
+
+def test_f2_key_not_in_agent_is_loaded_in_the_foreground_before_the_tunnel(mac):
+    """F2 (Anleitung): Ist der Schlüssel nicht im Agent, fragt ssh-add im Vordergrund nach der
+    Passphrase, bevor der Tunnel im Hintergrund startet (der fragt nie selbst, BatchMode=yes)."""
+    (mac.fake / "agent-has-key").unlink()
+    res = mac.run("start", FAKE_SSH_ADD_FAIL="1")
+    assert res.returncode == 1 and "Schlüssel nicht geladen" in res.stderr
+    assert mac.remote_calls() == []  # kein Tunnel, keine Frist läuft
+    res = mac.run("start")
+    assert res.returncode == 0, res.stdout + res.stderr
+    log = (mac.fake / "ssh-add.log").read_text().splitlines()
+    assert log[-1] == f"-t 4h {mac.key}" and log[0] == f"-T {mac.key}.pub"
+    assert "Passphrase des Mac-Schlüssels" in res.stdout
+    assert mac.run("stop", "--no-backup").returncode == 0
+
+
+@pytest.mark.parametrize("cmd", ["unlock", "backup", "restore"])
+def test_sec_m1_unlock_backup_restore_check_ssh_settings_first(mac, tmp_path, cmd):
+    """SEC-M1 (R13): unlock schickt die Passphrase, restore den Klartext der Sicherung; beide (und
+    backup) laufen nur mit bekanntem Hostkey und StrictHostKeyChecking yes."""
+    backup = tmp_path / "kali-sl-x.age"
+    backup.write_bytes(b"age-encryption.org/v1\n")
+    args = [cmd, str(backup), "--yes"] if cmd == "restore" else [cmd]
+    mac.ssh_g(strict="ask")
+    res = mac.run(*args)
+    assert res.returncode == 1 and "StrictHostKeyChecking ist nicht yes" in res.stderr
+    assert mac.remote_calls() == []
+    mac.ssh_g(strict="true")
+    mac.known.write_text("")
+    res = mac.run(*args)
+    assert res.returncode == 1 and "Hostkey der Kali unbekannt" in res.stderr
+    assert mac.remote_calls() == []
+    assert not (mac.fake / "restore.in").exists()
 
 
 def test_unlock_uses_terminal(mac):

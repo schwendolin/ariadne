@@ -2,9 +2,12 @@
 
 Nur Linux, nur ``/proc``, ohne root:
 
-* :func:`find_socket` sucht den Client-Socket einer Verbindung in ``/proc/net/tcp`` und
-  ``/proc/net/tcp6`` (lokale Adresse = Client, entfernte = Server; IPv4-mapped-Adressen gelten
-  als IPv4) und liefert UID und Inode.
+* :func:`find_socket` sucht den Client-Socket einer Verbindung gezielt über Netlink
+  ``sock_diag`` (:func:`diag_lookup`, eine Abfrage mit dem 4-Tupel, etwa 15 µs, ohne root) und nur,
+  wenn Netlink fehlt, in ``/proc/net/tcp`` und ``/proc/net/tcp6`` (lokale Adresse = Client,
+  entfernte = Server; IPv4-mapped-Adressen gelten als IPv4). Ergebnis: UID und Inode. Die gezielte
+  Suche hält eine Verbindungsflut eines fremden Benutzers billig (Befund SEC-W2: das Parsen der
+  ganzen Tabelle wuchs mit jeder TIME_WAIT-Zeile).
 * :func:`find_holders` sucht den Inode in ``/proc/<pid>/fd`` der Prozesse mit derselben UID.
   Nicht lesbare Prozesse (nicht «dumpable», z. B. ``sshd-session`` nach dem Rechtewechsel)
   werden übersprungen; findet sich kein Halter, ist der Peer «nicht lesbar» (leeres Tupel).
@@ -19,9 +22,11 @@ sie darum nur einmal pro Verbindung und nie im Loop des Daemons auf.
 
 from __future__ import annotations
 
+import errno
 import ipaddress
 import os
 import re
+import socket
 import struct
 import sys
 from dataclasses import dataclass
@@ -32,6 +37,8 @@ __all__ = [
     "ProcInfo",
     "parse_proc_net",
     "find_socket",
+    "diag_lookup",
+    "DiagUnavailable",
     "find_holders",
     "resolve_peer",
     "proc_info",
@@ -136,17 +143,105 @@ def _read_text(path: str) -> str:
         return ""
 
 
+# --------------------------------------------------------------------------- #
+# Netlink sock_diag (gezielte Suche)
+# --------------------------------------------------------------------------- #
+
+_NETLINK_SOCK_DIAG = 4
+_SOCK_DIAG_BY_FAMILY = 20
+_NLM_F_REQUEST = 0x1
+_NLMSG_ERROR = 2
+_NLMSG_HDR = struct.Struct("=IHHII")
+_ALL_STATES = 0xFFFFFFFF
+_NO_COOKIE = 0xFFFFFFFF
+_DIAG_TIMEOUT_S = 1.0
+
+
+class DiagUnavailable(OSError):
+    """Netlink ``sock_diag`` geht hier nicht (Kernel, Sandbox); dann gilt ``/proc/net/tcp``."""
+
+
+def _diag_once(family: int, local: tuple[str, int], remote: tuple[str, int]) -> TcpEntry | None:
+    def packed(host: str) -> bytes:
+        raw = ipaddress.ip_address(host).packed
+        return raw + b"\0" * (16 - len(raw))
+
+    sockid = (struct.pack("!HH", local[1], remote[1]) + packed(local[0]) + packed(remote[0])
+              + struct.pack("=III", 0, _NO_COOKIE, _NO_COOKIE))
+    req = struct.pack("=BBBBI", family, socket.IPPROTO_TCP, 0, 0, _ALL_STATES) + sockid
+    msg = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(req), _SOCK_DIAG_BY_FAMILY, _NLM_F_REQUEST, 1, 0) + req
+    try:
+        s = socket.socket(socket.AF_NETLINK, socket.SOCK_DGRAM, _NETLINK_SOCK_DIAG)
+    except OSError as exc:
+        raise DiagUnavailable(exc.errno, "sock_diag nicht verfügbar") from None
+    try:
+        s.settimeout(_DIAG_TIMEOUT_S)
+        s.sendto(msg, (0, 0))
+        data = s.recv(8192)
+    except OSError as exc:
+        raise DiagUnavailable(exc.errno, "sock_diag nicht verfügbar") from None
+    finally:
+        s.close()
+    if len(data) < _NLMSG_HDR.size + 4:
+        raise DiagUnavailable(errno.EPROTO, "sock_diag: kurze Antwort")
+    _ln, typ, _flags, _seq, _pid = _NLMSG_HDR.unpack_from(data, 0)
+    body = data[_NLMSG_HDR.size:]
+    if typ == _NLMSG_ERROR:
+        err = -struct.unpack_from("=i", body, 0)[0]
+        if err in (errno.ENOENT, errno.ESRCH):
+            return None  # kein solcher Socket
+        raise DiagUnavailable(err, "sock_diag abgelehnt")
+    if typ != _SOCK_DIAG_BY_FAMILY or len(body) < 4 + 48 + 20:
+        raise DiagUnavailable(errno.EPROTO, "sock_diag: unerwartete Antwort")
+    _fam, state = struct.unpack_from("=BB", body, 0)
+    uid, inode = struct.unpack_from("=II", body, 4 + 48 + 12)
+    return TcpEntry(local, remote, int(state), int(uid), int(inode))
+
+
+def diag_lookup(client: tuple[str, int], server: tuple[str, int]) -> TcpEntry | None:
+    """Client-Socket der Verbindung über Netlink ``sock_diag`` mit dem genauen 4-Tupel.
+
+    ``None``: kein solcher Socket oder einer ohne Inode (TIME_WAIT). :class:`DiagUnavailable`,
+    wenn Netlink hier nicht geht. Eine IPv4-Verbindung aus einem IPv6-Socket (IPv4-mapped) wird
+    ein zweites Mal als IPv6 gesucht."""
+    local = (_norm_ip(client[0]), int(client[1]))
+    remote = (_norm_ip(server[0]), int(server[1]))
+    v6 = ":" in local[0]
+    entry = _diag_once(socket.AF_INET6 if v6 else socket.AF_INET, local, remote)
+    if entry is None and not v6:
+        mapped = (f"::ffff:{local[0]}", local[1]), (f"::ffff:{remote[0]}", remote[1])
+        entry = _diag_once(socket.AF_INET6, *mapped)
+        entry = TcpEntry(local, remote, entry.state, entry.uid, entry.inode) if entry else None
+    if entry is None or entry.inode == 0:
+        return None
+    return entry
+
+
 def find_socket(client: tuple[str, int], server: tuple[str, int], *,
-                proc_root: str = PROC) -> TcpEntry | None:
-    """Eintrag des Client-Sockets der Verbindung ``client`` → ``server`` oder ``None``."""
+                proc_root: str = PROC, use_diag: bool | None = None) -> TcpEntry | None:
+    """Eintrag des Client-Sockets der Verbindung ``client`` → ``server`` oder ``None``.
+
+    ``use_diag`` (Standard: nur mit dem echten ``/proc``): zuerst Netlink ``sock_diag``; nur
+    wenn das hier nicht geht, die Tabellen in ``/proc/net`` (vorher nach dem Port gefiltert)."""
     try:
         want_local = (_norm_ip(client[0]), int(client[1]))
         want_remote = (_norm_ip(server[0]), int(server[1]))
     except (ValueError, TypeError, IndexError):
         return None
+    if use_diag is None:
+        use_diag = proc_root == PROC
+    if use_diag:
+        try:
+            return diag_lookup(want_local, want_remote)
+        except DiagUnavailable:
+            pass
+    port = f":{want_local[1]:04X} "
     best: TcpEntry | None = None
     for name in ("tcp", "tcp6"):
-        for e in parse_proc_net(_read_text(f"{proc_root}/net/{name}")):
+        text = _read_text(f"{proc_root}/net/{name}")
+        lines = text.splitlines()
+        wanted = "\n".join(lines[:1] + [ln for ln in lines[1:] if port in ln.upper()])
+        for e in parse_proc_net(wanted):
             if e.local != want_local or e.remote != want_remote:
                 continue
             if e.inode == 0:  # TIME_WAIT und Ähnliches gehören keinem Prozess mehr

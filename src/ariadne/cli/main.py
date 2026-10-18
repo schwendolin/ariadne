@@ -100,16 +100,20 @@ def cmd_init(paths: Paths, args: argparse.Namespace) -> int:
     return 0
 
 
-def _preroll_choice(paths: Paths, mode: str) -> tuple[bool, bool]:
+def _preroll_choice(paths: Paths, mode: str, *, other_project: bool = False) -> tuple[bool, bool]:
     """Vorlauf übernehmen? Gibt ``(adopt, asked)`` zurück.
 
-    Gefragt wird nur nach dem Vorlauf ohne Projekt und der gesperrten Zeit nach ``ariadne lock``
+    Gefragt wird nach dem Vorlauf ohne Projekt und der gesperrten Zeit nach ``ariadne lock``
     (``ask_*`` aus ``preroll.info``, E95, E103). Den Ausfallpuffer nach einem Neustart des
-    Daemons übernimmt der Daemon ohne Rückfrage (E102).
+    Daemons übernimmt der Daemon ohne Rückfrage (E102), aber nur ins Projekt, das dabei aktiv
+    war; startet ``other_project`` ein anderes, zählt er wie Vorlauf (E70, Befund F3).
     """
     info = _call(paths, "preroll.info")
     k = int(info.get("ask_terminals", info.get("terminals")) or 0)
     secs = int(info.get("ask_seconds", info.get("seconds")) or 0)
+    if other_project:
+        k += int(info.get("outage_terminals") or 0)
+        secs = max(secs, int(info.get("outage_seconds") or 0))
     if not k or not secs:
         return False, False
     if mode == "yes":
@@ -121,6 +125,11 @@ def _preroll_choice(paths: Paths, mode: str) -> tuple[bool, bool]:
 
 
 def _say_preroll(pre: dict[str, Any], mode: str, asked: bool) -> None:
+    lost = int(pre.get("discarded_outage_terminals") or 0)
+    if lost:
+        say(f"Ausfallpuffer verworfen: {lost} Terminal{'s' if lost != 1 else ''} (gehörte zum zuvor "
+            "aktiven Projekt; ein anderes Projekt übernimmt ihn nur mit --preroll yes und nur, was an "
+            "kein Projekt gebunden war).")
     outage = int(pre.get("outage_terminals") or 0)
     if outage:
         say(f"Ausfallpuffer übernommen: {outage} Terminal{'s' if outage != 1 else ''} "
@@ -167,8 +176,24 @@ def cmd_unlock(paths: Paths, args: argparse.Namespace) -> int:
     elif err:
         say(f"Projekt nicht geöffnet: {s(err.get('message'), 300)}")
     else:
-        say("Kein aktives Projekt. Weiter mit ariadne start <slug> --target <ziel>")
+        say(_no_active_hint(paths))
     return 0
+
+
+def _no_active_hint(paths: Paths) -> str:
+    """Nach ``unlock`` ohne aktives Projekt (etwa nach einem Restore): vorhandene Projekte nennen,
+    ``--target`` nur für ein neues (Befund F3 der Anleitung)."""
+    from ariadne.project.service import ProjectService
+
+    try:
+        slugs = [p.slug for p in ProjectService(paths).list()][:8]
+    except Exception:  # noqa: BLE001 - nur ein Hinweis
+        slugs = []
+    if slugs:
+        names = ", ".join(s(x, 40) for x in slugs)
+        return (f"Kein aktives Projekt. Vorhanden: {names}. Weiter mit ariadne start {s(slugs[0], 40)} "
+                f"(ein neues Projekt: ariadne start <slug> --target <ziel>).")
+    return "Kein aktives Projekt. Weiter mit ariadne start <slug> --target <ziel>"
 
 
 def cmd_lock(paths: Paths, args: argparse.Namespace) -> int:
@@ -247,7 +272,26 @@ def cmd_status(paths: Paths, args: argparse.Namespace) -> int:
     if ing.get("active"):
         err = f", letzter Fehler: {s(ing['last_error'], 60)}" if ing.get("last_error") else ""
         say(f"Auswertung: aktiv ({s(ing.get('runs', 0), 10)} Durchgänge{err})")
+    say(_web_line(paths))
     return 0
+
+
+def _web_line(paths: Paths) -> str:
+    """Zustand der Web-Oberfläche (ctl ``ui.status``): Adresse oder der Grund, warum sie aus ist
+    (Befund F11 der Anleitung: «Kein Code: Web-Oberfläche aus»)."""
+    try:
+        ui = _call(paths, "ui.status", start=False)
+    except (CliError, CtlError, DaemonUnavailable):
+        return "Web:      aus (im Daemon nicht geladen, etwa mit ARIADNE_WEB=0)"
+    if not isinstance(ui, dict):
+        return "Web:      unbekannt"
+    if ui.get("running") and isinstance(ui.get("port"), int):
+        host = str(ui.get("host") or "127.0.0.1")
+        host = f"[{host}]" if ":" in host else host
+        n = int(ui.get("sessions") or 0)
+        word = "Sitzung" if n == 1 else "Sitzungen"
+        return f"Web:      läuft auf http://{s(host, 64)}:{int(ui['port'])} ({n} {word})"
+    return f"Web:      aus ({s(ui.get('error') or 'Grund unbekannt', 160)})"
 
 
 def _ask_yes(prompt: str) -> bool:
@@ -288,7 +332,10 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     pw = None
     if not st["operator"]["unlocked"]:
         pw = read_secret("Passphrase: ", args.passphrase_fd)
-    adopt, asked = _preroll_choice(paths, args.preroll)
+    current = (st.get("project") or {}).get("slug") or (
+        active.get("slug") if active and not active.get("stopped") else None)
+    other = bool(args.slug) and current is not None and args.slug != current
+    adopt, asked = _preroll_choice(paths, args.preroll, other_project=other)
     try:
         res = _call(paths, "start", passphrase=pw, slug=args.slug, targets=args.target or None,
                     name=args.name, not_customer=args.not_customer, adopt_preroll=adopt)
@@ -478,6 +525,12 @@ def cmd_ctx(paths: Paths, args: argparse.Namespace) -> int:
 def cmd_verify(paths: Paths, args: argparse.Namespace) -> int:
     res = _call(paths, "verify")
     say(f"Events: {res['events']}, Kettenkopf: seq {res['head_seq']} {s(res['head_hash'])}")
+    saved = res.get("saved_head")
+    if isinstance(saved, dict):
+        how = "in der Kette" if saved.get("ok") else "FEHLT in der Kette"
+        say(f"Kettenkopf beim letzten Schliessen (nach einem Restore: aus der Sicherung): seq "
+            f"{s(saved.get('seq'))} {s(saved.get('hash'))} ({how}). Diesen Wert mit ariadne-mac stop "
+            f"bzw. ariadne backup vergleichen.")
     if res["ok"]:
         say("Kette, Commitments und Blobs: in Ordnung.")
         return 0

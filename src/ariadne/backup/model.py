@@ -49,6 +49,8 @@ class BackupResult:
     plain_bytes: int = 0  # Summe der Dateigrössen vor der Verschlüsselung
     skipped: int = 0  # übersprungene Einträge (Links, Sockets, Geräte), ohne Namen
     recipients: int = 0  # Zahl der age-Empfänger
+    unreadable: int = 0  # Arbeitsbereich: fremde oder nicht lesbare Dateien und Ordner (F1)
+    grown: int = 0  # Arbeitsbereich: während der Sicherung gewachsen, Anfang gesichert (RT-2)
 
 
 @dataclass(frozen=True)

@@ -27,6 +27,7 @@ from ariadne.web.api.views import (
     fact_view,
     loads,
     unit_brief,
+    with_secrets,
 )
 
 __all__ = ["add_routes", "next_view"]
@@ -58,6 +59,7 @@ def _verdicts(conn: Any, keys: list[str]) -> dict[str, str | None]:
 
 
 def next_view(conn: Any, profile: str, bag: Bag) -> dict[str, Any]:
+    bag = with_secrets(bag, conn)  # Titel kommen aus Befehlstexten (SEC-W1)
     rows = conn.execute(
         "SELECT item_key, kind, group_key, title, payload_json, created_ts FROM v_inbox "
         "ORDER BY created_ts, group_key, item_key LIMIT ?",
@@ -124,7 +126,7 @@ def next_view(conn: Any, profile: str, bag: Bag) -> dict[str, Any]:
                     s = data.get("summary") if isinstance(data.get("summary"), Mapping) else {}
                     g = groups[it["group"]] = {
                         "group_ref": queries.group_ref(it["group"]),
-                        "title": gb(it["title"]) or "",
+                        "title": gb.cmd(it["title"]) or "",
                         "unit": _brief(data.get("unit"), units, bag),
                         "items": [],
                         "summary": {

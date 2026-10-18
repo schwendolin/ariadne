@@ -6,6 +6,7 @@ der Präsentationsmodus. Ein Fehler einer Erweiterung lässt die Aufnahme nie au
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from ariadne.daemon.extensions import default_extensions, web_disabled
@@ -108,16 +109,36 @@ def test_context_from_web_is_retroactive_and_marked_webui(paths, operator):
         bad = await ctl(paths.ctl_sock, "ctx.set", terminal_id=s.terminal_id, host="10.10.10.3",
                         from_off=500)
         assert bad["error"]["code"] == "invalid"
-        res = await ctl_ok(paths.ctl_sock, "ctx.set", terminal_id="term-weg-00000001", host="10.10.10.3",
+        gone = await FakeShim(paths.term_sock).connect(proto=2)  # Terminal, das danach endet
+        await gone.wait_state(rec="on")
+        await gone.outx(1, 0, b"y" * 20)
+        await gone.wait_ack(1)
+        await gone.bye()
+        for _ in range(100):
+            if gone.terminal_id not in d.terminals:
+                break
+            await asyncio.sleep(0.02)
+        res = await ctl_ok(paths.ctl_sock, "ctx.set", terminal_id=gone.terminal_id, host="10.10.10.3",
                            source="webui", from_off=7)
         assert res == {"stack": None, "stored": True}
+        # Befund F8: unbekanntes Terminal 404, Offset hinter dem Strom 422, nichts im Journal
+        n_sets = len(list(d.project.journal.iter_events(kinds=["d.ctx.set"])))
+        bad = await ctl(paths.ctl_sock, "ctx.set", terminal_id="0" * 36, host="10.10.10.3",
+                        source="webui", from_off=0)
+        assert bad["error"]["code"] == "unknown_terminal"
+        bad = await ctl(paths.ctl_sock, "ctx.set", terminal_id=gone.terminal_id, host="10.10.10.3",
+                        source="webui", from_off=10**12)
+        assert bad["error"]["code"] == "invalid"
+        d.flush()
+        assert len(list(d.project.journal.iter_events(kinds=["d.ctx.set"]))) == n_sets
         await ctl_ok(paths.ctl_sock, "term.pause", terminal_id=s.terminal_id, minutes=5, source="webui")
         await ctl_ok(paths.ctl_sock, "term.resume", terminal_id=s.terminal_id, source="webui")
         d.flush()
         recs = list(d.project.journal.iter_events(kinds=["d.ctx.set", "term.pause"]))
         sets = [(r.header["terminal_id"], r.header["from_off"], r.origin)
                 for r in recs if r.kind == "d.ctx.set"]
-        assert sets == [(s.terminal_id, 10, "webui"), ("term-weg-00000001", 7, "webui")]
+        assert sets == [(s.terminal_id, 10, "webui"), (gone.terminal_id, 7, "webui")]
+        await gone.close()
         assert [r.header["source"] for r in recs if r.kind == "term.pause"] == ["webui"]
         await s.close()
 
@@ -180,12 +201,14 @@ def test_locked_event_whenever_an_unlocked_operator_is_locked(paths, operator):
         d.add_listener(lambda kind, data: seen.append(kind))
         await ctl_ok(paths.ctl_sock, "stop")  # kein Projekt offen, aber entsperrt
         assert seen.count("locked") == 1
-        await ctl_ok(paths.ctl_sock, "stop")  # schon gesperrt: kein zweites Ereignis
-        assert seen.count("locked") == 1
+        # schon gesperrt: stop meldet trotzdem locked, damit eine Web-Sitzung endet, die nach dem
+        # Sperren angemeldet wurde (Befund F5; Vertrag 1.4 Punkt 4: stop beendet jede Sitzung)
+        await ctl_ok(paths.ctl_sock, "stop")
+        assert seen.count("locked") == 2
         bad = await ctl(paths.ctl_sock, "start", passphrase=PASSPHRASE, slug="gibtsnicht")
         assert bad["error"]["code"] == "project_not_found"
         assert seen[-2:] == ["unlocked", "locked"]
         await ctl_ok(paths.ctl_sock, "lock")  # ausdrücklich: immer ein Ereignis
-        assert seen.count("locked") == 3
+        assert seen.count("locked") == 4
 
     run(paths, operator, scenario)

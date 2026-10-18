@@ -15,6 +15,9 @@ Shell, kein ``exec`` eines Client-Werts, und keine Variable des Clients wird aus
   eine Zeile ``<code>``, danach nichts mehr; mit Terminal (``ssh -t``) ein Tippcode
   ``ABCDE-FGHJK``. Danach **hält** ``code`` die Verbindung, die auch den Tunnel trägt, bis die
   Eltern-sshd endet oder SIGHUP, SIGTERM, SIGINT, SIGPIPE kommt (Exit 0). stdin wird nie gelesen.
+  Endet ``code`` (Ctrl-C unter ``ssh -t``, SIGTERM), widerruft es die Sitzungen und Codes dieser
+  SSH-Verbindung (ctl ``ui.revoke`` mit ``bound_pid``/``bound_start``): Ein offener SSE-Strom hält
+  sonst sshd und den Tunnel am Leben, und die Anmeldung gälte weiter (Befund SEC-R1/F4).
 * ``unlock``: nur mit Terminal; wie ``ariadne unlock`` (E101 öffnet das aktive Projekt, E102
   übernimmt den Ausfallpuffer ohne Frage).
 * ``lock``, ``revoke``: ctl ``lock`` bzw. ``ui.revoke`` (alle Sitzungen); ohne Daemon nichts zu tun.
@@ -48,6 +51,8 @@ EXIT_OK, EXIT_ERROR, EXIT_REFUSED, EXIT_UNREADY = 0, 1, 2, 3
 HOLD_SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT, signal.SIGPIPE)
 HELP = "Erlaubt sind nur: " + ", ".join(ALLOWED) + "."
 NEEDS_DAEMON = frozenset({"code", "unlock", "lock", "revoke"})
+# Kaltstart des Daemons vor dem ersten Code: unter den 15 s, die ariadne-mac start wartet (RT-3)
+CODE_START_TIMEOUT_S = 10.0
 
 
 def _err(text: str) -> None:
@@ -128,7 +133,7 @@ def _code(paths: Paths, env: Mapping[str, str]) -> int:
     typed = _isatty(sys.stdin)
     # Der Daemon startet hier (falls nötig) mit der normalen Signalmaske; erst danach blockieren.
     try:
-        client = _client(paths)
+        client = _client(paths, timeout=CODE_START_TIMEOUT_S)  # langsame Schul-VM nach dem Neustart
     except CliError as exc:
         _err(f"Daemon nicht erreichbar: {_s(exc)}. Kein Code.")
         return EXIT_UNREADY
@@ -155,14 +160,27 @@ def _code(paths: Paths, env: Mapping[str, str]) -> int:
             port = res.get("port") if isinstance(res.get("port"), int) else 7330
             _say(f"Code: {_s(display, 40)} (gültig {_s(res.get('expires_in'), 8)} s, nur einmal)")
             _say(f"Im Browser auf dem Mac http://127.0.0.1:{port} öffnen und den Code eingeben.")
-            _say("Tunnel offen, Ctrl-C beendet den Zugang.")
+            _say("Tunnel offen. Ctrl-C beendet Tunnel und Anmeldung (auch bei offenem Dashboard).")
         else:
             sys.stdout.write(code + "\n")
             sys.stdout.flush()
             _silence_stdout()
         return HOLD(ppid)
     finally:
+        _revoke_binding(client, res.get("bound"))
         signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+
+
+def _revoke_binding(client: Any, bound: Any) -> None:
+    """Sitzungen und Codes dieser SSH-Verbindung beenden (nach dem Halten). Fehler bleiben still:
+    Ohne Daemon gibt es nichts zu beenden, und die 2-s-Prüfung fängt das Ende des sshd ab."""
+    if not isinstance(bound, dict):
+        return
+    pid, start = bound.get("pid"), bound.get("start")
+    if type(pid) is not int or type(start) is not int:
+        return
+    with contextlib.suppress(Exception):
+        client.call("ui.revoke", bound_pid=pid, bound_start=start)
 
 
 def _unlock(paths: Paths, env: Mapping[str, str]) -> int:
@@ -257,13 +275,29 @@ def _restore(paths: Paths, env: Mapping[str, str]) -> int:
     summary = getattr(backup_api, "restore_summary_lines", None)
     if summary is not None:
         for line in summary(res, remote=True):
-            _say(_s(line, 400))
+            _say(_s(line, 600))
+        if res.config_added:
+            _say(_restart_hint(paths))
         return EXIT_OK
     projects = ", ".join(_s(p, 64) for p in res.projects) or "keine"
     vault = "ja" if res.operator_restored else "nein"
     _say(f"Wiederhergestellt: Operator-Tresor {vault}, Projekte: {projects}.")
     _say("Weiter: ssh -t kali-sl unlock, dann in der Kali ariadne project open SLUG und ariadne verify.")
     return EXIT_OK
+
+
+def _restart_hint(paths: Paths) -> str:
+    """Zurückgespielte ``config.toml`` liest ein laufender Daemon erst beim nächsten Start (etwa
+    ``[ui] port``; Befund F9 der Anleitung). Wie ``ariadne restore`` in der Kali darauf hinweisen."""
+    from ariadne.daemon.client import CtlClient
+
+    running = False
+    with contextlib.suppress(Exception):
+        running = CtlClient(paths.ctl_sock).ping()
+    if running:
+        return ("Neue Einstellungen (config.toml) gelten erst nach einem Neustart des Daemons, der hier "
+                "schon läuft: in der Kali ariadne daemon stop, danach startet ariadne-mac unlock ihn neu.")
+    return "Neue Einstellungen (config.toml) gelten beim nächsten Start des Daemons (ariadne-mac unlock)."
 
 
 def _check(paths: Paths, env: Mapping[str, str]) -> int:
