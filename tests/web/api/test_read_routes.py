@@ -26,6 +26,7 @@ def test_status_terminals_project_and_changes(paths, operator):
             "name": "lame",
             "profile": "lab",
             "chain_head_ok": True,
+            "scope_open": False,  # E131
         }
         assert st["operator"] == {"exists": True, "unlocked": True, "own_secrets": 1}
         assert st["locked"] is False
@@ -64,7 +65,9 @@ def test_status_terminals_project_and_changes(paths, operator):
 
         r = await c.get(f"{BASE}/p/{fx.pid}/project")
         pj = r.json()
-        assert pj["id"] == fx.pid and pj["scope"] == {"include": [TARGET], "exclude": [], "version": 1}
+        assert pj["id"] == fx.pid and pj["scope"] == {"include": [TARGET], "exclude": [], "version": 1,
+                                                       "open": False}
+        assert pj["scope_open"] is False
         assert pj["lab_guard"] == {"public_targets": False, "confirmed_not_customer": False}
         assert pj["chain"]["head_seq"] > 0 and len(pj["chain"]["head_hash"]) == 64 and pj["chain"]["head_ok"]
         assert pj["created_at"].endswith("Z") and pj["started_at"].endswith("Z")

@@ -34,7 +34,9 @@ export type DialogRequest =
   | { kind: 'scope-warning' }
   | { kind: 'scope-view' }
   | ScopeAddRequest
-  | { kind: 'scope-edit'; op: 'remove' | 'exclude'; entry?: string; list?: 'include' | 'exclude' };
+  | { kind: 'scope-edit'; op: 'add' | 'remove' | 'exclude'; entry?: string; list?: 'include' | 'exclude' }
+  /** E131: Scope öffnen bzw. schliessen (Einstellungen) */
+  | { kind: 'scope-open'; op: 'open' | 'close' };
 
 export interface Notice {
   id: number;

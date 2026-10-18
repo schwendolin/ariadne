@@ -19,6 +19,7 @@ from ariadne.ai.budget import Ledger
 from ariadne.ai.config import ConfigError, load_config
 from ariadne.ai.gateway import KEY_NAME, REASONS, policy_reason, project_flags
 from ariadne.daemon.ops_util import OpError
+from ariadne.scope.change import scope_open
 from ariadne.store.api import AppendItem
 
 if TYPE_CHECKING:
@@ -42,7 +43,8 @@ async def _flags(d: Daemon) -> dict[str, bool] | None:
         return None
     ing = await d._sync_ingest()
     profile = p.info.profile
-    return await ing.query(lambda c: project_flags(c, profile))
+    is_open = scope_open(p.settings)  # E131
+    return await ing.query(lambda c: project_flags(c, profile, is_open))
 
 
 async def op_status(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:

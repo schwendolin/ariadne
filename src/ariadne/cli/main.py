@@ -251,6 +251,8 @@ def cmd_status(paths: Paths, args: argparse.Namespace) -> int:
         say(f"Projekt:  {s(active.get('slug'))} aktiv, {how} (weiter mit ariadne start)")
     else:
         say("Projekt:  - (ariadne start <slug> --target <ziel>)")
+    if p and p.get("scope_open") is True:
+        say("Scope:    offen (alles gilt als im Scope, ausser Ausschlüssen; ariadne scope close)")
     if p and p.get("chain_head_ok") is False:
         say("WARNUNG:  Kettenkopf ungültig beim Öffnen, ariadne verify ausführen")
     idle = st.get("idle") or {}
@@ -322,11 +324,51 @@ def _no_active(active: dict[str, Any] | None) -> CliError:
                     f"Weiter: ariadne start {s(slug, 64)}")
 
 
+OPEN_SCOPE_QUESTION = ("Projekt {slug} gibt es noch nicht. Neu anlegen mit offenem Scope? Alles gilt dann "
+                       "als im Scope, auch öffentliche Ziele; nur ohne Kundenauftrag. [j/N] ")
+OPEN_SCOPE_HINT = ("Projekt {slug} gibt es noch nicht. Neu anlegen mit Zielen: ariadne {cmd} {slug} --target "
+                   "<ziel>, oder mit offenem Scope (alles gilt als im Scope, auch öffentliche Ziele; nur "
+                   "ohne Kundenauftrag): ariadne {cmd} {slug} --open-scope --not-customer")
+
+
+def _project_exists(paths: Paths, slug: str) -> bool:
+    from ariadne.project.service import ProjectService
+
+    try:
+        return slug in {p.slug for p in ProjectService(paths).list()}
+    except Exception:  # noqa: BLE001 - im Zweifel entscheidet der Daemon
+        return True
+
+
+def _open_scope_choice(paths: Paths, args: argparse.Namespace, cmd: str) -> None:
+    """E131: neues Projekt ohne ``--target``. Im Terminal Rückfrage (fängt Tippfehler im Slug ab), ohne
+    Terminal nur mit ``--open-scope --not-customer``. Setzt ``args.open_scope`` und
+    ``args.not_customer``; lehnt sonst mit Hinweis ab."""
+    slug = s(args.slug, 64)
+    if args.open_scope and args.not_customer:
+        return
+    if not sys.stdin.isatty():
+        raise CliError(OPEN_SCOPE_HINT.format(slug=slug, cmd=cmd))
+    if not args.open_scope:
+        if not _ask_yes(OPEN_SCOPE_QUESTION.format(slug=slug)):
+            raise CliError(f"Nicht angelegt. Mit Zielen: ariadne {cmd} {slug} --target <ziel>")
+        args.open_scope = True
+        args.not_customer = True  # die Frage nennt «nur ohne Kundenauftrag»
+        return
+    if not _ask_yes("Kein Kundenauftrag? [j/N] "):
+        raise CliError("Nicht angelegt: offener Scope nur ohne Kundenauftrag (--not-customer).")
+    args.not_customer = True
+
+
 def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     if not OperatorVault(paths.operator_dir).exists:
         raise CliError("kein Operator-Tresor (ariadne init)")
     if args.target and not args.slug:
         raise CliError("--target braucht einen Projektnamen: ariadne start <slug> --target <ziel>")
+    if args.open_scope and not args.slug:
+        raise CliError("--open-scope braucht einen Projektnamen: ariadne start <slug> --open-scope")
+    if args.slug and not args.target and not _project_exists(paths, args.slug):
+        _open_scope_choice(paths, args, "start")
     _client(paths)
     _pause_this_terminal(paths)
     st = _call(paths, "status")
@@ -342,7 +384,8 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     adopt, asked = _preroll_choice(paths, args.preroll, other_project=other)
     try:
         res = _call(paths, "start", passphrase=pw, slug=args.slug, targets=args.target or None,
-                    name=args.name, not_customer=args.not_customer, adopt_preroll=adopt)
+                    name=args.name, not_customer=args.not_customer, adopt_preroll=adopt,
+                    open_scope=bool(args.open_scope))
     except CtlError as exc:
         if exc.code == "guardrail":
             say("Ziele ausserhalb der Lab-Allowlist: "
@@ -357,7 +400,8 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
             if not slug:
                 raise CliError("Projekt existiert nicht. ariadne start <slug> --target <ziel>") from None
             raise CliError(f"Projekt {s(slug, 64)} existiert nicht. Neu anlegen: "
-                           f"ariadne start {s(slug, 64)} --target <ziel>") from None
+                           f"ariadne start {s(slug, 64)} --target <ziel> (oder --open-scope "
+                           f"--not-customer)") from None
         raise
     if res.get("unlocked"):
         say("Entsperrt.")
@@ -366,10 +410,15 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
             f"bis die lokale Shell zurück ist.")
     if res.get("created"):
         say(f"Projekt {s(res['slug'])} angelegt ({s(res['profile'])}) in {s(res['workspace'], 400)}")
+        if args.open_scope:
+            say("Scope: offen (alles gilt als im Scope, ausser Ausschlüssen). Einschränken: ariadne scope "
+                "exclude <ziel>, schliessen: ariadne scope close")
     else:
         say(f"Projekt {s(res['slug'])} geöffnet ({s(res['profile'])}).")
     if res.get("targets_ignored"):
         _targets_hint(paths, args.target or [])
+    if args.open_scope and not res.get("created"):
+        say("Das Projekt existiert schon; --open-scope ändert den Scope nicht. Öffnen: ariadne scope open")
     _say_preroll(res.get("preroll") or {}, args.preroll, asked)
     held = int(res.get("held") or 0)
     switching = f"; {held} wechseln an der nächsten lokalen Eingabeaufforderung" if held else ""
@@ -465,9 +514,12 @@ def cmd_resume(paths: Paths, args: argparse.Namespace) -> int:
 
 def cmd_project(paths: Paths, args: argparse.Namespace) -> int:
     if args.pcmd == "new":
+        if not args.target:  # E131: ohne Ziele nur mit offenem Scope
+            _open_scope_choice(paths, args, "project new")
         try:
-            res = _call(paths, "project.new", slug=args.slug, targets=args.target, name=args.name,
-                        not_customer=args.not_customer, open=not args.no_open)
+            res = _call(paths, "project.new", slug=args.slug, targets=args.target or [], name=args.name,
+                        not_customer=args.not_customer, open=not args.no_open,
+                        open_scope=bool(args.open_scope))
         except CtlError as exc:
             if exc.code == "guardrail":
                 say("Ziele ausserhalb der Lab-Allowlist: "
@@ -690,6 +742,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="IP, CIDR oder Name (mehrfach, nur beim Anlegen; danach: ariadne scope add)")
     sp.add_argument("--name")
     sp.add_argument("--not-customer", action="store_true", help="bestätigt: kein Kundenauftrag")
+    sp.add_argument("--open-scope", action="store_true",
+                    help="neues Projekt mit offenem Scope: alles gilt als im Scope (nur mit --not-customer)")
     sp.add_argument("--passphrase-fd", type=int, metavar="N", help="Passphrase von Dateideskriptor N lesen")
     sp.add_argument("--preroll", choices=["ask", "yes", "no"], default="ask",
                     help="Vorlauf (letzte Minuten aus dem RAM) übernehmen: fragen, ja, nein")
@@ -711,9 +765,11 @@ def build_parser() -> argparse.ArgumentParser:
     psub = sp.add_subparsers(dest="pcmd", required=True, metavar="AKTION")
     pn = psub.add_parser("new", help="Projekt anlegen (Profil lab)")
     pn.add_argument("slug")
-    pn.add_argument("--target", action="append", required=True, help="IP, CIDR oder Name (mehrfach)")
+    pn.add_argument("--target", action="append", help="IP, CIDR oder Name (mehrfach)")
     pn.add_argument("--name")
     pn.add_argument("--not-customer", action="store_true", help="bestätigt: kein Kundenauftrag")
+    pn.add_argument("--open-scope", action="store_true",
+                    help="offener Scope: alles gilt als im Scope (nur mit --not-customer)")
     pn.add_argument("--no-open", action="store_true", help="nur anlegen, nicht öffnen")
     po = psub.add_parser("open", help="Projekt öffnen")
     po.add_argument("slug")

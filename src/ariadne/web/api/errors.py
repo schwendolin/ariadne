@@ -57,6 +57,8 @@ MESSAGES: dict[str, str] = {
     "guardrail": (
         "Ziel ausserhalb der Lab-Allowlist: nur im Terminal mit ariadne scope add <ziel> --not-customer."
     ),
+    "noop": "Keine Änderung: Der Scope ist schon so.",
+    "no_include": "Zuerst einen Eintrag hinzufügen: ariadne scope add <ziel>",
     "internal": "Interner Fehler.",
     **SHOT_ERRORS,  # shot_display, shot_wayland, shot_window, shot_region, shot_failed (alle 503)
 }
@@ -80,6 +82,8 @@ STATUS: dict[str, int] = {
     "clipboard_tool": 503,
     "clipboard_session": 503,
     "guardrail": 403,
+    "noop": 409,
+    "no_include": 409,
     "internal": 500,
     **dict.fromkeys(SHOT_ERRORS, 503),
 }
@@ -95,10 +99,21 @@ _CTL: dict[str, str] = {
     "conflict": "conflict",
     "project_changed": "conflict",
     "guardrail": "guardrail",
+    "noop": "noop",
+    "no_include": "no_include",
     "no_ingest": "unavailable",
     "clipboard_tool": "clipboard_tool",
     "clipboard_session": "clipboard_session",
     **{code: code for code in SHOT_ERRORS},
+}
+
+# Feste andere Texte zu einem Code (nie aus der Anfrage oder einer Ausnahme): Name -> (Code, Text)
+VARIANTS: dict[str, tuple[str, str]] = {
+    "guardrail_open": (
+        "guardrail",
+        "Offener Scope gilt wie ein öffentliches Ziel: nur im Terminal mit ariadne scope open "
+        "(Bestätigung «kein Kundenauftrag»).",
+    ),
 }
 
 _DETAIL_MAX = 50  # höchstens so viele Einträge in ``detail`` (422)
@@ -114,6 +129,9 @@ class ApiError(Exception):
     """Fehler einer Route mit festem Code. ``detail`` nur bei 422 (Orte, ohne Werte)."""
 
     def __init__(self, code: str, detail: list[dict[str, Any]] | None = None) -> None:
+        self.message: str | None = None
+        if code in VARIANTS:
+            code, self.message = VARIANTS[code]
         if code not in MESSAGES:
             code = "internal"
         super().__init__(code)
@@ -124,13 +142,16 @@ class ApiError(Exception):
 def from_ctl(error: Any) -> ApiError:
     """Abbildung eines ctl-Fehlers (``{"code", "message"}``) auf die API; die Meldung fällt weg."""
     code = error.get("code") if isinstance(error, dict) else None
+    if code == "guardrail" and isinstance(error, dict) and error.get("hint") == "open":
+        return ApiError("guardrail_open")  # E131: Hinweis «ariadne scope open»
     return ApiError(_CTL.get(str(code), "internal"))
 
 
-def error_response(code: str, detail: list[dict[str, Any]] | None = None) -> JsonResponse:
+def error_response(code: str, detail: list[dict[str, Any]] | None = None,
+                   message: str | None = None) -> JsonResponse:
     if code not in MESSAGES:
         code = "internal"
-    body: dict[str, Any] = {"code": code, "message": MESSAGES[code]}
+    body: dict[str, Any] = {"code": code, "message": message or MESSAGES[code]}
     if detail:
         body["detail"] = detail[:_DETAIL_MAX]
     return JsonResponse({"error": body}, status_code=STATUS[code])
@@ -164,7 +185,7 @@ class ApiRoute(APIRoute):
             try:
                 return await original(request)
             except ApiError as exc:
-                return error_response(exc.code, exc.detail)
+                return error_response(exc.code, exc.detail, exc.message)
             except RequestValidationError as exc:
                 return error_response("validation", validation_detail(exc.errors()))
             except Exception as exc:  # nie Text der Ausnahme an den Browser oder ins Log

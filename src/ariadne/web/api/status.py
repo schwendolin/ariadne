@@ -17,6 +17,7 @@ from starlette.responses import Response
 from ariadne import __version__
 from ariadne.ingest.db import get_meta
 from ariadne.ingest.queries import cmd_ref, term_refs
+from ariadne.scope.change import scope_open
 from ariadne.web.api.common import Api, session_view, valid_tid
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.models import MAX_WEB_PAUSE_MIN, PauseRequest, PresentationRequest
@@ -41,6 +42,7 @@ def project_brief(p: Any, bag: Bag) -> dict[str, Any]:
         "name": bag(name if isinstance(name, str) else p.info.slug),
         "profile": p.info.profile,
         "chain_head_ok": bool(p.head_ok),
+        "scope_open": scope_open(settings),  # E131: offener Scope
     }
 
 

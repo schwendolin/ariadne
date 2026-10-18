@@ -6,6 +6,9 @@
   Eintrag so, wie er gespeichert wird (z. B. «box.lab» statt «Box.LAB.», xn--Form); danach steht dort
   der gespeicherte Eintrag. «Rückgängig» kann den Scope wieder erweitern (Ausschluss weg, Ziel wieder
   drin) und braucht deshalb eine Bestätigung mit Wirkung und Eintrag (E129, wie in der Zeitachse).
+  «Hinzufügen …» (E131, E133): freier Eintrag mit `dry_run`; braucht er «kein Kundenauftrag»
+  (`needs_not_customer`, 403 guardrail), bleibt der Knopf gesperrt mit dem Befehl fürs Terminal;
+  sehr breite Einträge (`broad`) bekommen einen Warnhinweis.
   Im Profil customer nur der Hinweis auf `ariadne scope`. Besitzer: ui.
 -->
 <script lang="ts">
@@ -18,6 +21,7 @@
   import Dialog from '../ui/Dialog.svelte';
   import TextField from '../ui/TextField.svelte';
   import Txt from '../ui/Txt.svelte';
+  import { addCommand } from './open';
 
   let {
     app,
@@ -26,7 +30,7 @@
     entry = '',
     list = 'include',
     onclose,
-  }: { app: AppState; project: ProjectStore; op: 'remove' | 'exclude'; entry?: string; list?: 'include' | 'exclude'; onclose: () => void } = $props();
+  }: { app: AppState; project: ProjectStore; op: 'add' | 'remove' | 'exclude'; entry?: string; list?: 'include' | 'exclude'; onclose: () => void } = $props();
 
   const scope = $derived(project.scope);
   let typed = $state('');
@@ -36,17 +40,21 @@
   let undone = $state(false);
   let confirmUndo = $state(false);
   const target = $derived(op === 'remove' ? entry : typed.trim());
-  // Vorschau per dry_run (web-api.md 20.2) beim Ausschliessen, kurz verzögert beim Tippen
-  let preview = $state.raw<{ typed: string; entry: string | null; error: string | null } | null>(null);
+  // Vorschau per dry_run (web-api.md 20.2) beim Ausschliessen und Hinzufügen, kurz verzögert beim Tippen
+  let preview = $state.raw<{ typed: string; entry: string | null; error: string | null; needsNc: boolean; broad: boolean } | null>(null);
   let previewSeq = 0;
   $effect(() => {
-    const value = op === 'exclude' ? typed.trim() : '';
+    const value = op !== 'remove' ? typed.trim() : '';
     if (!value || done || !scope.editable) return;
     const seq = ++previewSeq;
     const timer = setTimeout(() => {
-      void scope.preview({ op: 'exclude', entry: value }).then((r) => {
+      void scope.preview({ op: op === 'add' ? 'add' : 'exclude', entry: value }).then((r) => {
         if (seq !== previewSeq) return;
-        preview = r.ok ? { typed: value, entry: r.result.entries?.[0] ?? value, error: null } : { typed: value, entry: null, error: r.error };
+        preview = r.ok
+          ? { typed: value, entry: r.result.entries?.[0] ?? value, error: null, needsNc: !!r.result.needs_not_customer, broad: r.result.broad === true }
+          : r.code === 'guardrail'
+            ? { typed: value, entry: value, error: null, needsNc: true, broad: false }
+            : { typed: value, entry: null, error: r.error, needsNc: false, broad: false };
       });
     }, 250);
     return () => clearTimeout(timer);
@@ -54,9 +62,24 @@
   const current = $derived(preview && preview.typed === target ? preview : null);
   // der genaue Eintrag: nach dem Speichern der gespeicherte, vorher die Vorschau des Servers
   const shown = $derived(done ? (done.entries?.length ? done.entries.join(', ') : target) : op === 'remove' ? entry : (current?.entry ?? target));
-  const undoText = $derived(op === 'exclude' ? t('scope.edit.undoExclude') : list === 'exclude' ? t('scope.edit.undoReexclude') : t('scope.edit.undoRemove'));
+  const undoText = $derived(
+    op === 'add' ? t('scope.edit.undoAdd') : op === 'exclude' ? t('scope.edit.undoExclude') : list === 'exclude' ? t('scope.edit.undoReexclude') : t('scope.edit.undoRemove'),
+  );
+  // 403 guardrail beim Schreiben: wie die Vorschau sperren, mit dem Befehl fürs Terminal (E132)
+  let guardrailFor = $state<string | null>(null);
+  const needsNc = $derived(op === 'add' && (!!current?.needsNc || (guardrailFor !== null && guardrailFor === target)));
   const blockReason = $derived(
-    busy ? t('next.loading') : app.offline ? t('err.network') : !target ? t('scope.edit.empty') : current?.error ? current.error : null,
+    busy
+      ? t('next.loading')
+      : app.offline
+        ? t('err.network')
+        : !target
+          ? t('scope.edit.empty')
+          : needsNc
+            ? t('scope.edit.err.guardrail')
+            : current?.error
+              ? current.error
+              : null,
   );
 
   async function submit(): Promise<void> {
@@ -67,10 +90,12 @@
     busy = false;
     if (!res.ok) {
       error = res.error;
+      if (res.code === 'guardrail') guardrailFor = target;
       return;
     }
     done = res.result;
-    app.ui.notify('info', op === 'remove' ? t('scope.edit.removed') : t('scope.edit.excluded'));
+    app.ui.notify('info', op === 'add' ? t('scope.add.notice') : op === 'remove' ? t('scope.edit.removed') : t('scope.edit.excluded'));
+    if (op === 'add') void project.next.load();
     void app.refreshStatus();
   }
 
@@ -87,7 +112,7 @@
   }
 </script>
 
-<Dialog title={op === 'remove' ? t('scope.edit.removeTitle') : t('scope.edit.excludeTitle')} {onclose} size="m">
+<Dialog title={op === 'add' ? t('scope.edit.addTitle') : op === 'remove' ? t('scope.edit.removeTitle') : t('scope.edit.excludeTitle')} {onclose} size="m" tone={op === 'add' && current?.broad && !done ? 'attention' : 'neutral'}>
   {#if !scope.editable}
     <p class="text">{t('scope.add.customer')}</p>
     <CommandLine command="ariadne scope" size="s" />
@@ -107,10 +132,16 @@
     <p class="hint">{list === 'include' ? t('scope.edit.removeInclude') : t('scope.edit.removeExclude')}</p>
     <p class="hint">{t('scope.add.decision')}</p>
   {:else}
-    <TextField id="scope-exclude" label={t('scope.edit.excludeLabel')} mono bind:value={typed} maxlength={253} autofocus />
+    <TextField id={op === 'add' ? 'scope-add-entry' : 'scope-exclude'} label={op === 'add' ? t('scope.edit.addLabel') : t('scope.edit.excludeLabel')} mono bind:value={typed} maxlength={253} autofocus />
     {#if target}<div class="box"><p class="entry big" data-testid="scope-edit-entry"><Txt value={shown} mono max={200} /></p></div>{/if}
     {#if current?.error && !error}<p class="error" data-testid="scope-edit-preview-error">{current.error}</p>{/if}
-    <p class="hint">{t('scope.edit.excludeHint')}</p>
+    {#if op === 'add' && current?.broad}<p class="warn" role="note" data-testid="scope-broad"><span aria-hidden="true">!</span> {t('scope.add.broad')}</p>{/if}
+    {#if needsNc}
+      <p class="warn" role="note" data-testid="scope-edit-guardrail"><span aria-hidden="true">!</span> {t('scope.add.outsideLab')}</p>
+      <p class="hint">{t('scope.add.guardrailCmd')}</p>
+      <CommandLine command={addCommand(current?.entry ?? target)} size="s" />
+    {/if}
+    <p class="hint">{op === 'add' ? t('scope.edit.addHint') : t('scope.edit.excludeHint')}</p>
     <p class="hint">{t('scope.add.decision')}</p>
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -126,7 +157,7 @@
       <Button variant="primary" onclick={onclose}>{t('scope.add.close')}</Button>
     {:else}
       <Button onclick={onclose}>{t('scope.add.cancel')}</Button>
-      <Button variant="primary" disabled={!!blockReason} reason={blockReason} onclick={submit}>{op === 'remove' ? t('scope.edit.remove') : t('scope.edit.exclude')}</Button>
+      <Button variant="primary" disabled={!!blockReason} reason={blockReason} onclick={submit}>{op === 'add' ? t('scope.edit.add') : op === 'remove' ? t('scope.edit.remove') : t('scope.edit.exclude')}</Button>
     {/if}
   {/snippet}
 </Dialog>
@@ -164,6 +195,11 @@
   .error {
     margin: var(--sp-2) 0 0;
     color: var(--error);
+  }
+  .warn {
+    margin: var(--sp-2) 0 0;
+    color: var(--attention);
+    font-size: var(--fs-s);
   }
   .undo-entry {
     font-weight: 600;

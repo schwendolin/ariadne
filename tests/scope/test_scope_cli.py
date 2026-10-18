@@ -16,7 +16,7 @@ from ariadne.project.guardrails import LabAllowlist
 from ariadne.scope.change import plan_change
 
 NET = "10.36.198.0/24"
-NAME = "recovery.vantis.internal"
+NAME = "recovery.vantis.htb"
 
 
 class FakeDaemon:
@@ -85,7 +85,7 @@ def test_show_lists_include_exclude_windows(fake, capsys):
 
 def test_add_asks_with_exact_entry_and_writes_on_yes(fake, capsys, monkeypatch):
     asked = _tty(monkeypatch, "j")
-    assert main(["scope", "add", "Recovery.Vantis.Internal."]) == 0
+    assert main(["scope", "add", "Recovery.Vantis.Htb."]) == 0
     out = capsys.readouterr().out
     assert f"Neu im Scope: {NAME}" in out and asked == ["Übernehmen? [j/N] "]
     assert [c[1].get("dry_run", False) for c in fake.calls] == [True, False]
@@ -130,9 +130,9 @@ def test_undo_takes_latest_change(fake, capsys, monkeypatch):
 
 
 def test_start_hint_shows_scope_and_command(monkeypatch, capsys):
-    lines = scope_cli.add_hint([NAME, NET, "*.vantis.internal"], [NET])
+    lines = scope_cli.add_hint([NAME, NET, "*.vantis.htb"], [NET])
     assert lines[1] == f"Scope jetzt: {NET}"
-    assert lines[2] == f"Erweitern: ariadne scope add {NAME} '*.vantis.internal'"
+    assert lines[2] == f"Erweitern: ariadne scope add {NAME} '*.vantis.htb'"
     assert scope_cli.add_hint([NET], [NET])[-1] == "Alle Ziele stehen schon im Scope."
     assert "Ungültig" in scope_cli.add_hint(["a b"], [NET])[-1]
 

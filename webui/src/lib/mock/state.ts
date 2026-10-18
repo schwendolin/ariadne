@@ -16,6 +16,9 @@
  *   Praxistest 1 (ui): praxis (Scope-Warnung für recovery.vantis.internal, zwei Klärungen E130),
  *   customer (dasselbe im Profil customer: nur Anzeige), ende (nach 1,5 s endet die Sitzung mit
  *   dem Ereignis `session`, Grund stop).
+ *   Praxistest 2 (ui, E131): offen (offener Scope ohne Einschlüsse, «kein Kundenauftrag» bestätigt,
+ *   Öffnen in der Zeitachse), zu (geschlossen, bestätigt: Öffnen geht), praxisnc (wie praxis, mit
+ *   bestätigtem «kein Kundenauftrag»: .internal lässt sich aufnehmen, E132).
  */
 import type {
   AiJob,
@@ -35,6 +38,7 @@ import type {
   PrefsView,
   Profile,
   ScopeChange,
+  ScopeChangeResult,
   ScopeView,
   ScopeWarning,
   SeenView,
@@ -48,7 +52,7 @@ import * as base from './data/base';
 import * as e4 from './data/etappe4';
 import * as history from './data/history';
 import * as map from './data/map';
-import { praxisClarify, praxisWarning } from './handlers/scope';
+import { openItem, OPEN_ID, praxisClarify, praxisWarning } from './handlers/scope';
 
 export const SCENARIOS = [
   'normal', 'calm', 'empty', 'noproject', 'locked', 'held', 'offline', 'many', 'hostile', 'login', 'chain', 'noclip',
@@ -59,6 +63,8 @@ export const SCENARIOS = [
   'ki', 'kiwarn', 'kiover', 'kigone', 'kirefuse', 'kiinject', 'kirun', 'kioff', 'versions',
   // Praxistest 1: Scope erweitern (E129, E130), Profil customer, Abmeldung mit Grund
   'praxis', 'customer', 'ende',
+  // Praxistest 2: offener Scope (E131); praxisnc: praxis mit bestätigtem «kein Kundenauftrag» (E132)
+  'offen', 'zu', 'praxisnc',
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
@@ -84,13 +90,15 @@ export interface MockState {
   /** Scope-Warnung (Status und Spalte); null: Standard aus base.status */
   scopeWarning: ScopeWarning | null;
   /** Scope des Projekts (E129) und Profil */
-  scope: Pick<ScopeView, 'include' | 'exclude' | 'windows' | 'version'>;
+  scope: Pick<ScopeView, 'include' | 'exclude' | 'windows' | 'version' | 'open'>;
+  /** d.lab.not_customer bestätigt (nur im Terminal) */
+  notCustomer: boolean;
   /** E130: verworfene Klärungen (d.suggestion.dismiss mit Schlüssel «scope-name:») */
   dismissedScope: string[];
   /** Entscheid-ID des Verwerfens: verworfene Klärung (für d.revoke) */
   dismissedScopeItems: Record<string, NextView['clarify'][number]>;
   profile: Profile;
-  scopeDecisions: { decision_id: string; change: ScopeChange }[];
+  scopeDecisions: { decision_id: string; change: ScopeChange; effect?: Required<Pick<ScopeChangeResult, 'include_added' | 'include_removed' | 'exclude_added' | 'exclude_removed'>> }[];
   /** Etappe 4: KI-Modus, letzter Auftrag, Screenshots, Exporte, Phasenkorrekturen */
   aiMode: e4.AiMode;
   aiJob: AiJob | null;
@@ -152,7 +160,8 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     positions: { positions: {}, updated_at: null },
     scopeAcked: true,
     scopeWarning: null,
-    scope: { include: [base.SCOPE], exclude: [], windows: [], version: 1 },
+    scope: { include: [base.SCOPE], exclude: [], windows: [], version: 1, open: false },
+    notCustomer: false,
     profile: 'lab',
     scopeDecisions: [],
     dismissedScope: [],
@@ -170,7 +179,7 @@ export function createState(scenario: Scenario = 'normal'): MockState {
   if (scenario === 'allon') s.terminals = s.terminals.map((x) => ({ ...x, state: 'on' as const, pause_until: null }));
   if (scenario === 'present') s.presentation = true;
   if (scenario === 'scope') s.scopeAcked = false;
-  if (scenario === 'praxis' || scenario === 'customer') {
+  if (scenario === 'praxis' || scenario === 'customer' || scenario === 'praxisnc') {
     s.scopeAcked = false;
     s.scopeWarning = praxisWarning();
     s.next = { ...s.next, clarify: [...praxisClarify(), ...s.next.clarify] };
@@ -178,6 +187,16 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     s.scope = { ...s.scope, exclude: ['192.168.56.1'], windows: [{ days: 'mon-fri', from: '08:00', to: '18:00', tz: 'Europe/Zurich' }] };
   }
   if (scenario === 'customer') s.profile = 'customer';
+  if (scenario === 'offen' || scenario === 'zu' || scenario === 'praxisnc') {
+    s.notCustomer = true;
+    if (scenario !== 'praxisnc') s.scope = { ...s.scope, exclude: ['192.168.56.1'] };
+  }
+  if (scenario === 'offen') {
+    // wie `ariadne start neu` ohne --target (E131): offen, keine Einschlüsse, Öffnen als Entscheid
+    s.scope = { ...s.scope, include: [], open: true, version: 2 };
+    s.scopeDecisions.push({ decision_id: OPEN_ID, change: { op: 'open', entry: '' } });
+    s.timeline = [openItem(), ...s.timeline];
+  }
   if (scenario === 'local') s.origin = 'local';
   if (scenario === 'budget') {
     s.terminals = s.terminals.map((x) =>

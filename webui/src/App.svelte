@@ -33,6 +33,7 @@
   import ScopeViewDialog from './lib/shell/ScopeViewDialog.svelte';
   import ScopeAddDialog from './lib/scope/ScopeAddDialog.svelte';
   import ScopeEditDialog from './lib/scope/ScopeEditDialog.svelte';
+  import ScopeOpenDialog from './lib/scope/ScopeOpenDialog.svelte';
   import SettingsPanel from './lib/shell/SettingsPanel.svelte';
   import ShotPanel from './lib/shots/ShotPanel.svelte';
   import StateView from './lib/shell/StateView.svelte';
@@ -130,6 +131,8 @@
   <ScopeAddDialog {app} {project} req={dialog} onclose={() => app.ui.closeDialog()} />
 {:else if dialog?.kind === 'scope-edit' && project}
   <ScopeEditDialog {app} {project} op={dialog.op} entry={dialog.entry} list={dialog.list} onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'scope-open' && project}
+  <ScopeOpenDialog {app} {project} op={dialog.op} onclose={() => app.ui.closeDialog()} />
 {:else if dialog?.kind === 'context' && project}
   <ContextDialog {app} {project} terminalId={dialog.terminalId} itemKey={dialog.itemKey} fromOff={dialog.fromOff} onclose={() => app.ui.closeDialog()} />
 {/if}

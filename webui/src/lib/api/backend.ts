@@ -170,6 +170,11 @@ export interface Backend {
   subscribe(handlers: StreamHandlers): () => void;
 }
 
+/** Rumpf von `POST /scope/changes`: `open` und `close` (E131) ohne `entries`. */
+function scopeBody(change: ScopeChange): { op: ScopeChange['op']; entries?: string[] } {
+  return change.op === 'open' || change.op === 'close' ? { op: change.op } : { op: change.op, entries: [change.entry] };
+}
+
 export class HttpBackend implements Backend {
   readonly kind = 'http' as const;
   private readonly api: ApiClient;
@@ -258,10 +263,10 @@ export class HttpBackend implements Backend {
     return this.api.get<ScopeOptions>(apiPath('p', pid, 'scope', 'options'), { query: { value }, signal });
   }
   changeScope(pid: string, change: ScopeChange) {
-    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { op: change.op, entries: [change.entry], client_ref: clientRef() });
+    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { ...scopeBody(change), client_ref: clientRef() });
   }
   previewScope(pid: string, change: ScopeChange) {
-    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { op: change.op, entries: [change.entry], dry_run: true });
+    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { ...scopeBody(change), dry_run: true });
   }
   revertScope(pid: string, decisionId: string) {
     return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { op: 'revert', decision_id: decisionId, client_ref: clientRef() });

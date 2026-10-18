@@ -30,6 +30,7 @@ from ariadne.ai.providers import CloudProvider, LocalProvider, ProviderError, Pr
 from ariadne.ai.situation import Situation, build_situation
 from ariadne.ai.store import done_titles
 from ariadne.rules.engine import evaluate
+from ariadne.scope.change import scope_open
 from ariadne.store.api import AppendItem
 
 __all__ = [
@@ -91,10 +92,10 @@ def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def project_flags(conn: Any, profile: str = "lab") -> dict[str, bool]:
+def project_flags(conn: Any, profile: str = "lab", scope_open: bool = False) -> dict[str, bool]:
     """Freigabe und Leitplanken aus der Projektion: ``cloud_allowed`` (aktiver ``d.ai.allow_cloud``),
     ``not_customer`` (aktiver ``d.lab.not_customer``), ``public_scope`` (öffentliche Adresse oder
-    Domain mit Urteil ``in``, Architektur 8.1)."""
+    Domain mit Urteil ``in``, Architektur 8.1; ein offener Scope zählt immer so, E131)."""
     rows = conn.execute(
         "SELECT id, kind, payload_json FROM decision "
         "WHERE kind IN ('d.ai.allow_cloud', 'd.lab.not_customer', "
@@ -118,7 +119,7 @@ def project_flags(conn: Any, profile: str = "lab") -> dict[str, bool]:
     return {
         "cloud_allowed": "d.ai.allow_cloud" in active,
         "not_customer": "d.lab.not_customer" in active,
-        "public_scope": public,
+        "public_scope": public or scope_open,
     }
 
 
@@ -282,8 +283,9 @@ class Gateway:
 
     async def flags(self, p: Any) -> dict[str, bool]:
         profile = p.info.profile
+        is_open = scope_open(p.settings)  # E131: offener Scope zählt wie öffentliche Adressen
         await self.api.sync(p)  # Freigabe und Leitplanken aus Entscheiden: alles Gespeicherte auswerten
-        return await self.api.query(p, lambda c: project_flags(c, profile))
+        return await self.api.query(p, lambda c: project_flags(c, profile, is_open))
 
     async def status(self, p: Any) -> dict[str, Any]:
         cfg = self.config()

@@ -25,6 +25,7 @@ Pro Lab und nach jedem Neustart der VM:
 ariadne start lame --target 10.10.10.3   # Passphrase, Projekt anlegen oder öffnen
 ariadne start                            # später: das zuletzt aktive Projekt
 ariadne scope add recovery.lab           # Scope später erweitern (fragt [j/N], rückgängig: ariadne scope undo)
+ariadne start uebung                     # ohne --target: fragt nach, legt ein Projekt mit offenem Scope an (nur ohne Kundenauftrag)
 ```
 
 `ariadne start` fragt, ob die letzten Minuten aus dem Vorlauf übernommen werden sollen. Ab dann nehmen alle Terminals auf, auch parallele, mit der Zeit des Shims auf etwa 1 ms genau. Titel: `[REC lame]`.

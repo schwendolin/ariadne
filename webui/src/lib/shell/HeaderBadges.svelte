@@ -6,7 +6,8 @@
   kürzen sich dort statt in die Reiter zu laufen. Zuerst kürzt die Pause; held behält mindestens
   «… nicht gespeichert» (unter 1280 px als Kurzform «! pts/4 nicht gespeichert»), nie nur «!».
   Unter 1440 px stehen Pause, Scope und Präsentation in Kurzform (voller Text im title).
-  Besitzer: ui-fundament.
+  E131: «Scope offen» als Kennzeichen, solange der Scope des Projekts offen ist (führt zu den
+  Einstellungen). Besitzer: ui-fundament, «Scope offen»: ui.
 -->
 <script lang="ts">
   import { t } from '../i18n';
@@ -14,6 +15,7 @@
   import { termShort } from '../util/format';
   import { hhmm } from '../util/time';
   import { url } from '../url/state.svelte';
+  import { scopeOpen } from '../scope/open';
 
   let { app }: { app: AppState } = $props();
   const s = $derived(app.status);
@@ -23,6 +25,7 @@
   const paused = $derived(terms.filter((x) => x.state === 'paused'));
   const held = $derived(terms.filter((x) => x.state === 'held'));
   const scope = $derived(s?.scope_warning && s.scope_warning.acked !== true ? s.scope_warning : null);
+  const open = $derived(!!s?.project && scopeOpen(app));
 </script>
 
 {#if waitingTerm && waiting}
@@ -69,6 +72,11 @@
     <span class="bang" aria-hidden="true">!</span><span class="txt"><span class="long">{t('header.scopeWarning')}</span><span class="short">{t('header.scopeShort')}</span></span>
   </button>
 {/if}
+{#if open}
+  <button type="button" class="badge attention" data-badge="scope-open" title={t('header.scopeOpenTitle')} onclick={() => url.set({ tafel: 'einstellungen' }, { push: true })}>
+    <span class="txt">{t('header.scopeOpen')}</span>
+  </button>
+{/if}
 {#if s?.disk_low}
   <span class="badge attention" data-badge="disk">{t('header.diskLow')}</span>
 {/if}
@@ -102,6 +110,7 @@
   }
   .badge[data-badge='held'],
   .badge[data-badge='scope'],
+  .badge[data-badge='scope-open'],
   .badge[data-badge='presentation'] {
     flex: none;
   }

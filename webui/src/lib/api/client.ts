@@ -58,6 +58,7 @@ const KNOWN_CODES = new Set<string>([
   'conflict', 'too_large', 'host', 'validation', 'locked', 'rate_limited', 'not_implemented',
   'unavailable', 'internal', 'clipboard_tool', 'clipboard_session',
   'shot_display', 'shot_wayland', 'shot_window', 'shot_region', 'shot_failed', 'guardrail',
+  'no_include', 'noop',
 ]);
 
 export interface ApiClientOptions {

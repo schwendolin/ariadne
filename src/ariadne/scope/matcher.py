@@ -12,6 +12,9 @@ Regeln:
 * Mehrdeutige Schreibweisen: das strengste Urteil aller Lesarten gilt.
 * Zeitfenster nur, wenn ``at_utc_ns`` gegeben ist; ``in`` ausserhalb aller
   Fenster wird ``outside_window``. Ungültige Fenster passen nie (fail-closed).
+* Offener Scope (E131, ``[scope] open = true``): wirkt wie ein Einschluss, der jede
+  gültige Kennung trifft (IP, Name, URL-Host, ``svc:``-Host, Regel ``open``). Ausschlüsse
+  schlagen ihn, Sonderadressen sind nie implizit ``in``, Zeitfenster gelten wie sonst.
 
 Keine DNS-Auflösung. Namen erhalten Scope nur über eigene Regeln.
 """
@@ -125,6 +128,7 @@ class ScopeMatcher:
     windows: Sequence[Mapping[str, Any]] = ()
     version: int = 1
     errors: list[str] = field(default_factory=list)
+    open: bool = False  # E131: offener Scope
 
     def __post_init__(self) -> None:
         self._inc = [r for r in (self._rule(e, "include") for e in self.include) if r]
@@ -151,8 +155,10 @@ class ScopeMatcher:
             v = scope.get(key, [])
             return list(v) if isinstance(v, list | tuple) else []
 
-        # Nicht-Text-Einträge gehen mit, damit _rule sie als Fehler meldet
-        return cls(_list("include"), _list("exclude"), _list("windows"), version)
+        # Nicht-Text-Einträge gehen mit, damit _rule sie als Fehler meldet. ``open`` nur als echtes
+        # true (fail-closed: alles andere ist geschlossen).
+        return cls(_list("include"), _list("exclude"), _list("windows"), version,
+                   open=scope.get("open") is True)
 
     # ------------------------------------------------------------------ #
     def _rule(self, entry: Any, where: str) -> _Rule | None:
@@ -232,6 +238,8 @@ class ScopeMatcher:
         for r in self._inc:
             if any(a in n for n in r.nets):
                 return "in", f"include:{r.entry}"
+        if self.open:
+            return "in", "open"
         return "out", None
 
     def _judge_net(self, net: IPNet) -> tuple[VerdictKind, str | None]:
@@ -246,6 +254,8 @@ class ScopeMatcher:
         for r in self._inc:
             if any(n.version == net.version and net.subnet_of(n) for n in r.nets):  # type: ignore[arg-type]
                 return "in", f"include:{r.entry}"
+        if self.open:
+            return "in", "open"
         return "out", None
 
     def _judge_name(self, name: str) -> tuple[VerdictKind, str | None]:
@@ -255,6 +265,8 @@ class ScopeMatcher:
         for r in self._inc:
             if _name_hit(r, name):
                 return "in", f"include:{r.entry}"
+        if self.open:
+            return "in", "open"
         return "out", None
 
     def _judge_url(self, t: _Target) -> tuple[VerdictKind, str | None]:

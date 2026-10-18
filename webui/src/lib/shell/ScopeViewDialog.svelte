@@ -8,17 +8,20 @@
   import type { AppState } from '../stores/app.svelte';
   import Dialog from '../ui/Dialog.svelte';
   import Txt from '../ui/Txt.svelte';
+  import { scopeOpen } from '../scope/open';
 
   let { app, onclose }: { app: AppState; onclose: () => void } = $props();
   const info = $derived(app.project?.info ?? null);
+  const open = $derived(scopeOpen(app));
 </script>
 
 <Dialog title={t('scope.view.title')} {onclose} size="m">
+  <p class="state" class:open data-testid="scope-view-state">{open ? t('scope.state.open') : t('scope.state.closed')}</p>
   <h3>{t('scope.view.include')}</h3>
   {#if info && info.scope.include.length > 0}
     <ul>{#each info.scope.include as s, i (`${i}:${s}`)}<li><Txt value={s} mono /></li>{/each}</ul>
   {:else}
-    <p class="none">{t('scope.view.empty')}</p>
+    <p class="none">{open ? t('scope.view.open') : t('scope.view.empty')}</p>
   {/if}
   <h3>{t('scope.view.exclude')}</h3>
   {#if info && info.scope.exclude.length > 0}
@@ -45,6 +48,13 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+  .state {
+    margin: 0;
+    font-weight: 600;
+  }
+  .state.open {
+    color: var(--attention);
   }
   .none {
     margin: 0;

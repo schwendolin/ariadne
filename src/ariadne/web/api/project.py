@@ -148,9 +148,11 @@ def add_routes(router: APIRouter, api: Api) -> None:
         body = {
             **brief,
             "created_at": iso(data["created"]),
-            "scope": {"include": bag.many(include), "exclude": bag.many(exclude), "version": data["version"]},
+            "scope": {"include": bag.many(include), "exclude": bag.many(exclude), "version": data["version"],
+                      "open": brief["scope_open"]},
             "lab_guard": (
-                {"public_targets": _public(include), "confirmed_not_customer": data["not_customer"]}
+                {"public_targets": _public(include) or brief["scope_open"],
+                 "confirmed_not_customer": data["not_customer"]}
                 if lab
                 else None
             ),

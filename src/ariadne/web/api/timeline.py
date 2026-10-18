@@ -92,6 +92,8 @@ _SCOPE_OP = {  # E129: Änderungen über ariadne scope bzw. POST /scope/changes
     "remove": "Aus dem Scope entfernt",
     "exclude": "Aus dem Scope ausgeschlossen",
     "revert": "Scope-Änderung rückgängig",
+    "open": "Scope geöffnet",  # E131
+    "close": "Scope geschlossen",
 }
 
 
@@ -884,6 +886,11 @@ def _decision_extra(e: Mapping[str, Any], ctx: Mapping[str, Any], b: Bag) -> dic
         scope_change = {
             "op": ch.get("op") if ch.get("op") in _SCOPE_OP else None,
             "entries": [b(x) or "" for x in entries],
+            # E131: Listen der Änderung, damit der Text bei Rückgängig stimmt
+            **{k: [b(x) or "" for x in (ch.get(k) or []) if isinstance(x, str)][:50]
+               for k in ("include_added", "include_removed", "exclude_added", "exclude_removed")},
+            "open_before": ch.get("open_before") if isinstance(ch.get("open_before"), bool) else None,
+            "open_after": ch.get("open_after") if isinstance(ch.get("open_after"), bool) else None,
             "version": data.get("version") if isinstance(data.get("version"), int) else None,
             "revert_of": ch.get("revert_of") if isinstance(ch.get("revert_of"), str) else None,
             "reverted_by": by,

@@ -181,7 +181,9 @@ def test_cli_full_flow_and_canary(cli_env, tmp_path):
     assert res.returncode == 1 and "Projekt lame ist beendet mit ariadne stop. Weiter: ariadne start lame" \
         in res.stderr
     res = _cli(env, "start", "nix", secret=PW)  # gescheiterter Start lässt den Tresor nicht offen
-    assert res.returncode == 1 and "existiert nicht" in res.stderr
+    # E131: ohne Terminal und ohne --target nur mit --open-scope --not-customer, sonst nichts angelegt
+    assert res.returncode == 1 and "Projekt nix gibt es noch nicht" in res.stderr
+    assert "--open-scope --not-customer" in res.stderr
     assert "Tresor:   gesperrt" in _cli(env, "status").stdout
     res = _cli(env, "start", "lame", secret=PW + "x")
     assert res.returncode == 1 and "Passphrase falsch" in res.stderr

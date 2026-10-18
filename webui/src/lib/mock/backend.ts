@@ -73,7 +73,15 @@ import * as e4 from './data/etappe4';
 import * as history from './data/history';
 import { applyHistoryDecision } from './handlers/history';
 import { applyMapDecision } from './handlers/map';
-import { applyScopeChange, revertScopeDecision, scopeOptions, scopeView } from './handlers/scope';
+import { applyScopeChange, revertScopeDecision, scopeOptions, scopeView, type ScopeRefusal } from './handlers/scope';
+
+/** Fehler wie der Daemon (web-api.md 20): 422, 409 (auch no_include, noop), 403 guardrail */
+function scopeError(r: ScopeRefusal): ApiError {
+  if (r === 'validation') return new ApiError('validation', 422, 'validation');
+  if (r === 'guardrail') return new ApiError('guardrail', 403, 'guardrail');
+  if (r === 'no_include' || r === 'noop') return new ApiError(r, 409, r);
+  return new ApiError('conflict', 409, 'conflict');
+}
 import { createState, newDecisionId, scenarioFromLocation, type MockState, type Scenario } from './state';
 
 /**
@@ -175,7 +183,8 @@ export class MockBackend implements Backend {
       const st = base.status(s.terminals, s.generation, s.presentation, s.origin);
       if (s.scopeWarning) st.scope_warning = s.scopeWarning;
       if (st.scope_warning) st.scope_warning = { ...st.scope_warning, acked: s.scopeAcked };
-      if (st.project) st.project = { ...st.project, profile: s.profile };
+      if (st.project) st.project = { ...st.project, profile: s.profile, scope_open: s.scope.open === true };
+      if (st.project) st.scope_open = s.scope.open === true;
       if (s.scenario === 'noproject') {
         return { ...st, project: null, active: null, terminals: st.terminals.map((t) => ({ ...t, state: 'preroll' as const, pause_until: null, ordinal: null, label: null })), idle: null, generation: null, scope_warning: null, preroll: { ...st.preroll, terminals: 3, seconds: 900 } };
       }
@@ -252,7 +261,7 @@ export class MockBackend implements Backend {
     return this.wait(() => {
       this.check(pid);
       const sc = this.state.scope;
-      return { ...base.project(), profile: this.state.profile, scope: { include: [...sc.include], exclude: [...sc.exclude], version: sc.version } };
+      return { ...base.project(), profile: this.state.profile, scope: { include: [...sc.include], exclude: [...sc.exclude], version: sc.version, open: sc.open === true }, scope_open: sc.open === true };
     });
   }
   graph(pid: string, _layers?: GraphLayer[]): Promise<GraphView> {
@@ -320,9 +329,7 @@ export class MockBackend implements Backend {
       // E129: im Profil customer nur im Terminal; im Präsentationsmodus nie
       if (this.state.profile === 'customer' || this.state.presentation) throw err('policy', 403);
       const r = applyScopeChange(this.state, change, newDecisionId());
-      if (r === 'validation') throw err('validation', 422);
-      if (r === 'conflict') throw err('conflict', 409);
-      if (r === 'guardrail') throw new ApiError('guardrail', 403, 'guardrail');
+      if (typeof r === 'string') throw scopeError(r);
       this.afterScopeChange(pid);
       return r;
     });
@@ -332,9 +339,7 @@ export class MockBackend implements Backend {
       this.check(pid);
       if (this.state.profile === 'customer') throw err('policy', 403);
       const r = applyScopeChange(this.state, change, '', true);
-      if (r === 'validation') throw err('validation', 422);
-      if (r === 'conflict') throw err('conflict', 409);
-      if (r === 'guardrail') throw new ApiError('guardrail', 403, 'guardrail');
+      if (typeof r === 'string') throw scopeError(r);
       return r;
     });
   }
@@ -345,6 +350,7 @@ export class MockBackend implements Backend {
       if (this.state.profile === 'customer' || this.state.presentation) throw err('policy', 403);
       const r = revertScopeDecision(this.state, decisionId, newDecisionId());
       if (r === 'not_found') throw err('not_found', 404);
+      if (typeof r === 'string') throw scopeError(r);
       this.afterScopeChange(pid);
       return r;
     });

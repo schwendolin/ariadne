@@ -18,7 +18,8 @@ const column = (page: Page) => page.locator('section[data-keyzone="next"]');
 const shot = (page: Page, name: string) => page.screenshot({ path: resolve(SHOTS, `${name}.png`) });
 
 test('Scope-Warnung: In den Scope aufnehmen, Wildcard, Neuauswertung, Warnung verschwindet', async ({ page }) => {
-  await openMock(page, 'praxis');
+  // E132: .internal nur mit bestätigtem «kein Kundenauftrag» (Szenario praxisnc), sonst wie bisher
+  await openMock(page, 'praxisnc');
   const entry = column(page).locator('[data-scope-entry]');
   await expect(entry).toContainText('curl http://recovery.vantis.internal/login');
   await expect(entry.getByRole('button', { name: 'Quittieren' })).toBeVisible();
@@ -46,11 +47,10 @@ test('E130: Klärung mit Wahl Name oder Wildcard, Warnhinweis bei öffentlicher 
   const card = col.locator('.card', { hasText: 'gehört laut nmap zu' });
   await expect(card).toContainText('recovery.vantis.internal gehört laut nmap zu 192.168.56.101. In den Scope aufnehmen?');
   await expect(card.getByLabel(/\*\.vantis\.internal/)).toBeVisible();
+  // E132: .internal liegt ausserhalb der Lab-Allowlist: ohne «kein Kundenauftrag» gesperrt, mit Befehl
+  await expect(card.getByTestId('clarify-scope-guardrail')).toContainText('ariadne scope add recovery.vantis.internal --not-customer');
+  await expect(card.getByRole('button', { name: /Aufnehmen/ })).toBeDisabled();
   await shot(page, '05-e130-intern');
-  await card.getByRole('button', { name: /Aufnehmen/ }).click();
-  const dlg = page.getByRole('dialog', { name: 'In den Scope aufnehmen' });
-  await expect(dlg.getByTestId('scope-add-entry')).toHaveText('recovery.vantis.internal');
-  await dlg.getByRole('button', { name: 'Abbrechen' }).click();
 
   await col.locator('button.line', { hasText: 'vpn.vantis-group.com' }).click();
   const pub = col.locator('.card', { hasText: 'vpn.vantis-group.com' });

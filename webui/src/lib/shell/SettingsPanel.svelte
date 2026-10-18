@@ -6,6 +6,9 @@
   Abschnitt Scope (E129): Ziele, Ausschlüsse und Zeitfenster aus `GET /scope`; «Entfernen …» pro
   Eintrag und «Ausschliessen …» öffnen den Bestätigungsdialog; im Profil customer nur Anzeige mit
   Hinweis auf `ariadne scope`. Einträge als Text (Txt). Besitzer: ui-fundament, Scope: ui.
+  E131: Zustandszeile offen/geschlossen, «Scope öffnen …» bzw. «Scope schliessen …» (Dialog mit
+  dry_run), «Hinzufügen …»; bei offenem Scope ohne Einschlüsse steht «offen» statt «keine».
+  Im Profil customer kein Knopf.
 -->
 <script lang="ts">
   import { t } from '../i18n';
@@ -16,6 +19,7 @@
   import Txt from '../ui/Txt.svelte';
   import type { ScopeWindow } from '../api/types';
   import { url } from '../url/state.svelte';
+  import { scopeOpen } from '../scope/open';
 
   let { app }: { app: AppState } = $props();
   const p = $derived(app.prefs.prefs);
@@ -30,6 +34,7 @@
   const windows = $derived(sv?.windows ?? []);
   const editable = $derived(!!scopeStore && scopeStore.editable && !!app.project);
   const editReason = $derived(app.offline ? t('err.network') : null);
+  const open = $derived(scopeOpen(app));
 
   function windowText(w: ScopeWindow): string {
     return [w.days, w.from && w.to ? `${w.from}–${w.to}` : (w.from ?? w.to), w.tz].filter(Boolean).join(' ');
@@ -41,6 +46,14 @@
 
   function excludeEntry(): void {
     app.ui.openDialog({ kind: 'scope-edit', op: 'exclude' });
+  }
+
+  function addEntry(): void {
+    app.ui.openDialog({ kind: 'scope-edit', op: 'add' });
+  }
+
+  function toggleOpen(): void {
+    app.ui.openDialog({ kind: 'scope-open', op: open ? 'close' : 'open' });
   }
 
   function aiText(): string {
@@ -114,8 +127,12 @@
   {#if app.project}
     <section class="scope" aria-labelledby="set-scope" data-testid="settings-scope">
       <h3 id="set-scope">{t('scope.view.title')}</h3>
+      <div class="state" class:open data-testid="scope-state">
+        <span>{open ? t('scope.state.open') : t('scope.state.closed')}</span>
+        {#if editable}<button type="button" class="small" disabled={!!editReason} title={editReason ?? undefined} onclick={toggleOpen}>{open ? t('scope.close.button') : t('scope.open.button')}</button>{/if}
+      </div>
       <h4>{t('scope.view.include')}</h4>
-      {#if include.length === 0}<p class="none">{t('scope.view.empty')}</p>{/if}
+      {#if include.length === 0}<p class="none">{open ? t('scope.view.open') : t('scope.view.empty')}</p>{/if}
       <ul>
         {#each include as e, i (`${i}:${e}`)}
           <li>
@@ -135,7 +152,10 @@
         {/each}
       </ul>
       {#if editable}
-        <button type="button" class="small add" disabled={!!editReason} title={editReason ?? undefined} onclick={excludeEntry}>{t('scope.edit.excludeButton')}</button>
+        <div class="adds">
+          <button type="button" class="small add" disabled={!!editReason} title={editReason ?? undefined} onclick={addEntry}>{t('scope.edit.addButton')}</button>
+          <button type="button" class="small add" disabled={!!editReason} title={editReason ?? undefined} onclick={excludeEntry}>{t('scope.edit.excludeButton')}</button>
+        </div>
       {/if}
       <h4>{t('scope.view.windows')}</h4>
       {#if windows.length === 0}
@@ -228,8 +248,28 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  .add {
+  .adds {
+    display: flex;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
     margin-top: var(--sp-2);
+  }
+  .state {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border-radius: var(--r-btn);
+    border: var(--lw-1) solid var(--line);
+  }
+  .state.open {
+    border-color: var(--attention);
+    color: var(--attention);
+  }
+  .state.open .small {
+    color: var(--fg);
   }
   .hint {
     margin: var(--sp-3) 0 0;

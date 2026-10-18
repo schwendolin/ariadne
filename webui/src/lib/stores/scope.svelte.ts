@@ -9,6 +9,7 @@
  * - Nach einer Änderung meldet der Server `scope` und nach der Neuauswertung `changes` (SSE).
  *   `reevaluated` zählt die `changes` nach der letzten eigenen Änderung (Rückmeldung im Dialog).
  * - Im Profil customer (oder `editable: false`) nur Anzeige mit Hinweis auf `ariadne scope`.
+ * - E131: `open` und `close` ohne Eintrag; Fehler mit `code` (guardrail, no_include, noop).
  * - Meldungen nennen nie den Eintrag (Zieldaten); den zeigt der Dialog über Txt.
  */
 import { isApiError } from '../api/client';
@@ -17,7 +18,8 @@ import { t } from '../i18n';
 import { errorText, isAbort } from '../util/errors';
 import type { ProjectCtx, ProjectPart } from './ctx';
 
-export type ScopeChangeOutcome = { ok: true; result: ScopeChangeResult } | { ok: false; error: string };
+/** `code`: stabiler Fehlercode (z. B. `guardrail`, `no_include`), damit Dialoge sperren können */
+export type ScopeChangeOutcome = { ok: true; result: ScopeChangeResult } | { ok: false; error: string; code?: string };
 
 export class ScopeStore implements ProjectPart {
   view = $state.raw<ScopeView | null>(null);
@@ -78,13 +80,15 @@ export class ScopeStore implements ProjectPart {
       return { ok: true, result: await this.ctx.backend.previewScope(this.ctx.pid, change) };
     } catch (e) {
       if (isAbort(e)) return { ok: false, error: t('err.aborted') };
-      return { ok: false, error: this.errorFor(e) };
+      return { ok: false, error: this.errorFor(e), code: isApiError(e) ? e.code : undefined };
     }
   }
 
   private errorFor(e: unknown): string {
     if (isApiError(e, 'guardrail')) return t('scope.edit.err.guardrail');
     if (isApiError(e, 'policy') || isApiError(e, 'forbidden')) return t('scope.edit.err.policy');
+    if (isApiError(e, 'no_include')) return t('scope.edit.err.noInclude');
+    if (isApiError(e, 'noop')) return t('scope.edit.err.noop');
     if (isApiError(e, 'conflict')) return t('scope.edit.err.conflict');
     if (isApiError(e, 'validation')) return t('scope.edit.err.validation');
     return errorText(e, 'scope.edit.err.prefix');
@@ -99,7 +103,7 @@ export class ScopeStore implements ProjectPart {
       result = await this.ctx.backend.changeScope(this.ctx.pid, change);
     } catch (e) {
       if (isAbort(e)) return { ok: false, error: t('err.aborted') };
-      return { ok: false, error: this.errorFor(e) };
+      return { ok: false, error: this.errorFor(e), code: isApiError(e) ? e.code : undefined };
     }
     this.ctx.noteOwn(`d.scope.${change.op}`, { entry: change.entry, item_key: change.source?.item_key ?? null }, result.decision_id);
     this.reevaluated = 0;
@@ -115,7 +119,9 @@ export class ScopeStore implements ProjectPart {
       const r = await this.ctx.backend.revertScope(this.ctx.pid, decisionId);
       this.ctx.noteOwn('d.scope.revert', { revert_of: decisionId }, r.decision_id);
     } catch (e) {
-      if (!isAbort(e)) this.ctx.app.ui.notify('error', isApiError(e, 'policy') ? t('scope.edit.err.policy') : errorText(e, 'scope.edit.err.undo'));
+      // E131: Rückgängig prüft dieselben Bedingungen (guardrail, no_include)
+      const known = ['policy', 'forbidden', 'guardrail', 'no_include', 'noop', 'conflict'].some((c) => isApiError(e, c as 'policy'));
+      if (!isAbort(e)) this.ctx.app.ui.notify('error', known ? this.errorFor(e) : errorText(e, 'scope.edit.err.undo'));
       return false;
     }
     this.reevaluated = 0;

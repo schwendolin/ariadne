@@ -1798,8 +1798,10 @@ class Daemon:
         p = self.project
         if p is None:
             return None
+        scope = p.settings.get("scope") if isinstance(p.settings, dict) else None
         return {"slug": p.info.slug, "id": p.info.id, "profile": p.info.profile,
-                "workspace": str(p.info.workspace), "chain_head_ok": p.head_ok}
+                "workspace": str(p.info.workspace), "chain_head_ok": p.head_ok,
+                "scope_open": isinstance(scope, dict) and scope.get("open") is True}  # E131
 
     def _preroll_info(self) -> dict[str, Any]:
         return self.preroll.info()
@@ -1971,10 +1973,13 @@ class Daemon:
         created = targets_ignored = False
         existing = {s.slug for s in ProjectService(self.paths).list()}
         if slug not in existing:
-            if not targets:
-                raise ProjectNotFound(f"Projekt {slug} existiert nicht (mit --target anlegen)")
-            self._service().create(slug, targets, name=name, not_customer=bool(args.get("not_customer")),
-                                   profile=profile, origin="cli")
+            open_scope = args.get("open_scope") is True  # E131: ohne Ziele mit offenem Scope
+            if not targets and not open_scope:
+                raise ProjectNotFound(f"Projekt {slug} existiert nicht (mit --target oder --open-scope "
+                                      "anlegen)")
+            self._service().create(slug, targets or [], name=name,
+                                   not_customer=bool(args.get("not_customer")),
+                                   profile=profile, origin="cli", open_scope=open_scope)
             created = True
         elif targets:
             targets_ignored = True
@@ -2066,7 +2071,8 @@ class Daemon:
             raise OpError("invalid", "targets muss eine Liste von Strings sein")
         name = _arg_str(args, "name", required=False, max_len=200)
         info = self._service().create(slug, targets, name=name, not_customer=bool(args.get("not_customer")),
-                                      profile=str(args.get("profile", "lab")), origin="cli")
+                                      profile=str(args.get("profile", "lab")), origin="cli",
+                                      open_scope=args.get("open_scope") is True)
         opened = False
         if args.get("open", True):
             self.preroll.discard()
@@ -2534,7 +2540,10 @@ def _error(exc: BaseException) -> dict[str, Any]:
     if isinstance(exc, OpError):
         return {"code": exc.code, "message": str(exc)}
     if isinstance(exc, GuardrailError):
-        return {"code": "guardrail", "message": str(exc), "outside": exc.outside}
+        out: dict[str, Any] = {"code": "guardrail", "message": str(exc), "outside": exc.outside}
+        if exc.hint:
+            out["hint"] = exc.hint
+        return out
     table: list[tuple[type[BaseException], str]] = [
         (WrongPassphrase, "wrong_passphrase"),
         (InvalidRecoveryCode, "invalid_recovery"),

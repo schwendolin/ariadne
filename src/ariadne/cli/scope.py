@@ -4,6 +4,8 @@
 * ``scope add <ziel>...``, ``scope remove <ziel>...``, ``scope exclude <ziel>...``: prüft wie beim
   Anlegen (IP, CIDR, Name, ``*.domain``), zeigt den genauen Eintrag und fragt ``[j/N]``.
 * ``scope undo [<decision_id>]``: macht eine Änderung rückgängig (ohne Angabe die jüngste).
+* ``scope open`` / ``scope close`` (E131): offener Scope an bzw. aus. Öffnen gilt wie ein öffentliches
+  Ziel und fragt zusätzlich «Kein Kundenauftrag?» (oder ``--not-customer``).
 
 Jede Änderung ist ein Entscheid ``d.scope.update`` (ctl ``scope.change``, Herkunft ``cli``) und löst
 eine Neuauswertung aus. Ziele ausserhalb der Lab-Allowlist nur mit ``--not-customer`` wie beim
@@ -21,9 +23,16 @@ from typing import Any
 from ariadne.cli.common import CliError, _call, s, say
 from ariadne.paths import Paths
 
-__all__ = ["register", "cmd_scope", "show_lines", "add_hint"]
+__all__ = ["register", "cmd_scope", "show_lines", "add_hint", "OPEN_LINE", "CLOSED_LINE"]
 
-_OP_TEXT = {"add": "hinzugefügt", "remove": "entfernt", "exclude": "ausgeschlossen", "revert": "rückgängig"}
+NO_INCLUDE = "Zuerst einen Eintrag hinzufügen: ariadne scope add <ziel>"
+_NOOP = {"open": "Keine Änderung: Der Scope ist schon offen.",
+         "close": "Keine Änderung: Der Scope ist schon geschlossen."}
+
+_OP_TEXT = {"add": "hinzugefügt", "remove": "entfernt", "exclude": "ausgeschlossen", "revert": "rückgängig",
+            "open": "geöffnet", "close": "geschlossen"}
+OPEN_LINE = "Scope: offen (alles gilt als im Scope, ausser Ausschlüssen)"
+CLOSED_LINE = "Scope: geschlossen (nur die Einschlüsse)"
 _ORIGIN = {"cli": "Terminal", "webui": "Dashboard"}
 _VERDICT = {"in": "im Scope", "out": "ausserhalb", "excluded": "ausgeschlossen",
             "outside_window": "ausserhalb des Zeitfensters", "unknown": "unklar"}
@@ -42,7 +51,8 @@ def _list(title: str, items: list[Any], empty: str) -> list[str]:
 
 
 def show_lines(res: dict[str, Any]) -> list[str]:
-    lines = [f"Scope von {s(res.get('slug'), 64)} (Version {s(res.get('version'))}, "
+    lines = [OPEN_LINE if res.get("open") is True else CLOSED_LINE,
+             f"Scope von {s(res.get('slug'), 64)} (Version {s(res.get('version'))}, "
              f"Profil {s(res.get('profile'), 16)})"]
     lines += _list("Einschlüsse", list(res.get("include") or []), "keine")
     lines += _list("Ausschlüsse", list(res.get("exclude") or []), "keine")
@@ -55,7 +65,8 @@ def show_lines(res: dict[str, Any]) -> list[str]:
     if hist:
         lines.append("Letzte Änderungen (neueste zuerst):")
         for h in hist[:10]:
-            entries = ", ".join(s(x, 120) for x in h.get("entries") or []) or "-"
+            entries = ", ".join(s(x, 120) for x in h.get("entries") or []) or (
+                "offener Scope" if h.get("op") in ("open", "close") else "-")
             state = " [rückgängig gemacht]" if h.get("reverted_by") else ""
             where = _ORIGIN.get(str(h.get("origin")), "Terminal")
             lines.append(f"  v{s(h.get('version'))} {_time(h.get('ts_utc_ns'))} "
@@ -92,6 +103,17 @@ def add_hint(targets: list[str], include: list[str]) -> list[str]:
 
 def _plan_lines(res: dict[str, Any]) -> list[str]:
     out: list[str] = []
+    before, after = res.get("open_before") is True, res.get("open") is True
+    if after and not before:
+        out.append("  Scope wird offen: alles gilt als im Scope, auch öffentliche Ziele (jede IP, jeder "
+                   "Name, jede URL), ausser Ausschlüssen und Sonderadressen (Loopback, Link-Local, "
+                   "Multicast). Ariadne schickt Zielen nichts; der Scope steuert nur Auswertung, "
+                   "Warnungen, Karte und Lagebild.")
+    elif before and not after:
+        out.append("  Scope wird geschlossen: nur noch die Einschlüsse gelten als im Scope; alles andere "
+                   "bekommt wieder Scope-Warnungen.")
+        inc = [s(x, 120) for x in res.get("include") or []]
+        out.append("  Einschlüsse: " + (", ".join(inc[:20]) or "(keine)"))
     for key, text in (("include_added", "Neu im Scope"), ("include_removed", "Aus dem Scope entfernt"),
                       ("exclude_added", "Neu ausgeschlossen"),
                       ("exclude_removed", "Nicht mehr ausgeschlossen")):
@@ -120,7 +142,9 @@ def _change(paths: Paths, args: argparse.Namespace, op: str) -> int:
     from ariadne.daemon.client import CtlError
 
     base: dict[str, Any] = {"action": op, "origin": "cli"}
-    if op == "revert":
+    if op in ("open", "close"):
+        pass  # E131: ohne Einträge
+    elif op == "revert":
         did = args.decision_id
         if not did:
             hist = [h for h in (_call(paths, "scope.show").get("history") or []) if isinstance(h, dict)]
@@ -133,30 +157,52 @@ def _change(paths: Paths, args: argparse.Namespace, op: str) -> int:
         base["entries"] = list(args.targets)
     if getattr(args, "reason", None):
         base["reason"] = args.reason
-    plan = _call(paths, "scope.change", **base, dry_run=True)
+    try:
+        plan = _call(paths, "scope.change", **base, dry_run=True)
+    except CtlError as exc:
+        if exc.code in ("noop", "no_include"):  # E131: feste Texte, nie Zieldaten
+            raise CliError(_NOOP.get(op, "Keine Änderung.") if exc.code == "noop" else NO_INCLUDE) from None
+        raise
     say(f"Scope-Änderung ({_OP_TEXT.get(op, op)}), danach Version {s(plan.get('version'))}:")
     for line in _plan_lines(plan):
         say(line)
     outside = [s(x, 120) for x in plan.get("outside") or []]
-    if plan.get("needs_not_customer") and not args.not_customer:
-        say("Ziele ausserhalb der Lab-Allowlist: " + ", ".join(outside))
-        say("lab-Projekte sind nicht für Kundendaten. Wenn es sicher kein Kundenauftrag ist: --not-customer")
-        return 1
+    not_customer = bool(args.not_customer)
+    if plan.get("needs_not_customer") and not not_customer:
+        if plan.get("opens"):  # E131: Öffnen gilt wie ein öffentliches Ziel, Rückfrage im Terminal
+            if sys.stdin.isatty():
+                not_customer = _confirm("Kein Kundenauftrag? [j/N] ", False)
+            if not not_customer:
+                say("Offener Scope nur ohne Kundenauftrag: Bestätigung fehlt (im Terminal mit j "
+                    "antworten oder --not-customer).")
+                return 1
+        else:
+            say("Ziele ausserhalb der Lab-Allowlist: " + ", ".join(outside))
+            say("lab-Projekte sind nicht für Kundendaten. Wenn es sicher kein Kundenauftrag ist: "
+                "--not-customer")
+            return 1
     if plan.get("needs_not_customer"):
         say("Mit Bestätigung: Das ist kein Kundenauftrag.")
     if not _confirm("Übernehmen? [j/N] ", args.yes):
         say("Nicht geändert.")
         return 1
     try:
-        res = _call(paths, "scope.change", **base, not_customer=bool(args.not_customer))
+        res = _call(paths, "scope.change", **base, not_customer=not_customer)
     except CtlError as exc:
         if exc.code == "guardrail":
             outside = exc.extra.get("outside", [])
             say("Ziele ausserhalb der Lab-Allowlist: " + ", ".join(s(x, 120) for x in outside))
             return 1
+        if exc.code in ("noop", "no_include"):
+            raise CliError(_NOOP.get(op, "Keine Änderung.") if exc.code == "noop" else NO_INCLUDE) from None
         raise
-    say(f"Scope geändert (Version {s(res.get('version'))}, Entscheid {s(res.get('decision_id'), 64)}). "
-        "Die Auswertung rechnet neu.")
+    if op in ("open", "close"):
+        word = "geöffnet" if op == "open" else "geschlossen"
+        say(f"Scope {word} (Version {s(res.get('version'))}, Entscheid {s(res.get('decision_id'), 64)}). "
+            "Die Auswertung rechnet neu.")
+    else:
+        say(f"Scope geändert (Version {s(res.get('version'))}, Entscheid {s(res.get('decision_id'), 64)}). "
+            "Die Auswertung rechnet neu.")
     if op != "revert":
         say(f"Rückgängig: ariadne scope undo {s(res.get('decision_id'), 64)}")
     return 0
@@ -172,6 +218,8 @@ def cmd_scope(paths: Paths, args: argparse.Namespace) -> int:
         return _change(paths, args, cmd)
     if cmd == "undo":
         return _change(paths, args, "revert")
+    if cmd in ("open", "close"):
+        return _change(paths, args, cmd)
     raise CliError("unbekannte Aktion")
 
 
@@ -188,6 +236,14 @@ def register(sub: Any) -> None:
         c.add_argument("--reason", help="Grund (erscheint in der Zeitachse)")
         c.add_argument("--not-customer", action="store_true",
                        help="bestätigt: kein Kundenauftrag (für Ziele ausserhalb der Lab-Allowlist)")
+    o = ssub.add_parser("open", help="Scope öffnen: alles gilt als im Scope, ausser Ausschlüssen (E131)")
+    o.add_argument("--yes", action="store_true", help="ohne Rückfrage (ohne Terminal nötig)")
+    o.add_argument("--reason", help="Grund (erscheint in der Zeitachse)")
+    o.add_argument("--not-customer", action="store_true", help="bestätigt: kein Kundenauftrag")
+    c = ssub.add_parser("close", help="Scope schliessen: nur die Einschlüsse gelten (E131)")
+    c.add_argument("--yes", action="store_true", help="ohne Rückfrage (ohne Terminal nötig)")
+    c.add_argument("--reason", help="Grund (erscheint in der Zeitachse)")
+    c.add_argument("--not-customer", action="store_true", help=argparse.SUPPRESS)
     u = ssub.add_parser("undo", help="Scope-Änderung rückgängig machen (ohne Angabe: die jüngste)")
     u.add_argument("decision_id", nargs="?", help="Entscheid aus ariadne scope")
     u.add_argument("--yes", action="store_true", help="ohne Rückfrage")

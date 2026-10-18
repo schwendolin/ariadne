@@ -614,6 +614,7 @@ def collect(
             "period": [iso_ms(times[0]) if times else None, iso_ms(times[-1]) if times else None],
             "scope_include": [m.target(x) for x in scope.get("include") or [] if isinstance(x, str)],
             "scope_exclude": [m.target(x) for x in scope.get("exclude") or [] if isinstance(x, str)],
+            "scope_open": scope.get("open") is True,  # E131: offener Scope
         },
         "commands": commands,
         "findings": findings,

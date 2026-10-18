@@ -7,6 +7,10 @@ Entscheid ``d.scope.update`` mit neuer Version, lässt sich rückgängig machen 
 löst eine Neuauswertung aus. Im Profil customer 403 ``policy`` (nur im Terminal), neue Einschlüsse
 ausserhalb der Lab-Allowlist ohne Bestätigung «kein Kundenauftrag» 403 ``guardrail`` (die
 Bestätigung gibt es nur im Terminal). Nach dem Schreiben folgt das SSE-Ereignis ``scope``.
+
+Offener Scope (E131): ``op: 'open'`` bzw. ``'close'`` ohne ``entries``. Öffnen gilt wie ein
+öffentliches Ziel (403 ``guardrail`` mit Hinweis ``ariadne scope open``), Schliessen ohne Einschluss
+409 ``no_include``, ohne Wirkung 409 ``noop``. ``broad`` (E133) in der Antwort: sehr breiter Eintrag.
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ Entry = Annotated[str, Field(min_length=1, max_length=260)]
 
 
 class ScopeChangeRequest(_In):
-    op: Literal["add", "remove", "exclude", "revert"]
+    op: Literal["add", "remove", "exclude", "open", "close", "revert"]
     entries: list[Entry] | None = Field(default=None, min_length=1, max_length=20)
     decision_id: str | None = Field(default=None, min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=500)
@@ -61,6 +65,8 @@ def change_view(res: dict[str, Any]) -> dict[str, Any]:
         dry_run=bool(res.get("dry_run")),
         needs_not_customer=bool(res.get("needs_not_customer")),
         verdicts=[{"entry": str(k), "verdict": str(v)} for k, v in verdicts.items()],
+        open=bool(res.get("open")),  # E131: offener Scope nach der Änderung
+        broad=bool(res.get("broad")),  # E133: sehr breiter Eintrag
     )
     return out
 
@@ -80,6 +86,8 @@ def scope_view(res: dict[str, Any]) -> dict[str, Any]:
                                              "exclude_added", "exclude_removed")},
             "revert_of": h.get("revert_of") if isinstance(h.get("revert_of"), str) else None,
             "reverted_by": h.get("reverted_by") if isinstance(h.get("reverted_by"), str) else None,
+            "open_before": h.get("open_before") if isinstance(h.get("open_before"), bool) else None,
+            "open_after": h.get("open_after") if isinstance(h.get("open_after"), bool) else None,
         })
     windows = [
         {k: str(w[k]) if w.get(k) is not None else None for k in ("days", "from", "to", "tz")}
@@ -92,6 +100,7 @@ def scope_view(res: dict[str, Any]) -> dict[str, Any]:
         "profile": profile,
         "include": _strs(res.get("include")),
         "exclude": _strs(res.get("exclude")),
+        "open": res.get("open") is True,  # E131
         "windows": windows,
         "not_customer": bool(res.get("not_customer")),
         "change_allowed": profile != "customer",
@@ -132,6 +141,9 @@ def add_routes(router: APIRouter, api: Api) -> None:
         if body.op == "revert":
             if body.decision_id is None or body.entries is not None:
                 raise ApiError("validation", [{"loc": ["body", "decision_id"], "type": "revert"}])
+        elif body.op in ("open", "close"):  # E131: ohne entries
+            if body.entries is not None or body.decision_id is not None:
+                raise ApiError("validation", [{"loc": ["body", "entries"], "type": "extra"}])
         elif body.entries is None or body.decision_id is not None:
             raise ApiError("validation", [{"loc": ["body", "entries"], "type": "missing"}])
         if p.info.profile == "customer":

@@ -100,9 +100,10 @@ def locked_message(vault: Path, slug: str) -> str:
 
 
 class GuardrailError(ProjectError):
-    def __init__(self, message: str, outside: list[str]) -> None:
+    def __init__(self, message: str, outside: list[str], hint: str | None = None) -> None:
         super().__init__(message)
         self.outside = outside
+        self.hint = hint  # "open": offener Scope (E131), Hinweis «ariadne scope open»
 
 
 def valid_slug(slug: str) -> bool:
@@ -278,7 +279,10 @@ class ProjectService:
 
     # ------------------------------------------------------------------ #
     def create(self, slug: str, targets: list[str], *, name: str | None = None,
-               not_customer: bool = False, profile: str = "lab", origin: str = "cli") -> ProjectInfo:
+               not_customer: bool = False, profile: str = "lab", origin: str = "cli",
+               open_scope: bool = False) -> ProjectInfo:
+        """Projekt anlegen. Ohne Ziele nur mit offenem Scope (E131: ``open_scope`` und
+        ``not_customer``, gilt wie ein öffentliches Ziel); ein offener Scope geht auch mit Zielen."""
         if profile == "customer":
             raise ProjectError("Profil customer kommt ab v0.3; bis dahin nur lab und nie für Kundendaten")
         if profile != "lab":
@@ -288,9 +292,17 @@ class ProjectService:
         name = name if name is not None else slug
         if len(name) > 100 or any(ord(c) < 0x20 or ord(c) == 0x7F or 0x80 <= ord(c) <= 0x9F for c in name):
             raise ProjectError("ungültiger Projektname")
-        if not targets:
-            raise ProjectError("mindestens ein Ziel nötig (--target)")
+        if not targets and not open_scope:
+            raise ProjectError("mindestens ein Ziel nötig (--target) oder offener Scope (--open-scope "
+                               "--not-customer)")
         parsed, outside = split_targets(targets, self.allowlist)
+        if open_scope and not not_customer:
+            # E131: offener Scope gilt wie ein öffentliches Ziel
+            raise GuardrailError(
+                "Offener Scope: alles gilt als im Scope, auch öffentliche Ziele. Nur erlaubt mit der "
+                "Bestätigung, dass es kein Kundenauftrag ist (--open-scope --not-customer).",
+                [t.value for t in outside],
+            )
         if outside and not not_customer:
             raise GuardrailError(
                 "Ziele ausserhalb der Lab-Allowlist. Nur erlaubt mit der Bestätigung, dass es "
@@ -305,13 +317,14 @@ class ProjectService:
         try:
             return self._create_in(ws, slug, op, name=name, profile=profile,
                                    include=[t.value for t in parsed], not_customer=not_customer,
-                                   origin=origin)
+                                   origin=origin, open_scope=open_scope)
         except BaseException:
             shutil.rmtree(ws, ignore_errors=True)
             raise
 
     def _create_in(self, ws: Path, slug: str, op: UnlockedOperator, *, name: str, profile: str,
-                   include: list[str], not_customer: bool, origin: str) -> ProjectInfo:
+                   include: list[str], not_customer: bool, origin: str,
+                   open_scope: bool = False) -> ProjectInfo:
         for d in WORKSPACE_DIRS:
             ensure_private_dir(ws / d)
         vault = ensure_private_dir(ws / ".vault")
@@ -351,7 +364,8 @@ class ProjectService:
             }, origin=origin)
             journal.append("d.scope.update",
                            {"version": 1, "toml": default_settings(name=name, profile=profile,
-                                                                   include=include)},
+                                                                   include=include,
+                                                                   open_scope=open_scope)},
                            origin=origin)
             if not_customer:
                 journal.append("d.lab.not_customer", {"scope_version": 1}, origin=origin)

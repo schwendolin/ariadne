@@ -41,7 +41,10 @@ export type ApiErrorCode =
   | 'unavailable' | 'internal' | 'clipboard_tool' | 'clipboard_session'
   | 'shot_display' | 'shot_wayland' | 'shot_window' | 'shot_region' | 'shot_failed'
   /** E129: neue Einschlüsse ausserhalb der Lab-Allowlist ohne «kein Kundenauftrag» (nur im Terminal) */
-  | 'guardrail';
+  | 'guardrail'
+  /** E131: Schliessen ohne Einschluss (409) bzw. Öffnen/Schliessen ohne Wirkung (409) */
+  | 'no_include'
+  | 'noop';
 
 export interface ApiErrorBody {
   error: {
@@ -128,6 +131,8 @@ export interface ProjectBrief {
   name: string;
   profile: Profile;
   chain_head_ok: boolean;
+  /** E131: offener Scope (ältere Server ohne Feld) */
+  scope_open?: boolean;
 }
 
 export interface TerminalState {
@@ -199,6 +204,8 @@ export interface Status {
   ingest: { active: boolean; last_error: string | null } | null;
   disk_low: boolean;
   scope_warning: ScopeWarning | null;
+  /** E131: offener Scope des aktiven Projekts (ältere Server ohne Feld) */
+  scope_open?: boolean;
 }
 
 export interface PauseRequest {
@@ -243,7 +250,9 @@ export interface ContextResult {
 // ------------------------------------------------------------------ Projekt (6)
 export interface ProjectView extends ProjectBrief {
   created_at: string;
-  scope: { include: string[]; exclude: string[]; version: number };
+  scope: { include: string[]; exclude: string[]; version: number; open?: boolean };
+  /** E131: offener Scope (ältere Server ohne Feld) */
+  scope_open?: boolean;
   lab_guard: { public_targets: boolean; confirmed_not_customer: boolean } | null;
   started_at: string | null;
   chain: { head_seq: number; head_hash: string; head_ok: boolean };
@@ -761,8 +770,16 @@ export type TimelineItem = TimelineBase &
         effect: { rejected: number; weakened: number } | null;
         /** web-api.md 20.3: Scope-Änderung; `revertible` zeigt «Rückgängig» (op 'revert') */
         scope_change?: {
-          op: 'add' | 'remove' | 'exclude' | 'revert' | null;
+          op: 'add' | 'remove' | 'exclude' | 'open' | 'close' | 'revert' | null;
           entries: string[];
+          /** E131: Wirkung der Änderung (für den Text bei Rückgängig); ältere Server ohne Listen */
+          include_added?: string[];
+          include_removed?: string[];
+          exclude_added?: string[];
+          exclude_removed?: string[];
+          /** E131: offen vor bzw. nach der Änderung (null: unbekannt, ältere Einträge) */
+          open_before?: boolean | null;
+          open_after?: boolean | null;
           version: number | null;
           revert_of: string | null;
           reverted_by: string | null;
@@ -1074,7 +1091,7 @@ export interface ScopeHistoryItem {
   version: number | null;
   ts: string | null;
   origin: 'cli' | 'webui';
-  op: 'add' | 'remove' | 'exclude' | 'revert' | string;
+  op: 'add' | 'remove' | 'exclude' | 'open' | 'close' | 'revert' | string;
   entries: string[];
   include_added: string[];
   include_removed: string[];
@@ -1082,6 +1099,9 @@ export interface ScopeHistoryItem {
   exclude_removed: string[];
   revert_of: string | null;
   reverted_by: string | null;
+  /** E131: offen vor bzw. nach der Änderung */
+  open_before?: boolean | null;
+  open_after?: boolean | null;
 }
 /** GET /p/{pid}/scope */
 export interface ScopeView {
@@ -1091,12 +1111,17 @@ export interface ScopeView {
   exclude: string[];
   windows: ScopeWindow[];
   not_customer: boolean;
+  /** E131: offener Scope (alles gilt als im Scope, ausser Ausschlüssen); ältere Server ohne Feld */
+  open?: boolean;
   /** false im Profil customer: ändern nur im Terminal (`ariadne scope`) */
   change_allowed: boolean;
   history: ScopeHistoryItem[];
 }
-export type ScopeOp = 'add' | 'remove' | 'exclude';
-/** Eingabe der UI; HttpBackend macht daraus `POST /scope/changes` mit `entries: [entry]`. */
+export type ScopeOp = 'add' | 'remove' | 'exclude' | 'open' | 'close';
+/**
+ * Eingabe der UI; HttpBackend macht daraus `POST /scope/changes` mit `entries: [entry]`, bei
+ * `open` und `close` (E131) ohne `entries` (`entry` bleibt dann leer).
+ */
 export interface ScopeChange {
   op: ScopeOp;
   entry: string;
@@ -1120,6 +1145,10 @@ export interface ScopeChangeResult {
   outside?: string[];
   revert_of?: string | null;
   needs_not_customer?: boolean;
+  /** E133 (nur dry_run): sehr breiter Eintrag (IPv4 grösser als /16, IPv6 grösser als /48) */
+  broad?: boolean;
+  /** E131: Scope danach offen */
+  open?: boolean;
   verdicts?: { entry: string; verdict: Verdict | string }[];
 }
 

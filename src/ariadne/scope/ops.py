@@ -3,11 +3,15 @@
 * ``scope.show``: Einschlüsse, Ausschlüsse, Zeitfenster, Version, Profil, Bestätigung «kein
   Kundenauftrag» und die letzten Änderungen (mit ``decision_id`` für Rückgängig).
 * ``scope.change`` ``{action, entries?, decision_id?, reason?, origin?, not_customer?, dry_run?}``:
-  ``action`` ist ``add``, ``remove``, ``exclude`` oder ``revert`` (mit ``decision_id``; der Name
+  ``action`` ist ``add``, ``remove``, ``exclude``, ``open``, ``close`` (E131, ohne ``entries``) oder
+  ``revert`` (mit ``decision_id``; der Name
   ``op`` ist im ctl-Protokoll vergeben). Schreibt
   ``d.scope.update`` mit neuer Version und ``change``; der Commit-Hook der Auswertung lädt die
   Einstellungen neu und rechnet alles neu (Scope-Urteile, Drei-Spuren-Regel, Scope-Warnungen).
   ``dry_run`` zeigt nur, was geschähe (Rückfrage im Terminal mit dem genauen Eintrag).
+
+Öffnen (E131) gilt wie ein öffentliches Ziel. Schliessen braucht einen Einschluss (``no_include``),
+Öffnen bzw. Schliessen ohne Wirkung ist ``noop``.
 
 Leitplanken wie beim Anlegen: Neue Einschlüsse ausserhalb der Lab-Allowlist brauchen die
 Bestätigung «kein Kundenauftrag» (``d.lab.not_customer``); die gibt es nur im Terminal
@@ -22,7 +26,14 @@ from typing import TYPE_CHECKING, Any
 from ariadne.daemon.ops_util import OpError
 from ariadne.project.guardrails import LabAllowlist
 from ariadne.project.service import GuardrailError
-from ariadne.scope.change import ScopeChangeError, plan_change, plan_revert, render_toml, scope_lists
+from ariadne.scope.change import (
+    ScopeChangeError,
+    plan_change,
+    plan_revert,
+    render_toml,
+    scope_lists,
+    scope_open,
+)
 from ariadne.store.api import AppendItem
 
 if TYPE_CHECKING:
@@ -64,6 +75,8 @@ def history(p: OpenProject, limit: int = _HISTORY) -> list[dict[str, Any]]:
             "include_removed": list(ch.get("include_removed") or []),
             "exclude_added": list(ch.get("exclude_added") or []),
             "exclude_removed": list(ch.get("exclude_removed") or []),
+            "open_before": ch.get("open_before") if isinstance(ch.get("open_before"), bool) else None,
+            "open_after": ch.get("open_after") if isinstance(ch.get("open_after"), bool) else None,
             "revert_of": ch.get("revert_of"),
             "reverted_by": reverted.get(r.id),
         })
@@ -89,6 +102,7 @@ def show(p: OpenProject) -> dict[str, Any]:
         "version": p.settings_version,
         "include": include,
         "exclude": exclude,
+        "open": scope_open(p.settings),
         "windows": _windows(windows),
         "not_customer": not_customer_confirmed(p),
         "history": history(p),
@@ -146,24 +160,41 @@ async def op_change(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
             plan = plan_revert(p.settings, _revert_source(p, did), str(did), allow)
         elif op in ("add", "remove", "exclude"):
             plan = plan_change(p.settings, str(op), _entries(args), allow)
+        elif op in ("open", "close"):  # E131: ohne entries
+            if args.get("entries") not in (None, []):
+                raise OpError("invalid", "open und close ohne entries")
+            plan = plan_change(p.settings, str(op), None, allow)
         else:
-            raise OpError("invalid", "action muss add, remove, exclude oder revert sein")
+            raise OpError("invalid", "action muss add, remove, exclude, open, close oder revert sein")
     except ScopeChangeError as exc:
+        if exc.code == "no_include" or (exc.code == "noop" and op in ("open", "close")):
+            raise OpError(exc.code, str(exc)) from None  # E131: eigene Codes (API 409)
         code = "conflict" if exc.code in ("noop", "not_listed", "last_include") else "invalid"
         raise OpError(code, str(exc)) from None
-    need_nc = bool(plan.outside) and p.info.profile == "lab" and not not_customer_confirmed(p)
+    if plan.opens and p.info.profile != "lab":  # E131: offener Scope nie im Profil customer
+        raise OpError("policy", "Offener Scope gibt es nur im Profil lab, nie im Profil customer")
+    need_nc = ((bool(plan.outside) or plan.opens) and p.info.profile == "lab"
+               and not not_customer_confirmed(p))
     version = p.settings_version + 1
     res: dict[str, Any] = {**plan.view(), "version": version, "needs_not_customer": need_nc,
                            "dry_run": dry, "decision_id": None, "seq": None}
     if dry:
         return res
     if need_nc and not (origin == "cli" and args.get("not_customer") is True):
+        if plan.opens:
+            raise GuardrailError(
+                "Offener Scope gilt wie ein öffentliches Ziel. Nur im Terminal mit der Bestätigung, "
+                "dass es kein Kundenauftrag ist: ariadne scope open",
+                list(plan.outside),
+                hint="open",
+            )
         raise GuardrailError(
             "Ziele ausserhalb der Lab-Allowlist. Nur im Terminal mit der Bestätigung, dass es kein "
             "Kundenauftrag ist: ariadne scope add <ziel> --not-customer",
             list(plan.outside),
         )
-    text = render_toml(str(_last_toml(p)), plan.include, plan.exclude)
+    text = render_toml(str(_last_toml(p)), plan.include, plan.exclude,
+                       plan.open_after if plan.open_after != plan.open_before else None)
     header = {"version": version, "toml": text, "change": plan.change(reason)}
     if d.project is not p:
         raise OpError("project_changed", "Projekt wurde währenddessen gewechselt, nichts gespeichert")

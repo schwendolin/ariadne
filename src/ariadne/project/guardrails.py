@@ -23,6 +23,7 @@ from ariadne.scope.normalize import has_idna_deviation
 __all__ = [
     "DEFAULT_NETWORKS",
     "DEFAULT_SUFFIXES",
+    "NON_PUBLIC_SUFFIXES",
     "is_public_name",
     "InvalidTarget",
     "Target",
@@ -39,10 +40,13 @@ DEFAULT_NETWORKS = (
     "10.129.0.0/16",
     "100.64.0.0/10",
 )
-# Lab-Domains und Endungen, die es im öffentlichen DNS nicht gibt (``.internal`` reserviert ICANN für
-# private Netze, ``.test`` RFC 2606). Ergänzt nach dem Praxistest (E130: recovery.vantis.internal).
-DEFAULT_SUFFIXES = (".htb", ".local", ".lab", ".thm", ".vl", ".internal", ".test", ".lan", ".home",
-                    ".localdomain", ".home.arpa")
+# Lab-Allowlist: typische Lab-Domains (E132: wie vor Praxis 1). Andere Namen, auch ``.internal`` oder
+# ``.test``, brauchen wie öffentliche Ziele die Bestätigung «kein Kundenauftrag».
+DEFAULT_SUFFIXES = (".htb", ".local", ".lab", ".thm", ".vl")
+# Endungen, die es im öffentlichen DNS nicht gibt (E130/E132): nur für den Warnhinweis «öffentliche
+# Endung» (:func:`is_public_name`), getrennt von der Allowlist.
+NON_PUBLIC_SUFFIXES = (".htb", ".local", ".lab", ".thm", ".vl", ".internal", ".test", ".lan", ".home",
+                       ".localdomain", ".home.arpa", ".example", ".invalid", ".localhost")
 
 _LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -167,8 +171,8 @@ def split_targets(raw: Iterable[str], allowlist: LabAllowlist) -> tuple[list[Tar
 
 
 def is_public_name(name: str) -> bool:
-    """Name (auch ``*.domain``) mit öffentlicher Endung, also nicht aus :data:`DEFAULT_SUFFIXES` (E130:
-    zusätzlicher Warnhinweis). Nur syntaktisch, nie DNS."""
+    """Name (auch ``*.domain``) mit öffentlicher Endung, also nicht aus :data:`NON_PUBLIC_SUFFIXES`
+    (E130, E132: zusätzlicher Warnhinweis). Nur syntaktisch, nie DNS."""
     n = name.lower().rstrip(".")
     n = n[2:] if n.startswith("*.") else n
-    return not any(n.endswith(s) and len(n) > len(s) for s in DEFAULT_SUFFIXES)
+    return not any(n.endswith(s) and len(n) > len(s) for s in NON_PUBLIC_SUFFIXES)

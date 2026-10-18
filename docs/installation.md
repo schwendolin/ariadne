@@ -149,7 +149,18 @@ ariadne scope remove 10.36.198.1            # Eintrag wieder entfernen
 ariadne scope undo                          # jüngste Änderung rückgängig (oder: undo <decision_id>)
 ```
 
-Im Dashboard geht dasselbe über die Scope-Warnung in «Als Nächstes» («In den Scope aufnehmen» mit Bestätigung) und über die Zeitachse (Rückgängig). Namen erben nie den Scope ihrer IP (E49): Meldet nmap `recovery.vantis.internal (10.36.198.11)`, fragt Ariadne unter «Klären», ob der Name (oder `*.vantis.internal`) in den Scope soll. Ziele ausserhalb der Lab-Allowlist (öffentliche Adressen und Domains) gehen nur im Terminal mit `--not-customer`, wie beim Anlegen.
+Im Dashboard geht dasselbe über die Scope-Warnung in «Als Nächstes» («In den Scope aufnehmen» mit Bestätigung) und über die Zeitachse (Rückgängig). Namen erben nie den Scope ihrer IP (E49): Meldet nmap `recovery.vantis.internal (10.36.198.11)`, fragt Ariadne unter «Klären», ob der Name (oder `*.vantis.internal`) in den Scope soll. Ziele ausserhalb der Lab-Allowlist gehen nur im Terminal mit `--not-customer`, wie beim Anlegen. Zur Lab-Allowlist gehören die privaten Netze und die Endungen `.htb .local .lab .thm .vl` (E132); Namen wie `recovery.vantis.internal`, `*.test` oder `*.lan` brauchen also ebenfalls `--not-customer`.
+
+**Offener Scope (E131).** Für Übungen ohne festes Ziel (eigene Tests, CTFs mit wechselnden Adressen) gilt alles als im Scope: jede IP, jeder Name, jede URL, auch öffentliche Ziele. Ausnahmen: Ausschlüsse (`ariadne scope exclude`) und Sonderadressen wie Loopback, Link-Local und Multicast; die eigenen Adressen der Kali werden nie Host. Ariadne schickt Zielen nie etwas, der Scope steuert nur Auswertung, Warnungen, Karte und Lagebild. Weil das wie ein öffentliches Ziel gilt, nur ohne Kundenauftrag und nie im Profil customer:
+
+```sh
+ariadne start uebung                        # neues Projekt ohne --target: fragt «Neu anlegen mit offenem Scope? … [j/N]»
+ariadne start uebung --open-scope --not-customer   # dasselbe ohne Terminal (Skript)
+ariadne scope open                          # Scope eines vorhandenen Projekts öffnen (fragt auch «Kein Kundenauftrag?»)
+ariadne scope close                         # wieder schliessen: nur die Einschlüsse gelten (braucht mindestens einen)
+```
+
+Die Rückfrage bei `ariadne start <slug>` fängt auch Tippfehler ab: Wer `n` antwortet, legt nichts an. `ariadne scope` zeigt in der ersten Zeile, ob der Scope offen ist, `ariadne status` zeigt dann «Scope: offen». Im Dashboard geht Öffnen und Schliessen unter Einstellungen, Scope; Öffnen ohne bestätigtes «kein Kundenauftrag» verweist auf `ariadne scope open`. Hinzugefügte Einträge ergänzen den offenen Scope, Ausschlüsse gelten weiter; beides lässt sich rückgängig machen.
 
 Im Terminal: `F12 s` nimmt einen Screenshot des aktiven Fensters auf (nur X11, Xfce), `ariadne shot monitor` den ganzen Bildschirm. Bericht: `ariadne export` (Vorlage `cys`, mit `--template htb` die HTB-Vorlage) schreibt nach `~/ariadne/<projekt>/exports/`; dasselbe geht im Dashboard über «Export». Vom Mac aus: [Anleitung Fernzugriff](anleitung-fernzugriff.md). Ende der Session: `ariadne stop`, danach `ariadne backup --to-file PFAD.age` (braucht die Empfänger aus Abschnitt 1).
 

@@ -67,7 +67,35 @@
     exclude: 'tl.scopeRevert.exclude',
     revert: 'tl.scopeRevert.revert',
   };
-  const revertText = $derived(item.type === 'decision' && item.scope_change ? t(REVERT_TEXT[item.scope_change.op ?? ''] ?? 'tl.scopeRevert.other') : '');
+  // E131: Wirkung aus den Listen der Änderung (ein entfernter Ausschluss kommt wieder in den
+  // Ausschluss, nicht in den Scope); Öffnen/Schliessen ohne Einträge; ältere Server nur mit `op`
+  const revertLines = $derived.by((): { text: string; entries: string[] }[] => {
+    if (item.type !== 'decision' || !item.scope_change) return [];
+    const sc = item.scope_change;
+    if (sc.op === 'open') return [{ text: t('tl.scopeRevert.open'), entries: [] }];
+    if (sc.op === 'close') return [{ text: t('tl.scopeRevert.close'), entries: [] }];
+    // Rückgängig eines Rückgängig: `open_before`/`open_after` sagen, ob es den Scope öffnet oder schliesst
+    const flip: { text: string; entries: string[] }[] =
+      typeof sc.open_before === 'boolean' && typeof sc.open_after === 'boolean' && sc.open_before !== sc.open_after
+        ? [{ text: t(sc.open_after ? 'tl.scopeRevert.open' : 'tl.scopeRevert.close'), entries: [] }]
+        : [];
+    const lists: [string[] | undefined, MessageKey][] = [
+      [sc.include_added, 'tl.scopeRevert.add'],
+      [sc.include_removed, 'tl.scopeRevert.remove'],
+      [sc.exclude_added, 'tl.scopeRevert.exclude'],
+      [sc.exclude_removed, 'tl.scopeRevert.reexclude'],
+    ];
+    const out = [...flip, ...lists.filter(([l]) => Array.isArray(l) && l.length > 0).map(([l, k]) => ({ text: t(k), entries: l ?? [] }))];
+    if (out.length) return out;
+    if (sc.op === 'revert' && sc.revert_of) {
+      // Rückgängig eines Rückgängig von Öffnen bzw. Schliessen: die ursprüngliche Änderung
+      const orig = project.timeline.rows.find((r) => r.type === 'decision' && r.decision_id === sc.revert_of);
+      const o = orig?.type === 'decision' ? orig.scope_change?.op : null;
+      if (o === 'open') return [{ text: t('tl.scopeRevert.close'), entries: [] }];
+      if (o === 'close') return [{ text: t('tl.scopeRevert.open'), entries: [] }];
+    }
+    return [{ text: t(REVERT_TEXT[sc.op ?? ''] ?? 'tl.scopeRevert.other'), entries: sc.entries }];
+  });
   async function revertScope(): Promise<void> {
     if (item.type !== 'decision' || scopeBusy) return;
     scopeBusy = true;
@@ -329,8 +357,9 @@
   </div>
   {#if confirmRevert && item.type === 'decision' && item.scope_change}
     <div class="below scope-revert" role="group" aria-label={t('tl.scopeRevert')} data-testid="scope-revert-confirm">
-      <span>{revertText}</span>
-      <span class="entries"><Txt value={item.scope_change.entries.join(', ')} mono max={300} /></span>
+      {#each revertLines as l, i (i)}
+        <span class="line"><span>{l.text}</span>{#if l.entries.length}{SP}<span class="entries"><Txt value={l.entries.join(', ')} mono max={300} /></span>{/if}</span>
+      {/each}
       <button type="button" class="link" disabled={app.offline || scopeBusy} onclick={revertScope}>{t('tl.scopeRevert.confirm')}</button>
       <button type="button" class="link" onclick={() => (confirmRevert = false)}>{t('tl.scopeRevert.cancel')}</button>
     </div>

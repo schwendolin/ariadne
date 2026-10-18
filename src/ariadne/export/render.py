@@ -148,7 +148,10 @@ def _overview(data: Mapping[str, Any], hnames: Mapping[str, str]) -> str:
         "## Scope",
         "",
     ]
-    out += [f"- im Scope: {_t(x)}" for x in meta["scope_include"]] or ["- im Scope: keine Angabe"]
+    if meta.get("scope_open") is True:  # E131
+        out.append("- offener Scope: alles galt als im Scope, ausser Ausschlüssen")
+    out += [f"- im Scope: {_t(x)}" for x in meta["scope_include"]] or (
+        [] if meta.get("scope_open") is True else ["- im Scope: keine Angabe"])
     out += [f"- ausgeschlossen: {_t(x)}" for x in meta["scope_exclude"]]
     out += [
         "",

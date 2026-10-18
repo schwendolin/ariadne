@@ -24,6 +24,8 @@
   import type { ProjectStore } from '../stores/project.svelte';
   import Badge from '../ui/Badge.svelte';
   import Button from '../ui/Button.svelte';
+  import CommandLine from '../ui/CommandLine.svelte';
+  import { addCommand } from '../scope/open';
   import TextField from '../ui/TextField.svelte';
   import Txt from '../ui/Txt.svelte';
   import { url } from '../url/state.svelte';
@@ -304,7 +306,10 @@
         </fieldset>
       {/if}
       {#if scopeSel?.public || item.public}<p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.public')}</p>{/if}
-      {#if scopeNeedsNc}<p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.outsideLab')}</p>{/if}
+      {#if scopeNeedsNc}
+        <p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.outsideLab')}</p>
+        <div data-testid="clarify-scope-guardrail"><CommandLine command={addCommand(scopeSel?.entry)} size="s" /></div>
+      {/if}
       <p class="note">{t('next.scopeSug.never')} {t('scope.add.dns')}</p>
       <div class="grid">
         <span class="k">{t('next.f.source')}</span>

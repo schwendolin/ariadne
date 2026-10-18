@@ -57,6 +57,9 @@ describe('Scope-Warnung: In den Scope aufnehmen (E129)', () => {
 
   it('Dialog: Auswahl, genauer Eintrag gross, DNS-Hinweis; Aufnehmen schreibt, wertet neu aus, Rückgängig per revert', async () => {
     const { app, project: p, backend } = await project();
+    // E132: .internal liegt ausserhalb der Lab-Allowlist; mit bestätigtem «kein Kundenauftrag» wie bisher
+    backend.state.notCustomer = true;
+    await p.scope.load();
     const change = vi.spyOn(backend, 'changeScope');
     const revert = vi.spyOn(backend, 'revertScope');
     const req: ScopeAddRequest = {
@@ -120,6 +123,8 @@ describe('Scope-Warnung: In den Scope aufnehmen (E129)', () => {
 
   it('Server lehnt ab (403 guardrail): fester Text im Dialog, kein Erfolg', async () => {
     const { app, project: p, backend } = await project();
+    backend.state.notCustomer = true;
+    await p.scope.load();
     const { ApiError } = await import('../../src/lib/api/client');
     vi.spyOn(backend, 'changeScope').mockRejectedValueOnce(new ApiError('guardrail', 403, 'x'));
     const req: ScopeAddRequest = { kind: 'scope-add', values: [{ value: 'a.b.example', proposals: [{ entry: 'a.b.example', kind: 'name', public: false }] }], source: {} };
@@ -129,6 +134,32 @@ describe('Scope-Warnung: In den Scope aufnehmen (E129)', () => {
     await until(() => !!screen.queryByRole('alert'));
     expect(screen.getByRole('alert').textContent).toContain('Ausserhalb der Lab-Allowlist');
     expect(screen.queryByTestId('scope-add-done')).toBeNull();
+    // E132: danach gesperrt mit dem Befehl fürs Terminal
+    expect(text(screen.getByTestId('scope-add-guardrail'))).toContain('ariadne scope add a.b.example --not-customer');
+    expect((screen.getByRole('button', { name: /^Aufnehmen/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('E132: recovery.vantis.internal ohne bestätigtes «kein Kundenauftrag»: gesperrt mit ariadne scope add … --not-customer', async () => {
+    const { app, project: p, backend } = await project();
+    const change = vi.spyOn(backend, 'changeScope');
+    const req: ScopeAddRequest = {
+      kind: 'scope-add',
+      values: [{ value: 'http://recovery.vantis.internal/login', proposals: p.next.view!.scope_warning!.targets[0]!.proposals! }],
+      source: { cmd_id: p.next.view!.scope_warning!.cmd_id },
+    };
+    render(ScopeAddDialog, { props: { app, project: p, req, onclose: () => undefined } });
+    await until(() => !!screen.queryByTestId('scope-add-guardrail'));
+    const dlg = screen.getByRole('dialog', { name: 'In den Scope aufnehmen' });
+    expect(text(dlg)).not.toContain('Öffentliche Endung'); // .internal ist nicht öffentlich (eigene Liste)
+    expect(text(screen.getByTestId('scope-add-guardrail'))).toContain('ariadne scope add recovery.vantis.internal --not-customer');
+    await fireEvent.click(within(dlg).getByLabelText(/\*\.vantis\.internal/));
+    await until(() => text(screen.getByTestId('scope-add-guardrail')).includes("'*.vantis.internal'"));
+    expect((within(dlg).getByRole('button', { name: /^Aufnehmen/ }) as HTMLButtonElement).disabled).toBe(true);
+    // der Server lehnt ohne Bestätigung ab (403 guardrail)
+    const r = await p.scope.change({ op: 'add', entry: 'recovery.vantis.internal', source: null });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('guardrail');
+    expect(change).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -163,6 +194,7 @@ describe('Klärung «In den Scope aufnehmen?» (E130)', () => {
 
   it('nach dem Aufnehmen steht die Klärung als erledigt da; Rückgängig geht über revert', async () => {
     const { project: p, backend } = await project();
+    backend.state.notCustomer = true; // E132: .internal nur mit «kein Kundenauftrag»
     const revert = vi.spyOn(backend, 'revertScope');
     const item = p.next.clarifyItems.find((i) => i.kind === 'scope_name' && i.name === 'recovery.vantis.internal') as ScopeItem;
     const res = await p.scope.change({ op: 'add', entry: 'recovery.vantis.internal', source: { item_key: item.item_key } });

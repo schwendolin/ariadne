@@ -22,7 +22,7 @@ class SettingsError(ValueError):
     pass
 
 
-def default_settings(*, name: str, profile: str, include: Sequence[str]) -> str:
+def default_settings(*, name: str, profile: str, include: Sequence[str], open_scope: bool = False) -> str:
     doc = tomlkit.document()
     doc.add("schema", SCHEMA)
     project = tomlkit.table()
@@ -33,6 +33,8 @@ def default_settings(*, name: str, profile: str, include: Sequence[str]) -> str:
     scope.add("include", list(include))
     scope.add("exclude", [])
     scope.add("windows", [])
+    if open_scope:  # E131: offener Scope, alles gilt als im Scope ausser Ausschlüssen
+        scope.add("open", True)
     doc.add("scope", scope)
     secrets = tomlkit.table()
     secrets.add("use_global", True)
@@ -62,9 +64,13 @@ def parse_settings(text: str) -> dict[str, Any]:
     if not isinstance(project, dict) or project.get("profile") not in ("lab", "customer"):
         raise SettingsError("[project] profile fehlt oder ist ungültig")
     scope = data.setdefault("scope", {})
+    if not isinstance(scope, dict):
+        raise SettingsError("[scope] muss eine Tabelle sein")
     for key in ("include", "exclude", "windows"):
         if not isinstance(scope.setdefault(key, []), list):
             raise SettingsError(f"[scope] {key} muss eine Liste sein")
+    if not isinstance(scope.setdefault("open", False), bool):  # E131: nur true oder false
+        raise SettingsError("[scope] open muss true oder false sein")
     data.setdefault("secrets", {}).setdefault("use_global", True)
     llm = data.setdefault("llm", {})
     llm.setdefault("mode", "cloud")

@@ -39,7 +39,9 @@ def test_add_inside_broader_exclude_reports_verdict():
     p = plan_change(_settings(["10.0.0.0/24"], ["10.0.0.0/28"]), "add", ["10.0.0.5"], ALLOW)
     assert p.verdicts == {"10.0.0.5": "excluded"}
     w = plan_change(_settings(["10.0.0.0/24"]), "add", ["*.vantis.internal"], ALLOW)
-    assert w.verdicts == {"*.vantis.internal": "in"} and w.outside == ()
+    # E132: .internal steht nicht mehr in der Lab-Allowlist
+    assert w.verdicts == {"*.vantis.internal": "in"} and w.outside == ("*.vantis.internal",)
+    assert plan_change(_settings(["10.0.0.0/24"]), "add", ["*.vantis.htb"], ALLOW).outside == ()
 
 
 @pytest.mark.parametrize("bad", ["", " ", "a b", "x\x00.lab", "x.lab\n", "‮x.lab", "10.0.0.0/33", "a" * 300])
@@ -61,10 +63,19 @@ def test_errors_noop_not_listed_last_include_too_many():
 
 def test_outside_lab_allowlist_and_public_names():
     p = plan_change(_settings(["10.0.0.0/24"]), "add", ["www.example.com", "8.8.8.8", "x.internal"], ALLOW)
-    assert p.outside == ("www.example.com", "8.8.8.8")
+    assert p.outside == ("www.example.com", "8.8.8.8", "x.internal")  # E132
     assert is_public_name("www.example.com") and not is_public_name("*.vantis.internal")
-    private = ("internal", "local", "lab", "htb", "test", "lan", "home", "localdomain")
+    private = ("internal", "local", "lab", "htb", "test", "lan", "home", "localdomain", "home.arpa",
+               "example", "invalid", "localhost", "thm", "vl")
     assert not any(is_public_name(f"a.{t}") for t in private)
+    assert is_public_name("a.com") and is_public_name("*.vantis.ch") and is_public_name("arpa.io")
+    # E132: Allowlist nur .htb .local .lab .thm .vl und private Netze
+    from ariadne.project.guardrails import DEFAULT_SUFFIXES, parse_target
+
+    assert DEFAULT_SUFFIXES == (".htb", ".local", ".lab", ".thm", ".vl")
+    for name, ok in (("a.htb", True), ("a.thm", True), ("a.vl", True), ("a.test", False),
+                     ("a.lan", False), ("a.home.arpa", False), ("a.localdomain", False)):
+        assert ALLOW.allows(parse_target(name)) is ok, name
 
 
 def test_render_toml_keeps_other_settings_and_validates_event():

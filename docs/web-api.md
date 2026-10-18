@@ -134,6 +134,8 @@ type ApiErrorCode =
   | 'no_project'        // 409 kein Projekt offen
   | 'project_mismatch'  // 409 pid ist nicht das offene Projekt
   | 'conflict'          // 409 Entscheid passt nicht mehr (verwaist, schon anders entschieden)
+  | 'noop'              // 409 Scope öffnen bzw. schliessen ohne Wirkung (20.2, E131)
+  | 'no_include'        // 409 Scope schliessen ohne Einschluss (20.2, E131)
   | 'too_large'         // 413
   | 'host'              // 421 Host-Header falsch
   | 'validation'        // 422 Eingabe ungültig
@@ -309,6 +311,7 @@ interface Status {
 }
 interface ProjectBrief {
   id: string; slug: string; name: string; profile: Profile; chain_head_ok: boolean;
+  scope_open: boolean;                // E131: offener Scope (20.2)
 }
 interface TerminalState {
   terminal_id: string;
@@ -397,8 +400,8 @@ interface ContextResult {
 ```ts
 interface ProjectView extends ProjectBrief {
   created_at: string;
-  scope: { include: string[]; exclude: string[]; version: number };   // Eingaben des Nutzers
-  lab_guard: { public_targets: boolean; confirmed_not_customer: boolean } | null;
+  scope: { include: string[]; exclude: string[]; version: number; open: boolean };   // Eingaben des Nutzers; open: E131
+  lab_guard: { public_targets: boolean; confirmed_not_customer: boolean } | null;   // public_targets auch bei offenem Scope
   started_at: string | null;          // erste Aufnahme
   chain: { head_seq: number; head_hash: string; head_ok: boolean };
 }
@@ -1724,7 +1727,7 @@ interface NextView {
 * `Status.scope_warning` bleibt unverändert (Kennzeichen in der Kopfzeile).
 * Fehler: wie `/next`. Ist `state.db` nicht lesbar, gilt «nicht quittiert».
 
-## 20 Scope erweitern: E129, E130 [v0.1]
+## 20 Scope erweitern: E129 bis E133 [v0.1]
 
 Stand: gebaut und getestet (Korrektur nach dem ersten Praxistest). Anlass: Der Scope liess sich nur beim Anlegen setzen; ein Name, den nmap einer IP im Scope zuordnete (`recovery.vantis.internal (10.36.198.11)`), blieb ausserhalb (E49), und die Scope-Warnung liess sich nur quittieren.
 
@@ -1738,15 +1741,17 @@ interface ScopeView {
   profile: 'lab' | 'customer';
   include: string[]; exclude: string[];
   windows: { days: string | null; from: string | null; to: string | null; tz: string | null }[];
+  open: boolean;                       // E131: offener Scope, alles gilt als im Scope ausser Ausschlüssen
   not_customer: boolean;               // «Das ist kein Kundenauftrag» bestätigt
   change_allowed: boolean;             // false im Profil customer: Hinweis auf das Terminal
   history: ScopeChange[];              // Änderungen über scope/changes bzw. ariadne scope, neueste zuerst, höchstens 20
 }
 interface ScopeChange {
   decision_id: string; version: number; ts: string; origin: 'cli' | 'webui';
-  op: 'add' | 'remove' | 'exclude' | 'revert';
-  entries: string[];                   // wie bestätigt (normalisiert)
+  op: 'add' | 'remove' | 'exclude' | 'open' | 'close' | 'revert';
+  entries: string[];                   // wie bestätigt (normalisiert); bei 'open'/'close' leer
   include_added: string[]; include_removed: string[]; exclude_added: string[]; exclude_removed: string[];
+  open_before: boolean | null; open_after: boolean | null;   // nur wenn der offene Scope wechselt (E131)
   revert_of: string | null;            // bei op 'revert': die rückgängig gemachte Änderung
   reverted_by: string | null;          // schon rückgängig gemacht durch diesen Entscheid
 }
@@ -1758,8 +1763,8 @@ Fehler: wie überall (409 `no_project`, `project_mismatch`, 423).
 
 ```ts
 interface ScopeChangeRequest {
-  op: 'add' | 'remove' | 'exclude' | 'revert';
-  entries?: string[];                  // 1 bis 20, je 1 bis 260 Zeichen; Pflicht ausser bei 'revert'
+  op: 'add' | 'remove' | 'exclude' | 'open' | 'close' | 'revert';
+  entries?: string[];                  // 1 bis 20, je 1 bis 260 Zeichen; Pflicht bei add, remove, exclude; nie bei open, close, revert
   decision_id?: string;                // nur und Pflicht bei 'revert'
   reason?: string;                     // bis 500 Zeichen, erscheint in der Zeitachse
   dry_run?: boolean;                   // true: nur prüfen und zeigen, nichts schreiben (Antwort 200)
@@ -1772,33 +1777,41 @@ interface ScopeChangeResult {
   entries: string[]; include: string[]; exclude: string[];            // Listen nach der Änderung
   include_added: string[]; include_removed: string[]; exclude_added: string[]; exclude_removed: string[];
   outside: string[];                   // neue Einschlüsse ausserhalb der Lab-Allowlist
-  needs_not_customer: boolean;         // true: geht nur im Terminal mit --not-customer (403 guardrail)
+  needs_not_customer: boolean;         // true: geht nur im Terminal mit --not-customer (403 guardrail); auch beim Öffnen
   verdicts: { entry: string; verdict: Verdict }[];   // Urteil jedes Eintrags danach («bleibt ausgeschlossen»)
+  open: boolean;                       // E131: offener Scope nach der Änderung
+  broad: boolean;                      // E133: ein neuer Einschluss ist sehr breit (siehe unten)
 }
 ```
 
 * `add`: Einträge kommen in `include`; steht derselbe Eintrag in `exclude`, fällt er dort weg. `remove`: Einträge fallen aus `include` und `exclude`; mindestens ein Einschluss bleibt. `exclude`: Einträge kommen in `exclude`.
 * Keine Wildcard auf eine ganze Endung: `add` mit `*.com`, `*.internal`, `*.lab` usw. (nur ein Label nach `*.`) ergibt 422, auch im Terminal und mit `--not-customer`; `*` allein ist kein gültiges Ziel. Entfernen und Ausschliessen solcher Einträge gehen (ältere Projekte, Einschränkung).
-* `revert`: die gespeicherte Änderung (`include_added` usw.) umgekehrt auf den **aktuellen** Stand; spätere Änderungen bleiben. Jede Änderung lässt sich einmal rückgängig machen; ein `revert` ist selbst wieder rückgängig zu machen.
+* `open` / `close` (E131, ohne `entries`): offener Scope an bzw. aus (`[scope] open` in den Projekteinstellungen). Offen gilt alles als im Scope (jede IP, jeder Name, jede URL, auch öffentliche Ziele), ausser Ausschlüssen und den Sonderadressen des Matchers (Loopback, Link-Local, Multicast, Broadcast, `0.0.0.0`, `::`; nie implizit); Zeitfenster gelten wie für Einschlüsse; eigene Adressen der Kali werden weiter nie Host (E42). Einschlüsse ergänzen den offenen Scope, Ausschlüsse gelten weiter. Öffnen gilt wie ein öffentliches Ziel: ohne bestätigtes «kein Kundenauftrag» 403 `guardrail` mit dem Text «Offener Scope gilt wie ein öffentliches Ziel: nur im Terminal mit ariadne scope open (Bestätigung «kein Kundenauftrag»).»; `dry_run` liefert dann `needs_not_customer: true`. Schliessen braucht mindestens einen Einschluss, sonst 409 `no_include` («Zuerst einen Eintrag hinzufügen: ariadne scope add <ziel>»). Öffnen bei schon offenem bzw. Schliessen bei geschlossenem Scope: 409 `noop`. Bei offenem Scope darf `remove` den letzten Einschluss entfernen. Ariadne schickt Zielen nie etwas (E10); der Scope steuert nur Auswertung, Warnungen, Karte und Lagebild.
+* `broad` (E133): `true`, wenn ein neuer Einschluss ein IPv4-Netz bzw. -Bereich mit mehr als 65 536 Adressen (grösser als /16) oder ein IPv6-Netz grösser als /48 ist. Nach bestätigtem «kein Kundenauftrag» nimmt das Dashboard auch solche Einträge an; der Bestätigungsdialog zeigt dann «Sehr breiter Eintrag: umfasst mehr als 65 536 Adressen.» Wildcards unter öffentlichen Endungen behalten ihren Warnhinweis; `*.<eine Endung>` bleibt überall abgelehnt.
+* `revert`: die gespeicherte Änderung (`include_added` usw., bei `open`/`close` der offene Scope) umgekehrt auf den **aktuellen** Stand, mit denselben Prüfungen (Öffnen per Rückgängig braucht «kein Kundenauftrag», Schliessen per Rückgängig einen Einschluss); spätere Änderungen bleiben. Jede Änderung lässt sich einmal rückgängig machen; ein `revert` ist selbst wieder rückgängig zu machen.
 * Der Dialog im Dashboard ruft zuerst `dry_run: true` und zeigt `include_added` usw. wörtlich (Zieldaten, als Text); erst «Aufnehmen» schickt dieselbe Anfrage ohne `dry_run`.
 * Danach: SSE `scope` `{ project_id, version }`, nach der Neuauswertung `changes` und gegebenenfalls `inbox`.
-* Fehler: 422 `validation` (Schema, ungültiges Ziel, Steuerzeichen, Wildcard auf eine ganze Endung, mehr als 20 Einträge, `entries` bei `revert` bzw. fehlend), 409 `conflict` (nichts zu ändern, Eintrag steht nicht im Scope, letzter Einschluss, schon rückgängig gemacht), 404 (`decision_id` ist keine Scope-Änderung), 403 `policy` (Profil customer: «im Terminal möglich»), 403 `guardrail` (neuer Einschluss ausserhalb der Lab-Allowlist ohne Bestätigung «kein Kundenauftrag»; Text «Ziel ausserhalb der Lab-Allowlist: nur im Terminal mit ariadne scope add <ziel> --not-customer.»). Meldungen enthalten nie die Eingabe.
+* Fehler: 422 `validation` (Schema, ungültiges Ziel, Steuerzeichen, Wildcard auf eine ganze Endung, mehr als 20 Einträge, `entries` bei `revert` bzw. fehlend), 409 `conflict` (nichts zu ändern, Eintrag steht nicht im Scope, letzter Einschluss bei geschlossenem Scope, schon rückgängig gemacht), 409 `noop` (`open`/`close` ohne Wirkung), 409 `no_include` (Schliessen ohne Einschluss), 404 (`decision_id` ist keine Scope-Änderung), 403 `policy` (Profil customer: «im Terminal möglich»), 403 `guardrail` (neuer Einschluss ausserhalb der Lab-Allowlist ohne Bestätigung «kein Kundenauftrag»; Text «Ziel ausserhalb der Lab-Allowlist: nur im Terminal mit ariadne scope add <ziel> --not-customer.»). Meldungen enthalten nie die Eingabe.
 * `d.scope.update` und `d.lab.not_customer` über `POST /decisions` bleiben 403 `policy`; `d.revoke` auf eine Scope-Änderung ebenso (Rückgängig nur über `op: 'revert'`).
-* Lab-Allowlist: zu `.htb .local .lab .thm .vl` kommen `.internal .test .lan .home .localdomain .home.arpa` (Endungen ohne öffentliches DNS); RFC1918 wie bisher.
+* Lab-Allowlist (E132): `.htb .local .lab .thm .vl` und die privaten Netze wie vor Praxis 1. Namen unter `.internal .test .lan .home .localdomain .home.arpa` brauchen wie öffentliche Ziele die Bestätigung «kein Kundenauftrag» (ohne sie 403 `guardrail` mit Hinweis `ariadne scope add … --not-customer`); als «öffentliche Endung» (Warnhinweis, `public`) gelten sie nicht.
 
 ### 20.3 Zeitachse: Rückgängig
 
 `TimelineItem` `decision` bekommt das Pflichtfeld `scope_change` (sonst `null`):
 
 ```ts
-scope_change: { op: 'add' | 'remove' | 'exclude' | 'revert' | null; entries: string[]; version: number | null;
+scope_change: { op: 'add' | 'remove' | 'exclude' | 'open' | 'close' | 'revert' | null; entries: string[];
+                version: number | null;
+                include_added: string[]; include_removed: string[];   // E131: die Änderung selbst, damit der
+                exclude_added: string[]; exclude_removed: string[];   // Text bei Rückgängig stimmt
+                open_before: boolean | null; open_after: boolean | null;   // nur wenn der offene Scope wechselt
                 revert_of: string | null; reverted_by: string | null;
                 revertible: boolean } | null   // true: Knopf «Rückgängig» -> POST /scope/changes { op: 'revert', decision_id }
 ```
 
 Das Dashboard schickt das erst nach einer Bestätigung in der Zeile, die die Einträge und die Wirkung zeigt (z. B. «Rückgängig hebt den Ausschluss auf: …»), weil ein Rückgängig den Scope auch erweitern kann (E129: Bestätigung mit dem genauen Eintrag). Ebenso der Dialog in den Einstellungen («Entfernen», «Ausschliessen»): «Rückgängig» zeigt erst Wirkung und gespeicherten Eintrag, geschickt wird erst mit «Rückgängig machen»; vor dem Ausschliessen zeigt er per `dry_run` den Eintrag so, wie er gespeichert wird. Die Leitplanke gilt auch hier (403 `guardrail`).
 
-`summary`: «Scope erweitert (Version 2)», «Aus dem Scope entfernt (…)», «Aus dem Scope ausgeschlossen (…)», «Scope-Änderung rückgängig (…)»; ohne `change` wie bisher «Scope gesetzt (Version 1)». `detail`: die Einträge, durch Komma getrennt; `reason`: der Grund.
+`summary`: «Scope erweitert (Version 2)», «Aus dem Scope entfernt (…)», «Aus dem Scope ausgeschlossen (…)», «Scope geöffnet (Version N)», «Scope geschlossen (Version N)», «Scope-Änderung rückgängig (…)»; ohne `change` wie bisher «Scope gesetzt (Version 1)». `detail`: die Einträge, durch Komma getrennt; `reason`: der Grund.
 
 ### 20.4 Scope-Warnung: «In den Scope aufnehmen»
 
@@ -1847,14 +1860,16 @@ Beispiel `curl http://recovery.vantis.internal/login`: `[{ entry: 'recovery.vant
 * Entsteht, wenn nmap (Name im Scan-Bericht, XML `hostname type="user"` oder `PTR`, Text «rDNS record for …») einen Namen einer IP mit Urteil `in` zuordnet und der Name selbst `out` ist. Namen aus Bannern (`Service Info: Host:`, SMB) zählen nicht. Ausgeschlossene Namen nie.
 * Aufnehmen: `POST /scope/changes { op: 'add', entries: [choice.entry] }` mit Bestätigungsdialog. Nie automatisch, weil Zuordnungen vom Ziel stammen können.
 * Verwerfen: `POST /decisions` mit `d.suggestion.dismiss { suggestion_key }`; bleibt verworfen (auch nach Reparse), bis `d.revoke` auf diesen Entscheid. `d.suggestion.done` auf einen solchen Schlüssel: 409. Unbekannter oder schon verworfener Schlüssel: 409.
-* Öffentliche Endung (nicht `.internal .local .lab .htb .test .lan .home .localdomain .home.arpa .thm .vl`): `public: true` und `warning` «Öffentliche Domain: Die Zuordnung stammt vom Ziel. Nur aufnehmen, wenn sie sicher zum Auftrag gehört.»; aufnehmen geht dann nur im Terminal mit `--not-customer` (`outside_lab`).
+* Öffentliche Endung (nicht `.internal .local .lab .htb .test .lan .home .localdomain .home.arpa .thm .vl .example .invalid .localhost`, eigene Liste getrennt von der Lab-Allowlist, E132): `public: true` und `warning` «Öffentliche Domain: Die Zuordnung stammt vom Ziel. Nur aufnehmen, wenn sie sicher zum Auftrag gehört.»; aufnehmen geht dann nur im Terminal mit `--not-customer` (`outside_lab`).
 
 ### 20.6 Terminal und ctl
 
 * `ariadne scope` (bzw. `scope show`), `scope add <ziel>...`, `scope remove <ziel>...`, `scope exclude <ziel>...` mit Rückfrage `[j/N]` und dem genauen Eintrag (`--yes` ohne Rückfrage, `--reason`, `--not-customer` für Ziele ausserhalb der Lab-Allowlist), `scope undo [<decision_id>]` (ohne Angabe die jüngste Änderung).
 * `ariadne start <vorhandenes Projekt> --target X` zeigt den aktuellen Scope und den Befehl `ariadne scope add X` (nur Ziele, die noch fehlen).
+* Offener Scope (E131): `ariadne scope` zeigt als erste Zeile «Scope: offen (alles gilt als im Scope, ausser Ausschlüssen)» bzw. «Scope: geschlossen (nur die Einschlüsse)». `ariadne scope open` und `ariadne scope close` zeigen die genaue Wirkung und fragen `[j/N]` (ohne Terminal nur mit `--yes`); `open` fragt zusätzlich «Kein Kundenauftrag? [j/N]», solange das nicht bestätigt ist (oder `--not-customer`). `ariadne start <neu>` ohne `--target` fragt im Terminal «Projekt <slug> gibt es noch nicht. Neu anlegen mit offenem Scope? Alles gilt dann als im Scope, auch öffentliche Ziele; nur ohne Kundenauftrag. [j/N]» (fängt Tippfehler ab); ohne Terminal nur mit `--open-scope --not-customer`. Dasselbe für `ariadne project new` (`--target` nicht mehr Pflicht). `ariadne status` zeigt «Scope: offen», wenn offen. ctl `start` und `project.new` nehmen `open_scope`; ohne Ziele nur mit `open_scope` und `not_customer` (sonst `project_not_found` bzw. `guardrail`). Im Profil customer nie.
+* Antworten (E131): `GET /p/{pid}/status` (`project.scope_open`) und `GET /p/{pid}/project` (`scope_open`, `scope.open`; `lab_guard.public_targets` ist bei offenem Scope `true`) nennen den offenen Scope. KI (E126): ein offener Scope zählt wie öffentliche Adressen im Scope (`public_scope`, Cloud nur mit «kein Kundenauftrag», das Öffnen ohnehin verlangt); das Lagebild enthält alle Hosts im Scope.
 * ctl `scope.show` und `scope.change` `{ action, entries?, decision_id?, reason?, origin: 'cli' | 'webui', not_customer?, dry_run? }` (`action` statt `op`, weil `op` im ctl-Protokoll vergeben ist). Beide stehen in `ALLOWED_OPS` der Web-API; `not_customer` wirkt nur mit Herkunft `cli` und schreibt `d.lab.not_customer` im selben Commit.
-* `events.DScopeUpdate` bekommt das optionale Feld `change` (`DScopeChange`: `op`, `entries`, `include_added`, `include_removed`, `exclude_added`, `exclude_removed`, `revert_of`, `reason`), nur additiv; alte Einträge bleiben gültig.
+* `events.DScopeUpdate` bekommt das optionale Feld `change` (`DScopeChange`: `op`, `entries`, `include_added`, `include_removed`, `exclude_added`, `exclude_removed`, `revert_of`, `reason`, seit E131 auch `open_before`, `open_after` und `op` `open`/`close`), nur additiv; alte Einträge bleiben gültig. Projekteinstellungen: `[scope] open = true|false` (fehlt = false, nur bool).
 
 ## Anhang: Lücken aus Briefing B.4 und wo sie jetzt stehen
 

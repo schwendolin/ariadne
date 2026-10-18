@@ -522,7 +522,7 @@ class DTag(_M):
 
 
 ScopeEntry = Annotated[str, Field(min_length=1, max_length=260)]
-ScopeOp = Literal["add", "remove", "exclude", "revert"]
+ScopeOp = Literal["add", "remove", "exclude", "revert", "open", "close"]
 
 
 class DScopeChange(_M):
@@ -541,6 +541,9 @@ class DScopeChange(_M):
     exclude_removed: tuple[ScopeEntry, ...] = Field(default=(), max_length=20)
     revert_of: str | None = Field(default=None, min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=500)
+    # E131: offener Scope vor und nach der Änderung, nur wenn er wechselt (open, close, Rückgängig)
+    open_before: bool | None = None
+    open_after: bool | None = None
 
 
 class DScopeUpdate(_M):

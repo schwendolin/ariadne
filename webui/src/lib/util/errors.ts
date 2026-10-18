@@ -30,6 +30,8 @@ const KEYS: Record<ClientErrorCode, MessageKey> = {
   shot_region: 'err.shot_region',
   shot_failed: 'err.shot_failed',
   guardrail: 'err.guardrail',
+  no_include: 'scope.edit.err.noInclude',
+  noop: 'scope.edit.err.noop',
   network: 'err.network',
   aborted: 'err.aborted',
   timeout: 'err.timeout',

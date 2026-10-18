@@ -50,6 +50,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     monkeypatch.setattr(cli, "_client", lambda paths, **kw: None)
     monkeypatch.setattr(cli, "read_secret", fake_secret)
     monkeypatch.setattr(cli, "OperatorVault", _Vault)
+    monkeypatch.setattr(cli, "_project_exists", lambda paths, slug: True)  # E131: keine Rückfrage «neu?»
     monkeypatch.setenv("ARIADNE_TERMINAL_ID", "term-0001")
     return log
 

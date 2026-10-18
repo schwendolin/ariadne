@@ -93,6 +93,8 @@ ariadne scope undo                # wieder rückgängig
 
 Erwartet: Nach `j` verschwindet die Warnung zu diesem Befehl (Neuauswertung, wenige Sekunden), in der Zeitachse steht «Scope erweitert (Version 2)». Im Dashboard geht dasselbe über «In den Scope aufnehmen» an der Warnung, mit Bestätigung; Rückgängig über die Zeitachse. Meldet nmap einen Namen zu einer IP im Scope (`Nmap scan report for name.lab (10.10.10.5)`), steht unter «Klären» «name.lab gehört laut nmap zu 10.10.10.5 (im Scope). In den Scope aufnehmen?» mit der Wahl nur Name oder `*.domain`; nie automatisch.
 
+Offener Scope (E131), nur ohne Kundenauftrag: `ariadne start test-offen` (ohne `--target`) fragt «Projekt test-offen gibt es noch nicht. Neu anlegen mit offenem Scope? …». Nach `j` gilt alles als im Scope: `curl https://github.com/` erzeugt keine Scope-Warnung, `ariadne scope` zeigt «Scope: offen (…)», `ariadne status` «Scope: offen». `ariadne scope close` ohne Einschluss meldet «Zuerst einen Eintrag hinzufügen: ariadne scope add <ziel>»; nach `ariadne scope add 10.10.10.0/24` und `ariadne scope close` ist die Warnung beim nächsten Befehl auf ein Ziel ausserhalb wieder da. In der Zeitachse stehen «Scope geöffnet» bzw. «Scope geschlossen» mit Rückgängig.
+
 ## 8 Dashboard vom Mac
 
 Nach [Anleitung Fernzugriff](anleitung-fernzugriff.md) 7: `ariadne-mac start`. Dasselbe Projekt muss im Browser des Macs erscheinen. In der Kali `ariadne ui --sessions`: Die Mac-Sitzung steht dort mit Herkunft «über sshd».
@@ -157,6 +159,7 @@ Pro Punkt: **ok**, **Problem** (was genau, Uhrzeit) oder **nicht geprüft**.
 | 12 | Denkanstoss «Versionen recherchieren» ein Mal pro Host, Liste vollständig, Befehle kopierbar | |
 | 13 | Scope-Warnung als erster Eintrag, Quittieren wirkt, kommt bei neuem Ziel ausserhalb wieder | |
 | 13a | Scope erweitern: `ariadne scope add` und «In den Scope aufnehmen» im Dashboard, Warnung verschwindet, Rückgängig wirkt; Klärung zu nmap-Namen erscheint | |
+| 13b | Offener Scope: `ariadne start test-offen` ohne `--target` fragt nach, nach `j` gibt `curl https://github.com/` keine Scope-Warnung und der Host erscheint auf der Karte; `ariadne scope close` (nach `ariadne scope add …`) bringt die Warnung zurück | |
 | 14 | Pause: nichts aus der Pause in der Zeitachse | |
 | 15 | Export: lesbar, eigenes Secret (sudo) als Sternchen, Eingaben ohne Echo als `••••••••`, Screenshot mit Notiz | |
 | 15a | Optional KI: Ergebnis (Anzahl Denkanstösse, brauchbar?), Kosten laut `ariadne ai status`, Meldung bei Fehlern wörtlich, erledigt/verwerfen wirkt | |

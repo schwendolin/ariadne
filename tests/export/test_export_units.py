@@ -247,3 +247,22 @@ def test_render_write_with_screenshot(tmp_path):
     wu = (root / "02 Writeup.md").read_text("utf-8")
     assert "Lessons Learned" in wu and "Privilege Escalation" in wu
     assert res["warnings"] == ["generic_secret"] and res["generic_kinds"] == ["private_key"]
+
+
+def test_render_names_open_scope():
+    """E131: Bei offenem Scope nennt der Bericht das statt «keine Angabe»."""
+    from ariadne.export.render import render
+
+    meta = {"project_id": "p1", "slug": "offen", "name": "offen", "profile": "lab", "template": "htb",
+            "klartext": False, "created_at": iso_ms(1_700_000_000_000_000_000), "chain_seq": 1,
+            "chain_hash": "cd" * 32, "period": [None, None], "scope_include": [],
+            "scope_exclude": ["8.8.8.8"], "scope_open": True}
+    data = {"meta": meta, "commands": [], "findings": [], "keysteps": [], "belege": {}, "hosts": [],
+            "timeline": [], "credentials": [], "images": [], "masked": 0}
+    text = "\n".join(render(data).values())
+    assert "- offener Scope: alles galt als im Scope, ausser Ausschlüssen" in text
+    assert "keine Angabe" not in text.split("## Scope", 1)[1].split("## Statistik", 1)[0]
+    assert "- ausgeschlossen: 8.8.8.8" in text
+    meta.update(scope_open=False)
+    assert "- im Scope: keine Angabe" in "\n".join(render(data).values())
+    assert "offener Scope" not in "\n".join(render(data).values())

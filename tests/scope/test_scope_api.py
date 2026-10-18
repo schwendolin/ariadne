@@ -76,7 +76,8 @@ def test_add_reevaluates_and_revert_restores(paths, operator):
             props = w["targets"][0]["proposals"]
             assert [(p["entry"], p["kind"]) for p in props] == [
                 (NAME, "url_host"), ("*.vantis.internal", "wildcard")]
-            assert all(p["outside_lab"] is False and p["public"] is False for p in props)
+            # E132: .internal steht nicht mehr in der Lab-Allowlist, ist aber keine öffentliche Endung
+            assert all(p["outside_lab"] is True and p["public"] is False for p in props)
             items = {i["name"]: i for i in _names(nx)}
             assert set(items) == {NAME, PUBLIC}  # nie der Banner-Name metasploitable.localdomain
             it = items[NAME]
@@ -93,7 +94,19 @@ def test_add_reevaluates_and_revert_restores(paths, operator):
             r = await c.post(f"{base}/scope/changes", json={"op": "add", "entries": [NAME], "dry_run": True})
             assert r.status_code == 200, r.text
             assert r.json()["include_added"] == [NAME] and r.json()["decision_id"] is None
+            assert r.json()["needs_not_customer"] is True and r.json()["broad"] is False
             assert d.project.settings_version == 1
+            # E132: ohne bestätigtes «kein Kundenauftrag» 403 guardrail mit Hinweis aufs Terminal
+            r = await c.post(f"{base}/scope/changes", json={"op": "add", "entries": [NAME]})
+            assert r.status_code == 403 and r.json()["error"]["code"] == "guardrail"
+            assert "ariadne scope add" in r.json()["error"]["message"] and "--not-customer" in r.text
+            assert NAME not in r.text
+            from ariadne.store.api import AppendItem
+
+            d.submit(AppendItem("d.lab.not_customer", {"scope_version": 1}, origin="cli"))
+            d.flush()
+            r = await c.post(f"{base}/scope/changes", json={"op": "add", "entries": [NAME], "dry_run": True})
+            assert r.json()["needs_not_customer"] is False
 
             req = {"op": "add", "entries": [NAME], "client_ref": "u1"}
             r = await c.post(f"{base}/scope/changes", json=req)
@@ -332,6 +345,8 @@ def test_user_case_cli_options_and_broad_wildcards(paths, operator, capsys):
             rc = await asyncio.to_thread(main, ["scope", "add", NAME])
             assert rc != 0 and d.project.settings_version == 1  # ohne Bestätigung nichts
             rc = await asyncio.to_thread(main, ["scope", "add", NAME, "--yes"])
+            assert rc != 0 and d.project.settings_version == 1  # E132: .internal braucht --not-customer
+            rc = await asyncio.to_thread(main, ["scope", "add", NAME, "--yes", "--not-customer"])
             out = capsys.readouterr().out
             assert rc == 0, out
             assert f"Neu im Scope: {NAME}" in out and "ariadne scope undo" in out

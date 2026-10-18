@@ -4,7 +4,8 @@
   prüft keine Namen per DNS», einem Warnhinweis bei öffentlicher Endung und «Aufnehmen»/«Abbrechen».
   Vor dem Aufnehmen fragt der Dialog den Server mit `dry_run` (web-api.md 20.2) und zeigt, was neu
   in den Scope kommt; braucht es «kein Kundenauftrag» (`needs_not_customer`), bleibt «Aufnehmen»
-  gesperrt mit Hinweis aufs Terminal.
+  gesperrt mit Hinweis aufs Terminal und dem Befehl `ariadne scope add <eintrag> --not-customer` (E132).
+  Sehr breite Einträge (`broad` im dry_run, E133) bekommen einen Warnhinweis.
   Danach Rückmeldung im Dialog: «Aufgenommen», «Ariadne wertet neu aus …», sobald per SSE
   `changes` kommt «Neu ausgewertet.», mit «Rückgängig» (`op: 'revert'`, nie d.revoke) und «Schliessen».
   Im Profil customer nur der Hinweis auf `ariadne scope`. Ziele und Einträge nur über Txt.
@@ -23,6 +24,7 @@
   import Txt from '../ui/Txt.svelte';
   import { isApiError } from '../api/client';
   import { errorText, isAbort } from '../util/errors';
+  import { addCommand } from './open';
 
   let { app, project, req, onclose }: { app: AppState; project: ProjectStore; req: ScopeAddRequest; onclose: () => void } = $props();
 
@@ -49,7 +51,7 @@
   const all = $derived(groups.flatMap((g) => g.options));
   const chosen = $derived(all.find((o) => o.entry === selected) ?? null);
   // Vorschau per dry_run für den gewählten Eintrag
-  let preview = $state.raw<{ entry: string; result: ScopeChangeResult | null; error: string | null } | null>(null);
+  let preview = $state.raw<{ entry: string; result: ScopeChangeResult | null; error: string | null; code: string | null } | null>(null);
   let previewSeq = 0;
   $effect(() => {
     const entry = chosen?.entry ?? null;
@@ -57,11 +59,18 @@
     const seq = ++previewSeq;
     void scope.preview({ op: 'add', entry }).then((r) => {
       if (seq !== previewSeq) return;
-      preview = r.ok ? { entry, result: r.result, error: null } : { entry, result: null, error: r.error };
+      preview = r.ok ? { entry, result: r.result, error: null, code: null } : { entry, result: null, error: r.error, code: r.code ?? null };
     });
   });
   const current = $derived(preview && chosen && preview.entry === chosen.entry ? preview : null);
-  const needsNc = $derived(!!current?.result?.needs_not_customer || (!!chosen?.outside_lab && app.profile === 'lab' && scope.view?.not_customer === false));
+  // 403 guardrail beim Schreiben (oder schon in der Vorschau): gesperrt mit dem Befehl fürs Terminal
+  let guardrailFor = $state<string | null>(null);
+  const needsNc = $derived(
+    !!current?.result?.needs_not_customer ||
+      current?.code === 'guardrail' ||
+      (!!chosen && guardrailFor === chosen.entry) ||
+      (!!chosen?.outside_lab && app.profile === 'lab' && scope.view?.not_customer === false),
+  );
   const blockReason = $derived(
     busy ? t('next.loading') : app.offline ? t('err.network') : !chosen ? t('scope.edit.empty') : needsNc ? t('scope.edit.err.guardrail') : current?.error ? current.error : null,
   );
@@ -109,6 +118,7 @@
     busy = false;
     if (!res.ok) {
       error = res.error;
+      if (res.code === 'guardrail') guardrailFor = chosen.entry;
       return;
     }
     done = { entry: chosen.entry, result: res.result };
@@ -133,7 +143,7 @@
   }
 </script>
 
-<Dialog title={t('scope.add.title')} {onclose} size="m" tone={chosen?.public && !done ? 'attention' : 'neutral'}>
+<Dialog title={t('scope.add.title')} {onclose} size="m" tone={(chosen?.public || current?.result?.broad) && !done ? 'attention' : 'neutral'}>
   {#if !editable}
     <p class="text">{t('scope.add.customer')}</p>
     <CommandLine command="ariadne scope" size="s" />
@@ -169,11 +179,16 @@
         <p class="kicker">{t('scope.add.entry')}</p>
         <p class="entry big" data-testid="scope-add-entry"><Txt value={chosen.entry} mono ctrl={chosen.ctrl ?? false} max={200} /></p>
         {#if chosen.public}<p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.public')}</p>{/if}
-        {#if needsNc}<p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.outsideLab')}</p>{/if}
+        {#if needsNc}
+          <p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.outsideLab')}</p>
+          <p class="hint">{t('scope.add.guardrailCmd')}</p>
+          <div data-testid="scope-add-guardrail"><CommandLine command={addCommand(chosen.entry)} size="s" /></div>
+        {/if}
+        {#if current?.result?.broad}<p class="warn" role="note" data-testid="scope-broad"><span aria-hidden="true">!</span> {t('scope.add.broad')}</p>{/if}
         {#if current?.result}
           {@const r = current.result}
           {#if (r.exclude_removed ?? []).length > 0}<p class="effect">{t('scope.add.fromExclude')} {#each r.exclude_removed ?? [] as e, i (i)}{#if i > 0}, {/if}<Txt value={e} mono max={120} />{/each}</p>{/if}
-        {:else if current?.error}
+        {:else if current?.error && current.code !== 'guardrail'}
           <p class="warn" role="note">{current.error}</p>
         {/if}
       </div>
