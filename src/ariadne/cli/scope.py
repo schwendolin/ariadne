@@ -179,7 +179,7 @@ def register(sub: Any) -> None:
     sp = sub.add_parser("scope", help="Scope anzeigen und ändern (hinzufügen, entfernen, ausschliessen)")
     ssub = sp.add_subparsers(dest="scope_cmd", metavar="AKTION")
     ssub.add_parser("show", help="Einschlüsse, Ausschlüsse, Zeitfenster, letzte Änderungen")
-    for name, hlp in (("add", "Ziele in den Scope aufnehmen (IP, CIDR, Name, *.domain)"),
+    for name, hlp in (("add", "Ziele in den Scope aufnehmen (IP, CIDR, Bereich a.b.c.d-e, Name, *.domain)"),
                       ("remove", "Ziele aus dem Scope entfernen (Einschluss oder Ausschluss)"),
                       ("exclude", "Ziele ausschliessen (Ausschluss schlägt Einschluss)")):
         c = ssub.add_parser(name, help=hlp)

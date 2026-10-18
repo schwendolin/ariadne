@@ -183,6 +183,14 @@ def plan_change(settings: Mapping[str, Any], op: str, raw: Iterable[Any], allowl
     entries = normalize_entries(raw)
     inc, exc, windows = scope_lists(settings)
     if op == "add":
+        broad = [e for e in entries if e.startswith("*.") and "." not in e[2:]]
+        if broad:
+            # *.com, *.lab, *.internal: ganze Endungen nie per Wildcard (wie E130, wildcard_of);
+            # entfernen und ausschliessen bleiben möglich (alte Projekte, Einschränkung)
+            raise ScopeChangeError(
+                "invalid",
+                "Wildcard nur unter einer Domain mit mindestens zwei Labels (z. B. *.vantis.internal), "
+                "nie für eine ganze Endung: " + ", ".join(broad))
         new_inc = inc + [e for e in entries if e not in inc]
         new_exc = [x for x in exc if x not in entries]
     elif op == "remove":

@@ -481,7 +481,7 @@ def add_routes(router: APIRouter, api: Api) -> None:
         if warning is not None and await _acked(api, p, str(warning["cmd_id"])):
             view["scope_warning"] = None
         if view["scope_warning"] is not None:
-            # E129: «in den Scope aufnehmen» im Dashboard, im Profil customer nur im Terminal
+            # E129: «in den Scope aufnehmen» im Dashboard, im Profil customer nur im Terminal (wie /status)
             view["scope_warning"]["change_allowed"] = profile != "customer"
         keys = [str(i["item_key"]) for i in view["clarify"]]
         if keys:

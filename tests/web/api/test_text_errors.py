@@ -189,7 +189,7 @@ def test_error_format_fixed_texts_and_ctl_mapping():
         "project_changed": 409,
         "no_ingest": 503,
         "vault": 500,
-        "guardrail": 500,
+        "guardrail": 403,  # E129: Scope-Änderung ausserhalb der Lab-Allowlist (web-api.md 20.2)
         None: 500,
     }
     for code, status in mapping.items():

@@ -119,3 +119,39 @@ def test_slow_reader_is_closed_not_blocking():
         bus.close_all()
 
     asyncio.run(main())
+
+
+def test_end_sessions_sends_reason_then_closes_and_keeps_it_out_of_the_ring():
+    """Praxistest: vor dem Sitzungsende kommt ``session`` mit dem Grund, danach endet der Strom.
+    Das laufende Fenster geht vorher hinaus; ``session`` wird nie nachgeholt."""
+
+    async def main() -> None:
+        bus = EventBus(window_s=10, heartbeat_s=5, id_base=0)
+        a, b = bus.subscribe("s1"), bus.subscribe("s2")
+        it = bus.iterate(a)
+        assert await it.__anext__() == b": ok\n\n"
+        bus.publish("project", {"project_id": None, "change": "closed", "locked": False})
+        assert bus.end_sessions({"change": "ending", "reason": "stop", "slug": "lame"}) == 2
+        got = [await asyncio.wait_for(it.__anext__(), 1) for _ in range(2)]
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(it.__anext__(), 1)
+        evs = _events(got)
+        assert [e[1] for e in evs] == ["project", "session"] and evs[0][0] < evs[1][0]
+        assert evs[1][2] == {"change": "ending", "reason": "stop", "slug": "lame"}
+        assert _events(_drain(b))[-1][1] == "session" and b.closed
+        assert bus.streams() == 0 and a.closed
+        # neue Anmeldung mit alter Last-Event-ID: «session» kommt nicht noch einmal
+        c = bus.subscribe("s3", str(evs[0][0]))
+        assert all(e[1] != "session" for e in _events(c.initial))
+        # zu langsamer Leser: sofort zu, ohne zu blockieren
+        bus2 = EventBus(window_s=10, queue_size=1, id_base=0)
+        slow = bus2.subscribe("s")
+        bus2.publish("terminal", {"terminal_id": "t", "change": "opened"})
+        bus2.flush()
+        assert bus2.end_sessions({"change": "ending", "reason": "lock", "slug": None}) == 1
+        assert slow.closed and bus2.streams() == 0
+        bus.close_all()
+        assert bus.end_sessions({"change": "ending", "reason": "stop", "slug": None}) == 0
+        bus2.close_all()
+
+    asyncio.run(main())

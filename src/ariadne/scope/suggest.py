@@ -71,7 +71,8 @@ def _entry(value: str, kind: str, allowlist: LabAllowlist) -> dict[str, Any] | N
 def proposals(raw: str, allowlist: LabAllowlist | None = None) -> list[dict[str, Any]]:
     """Vorschläge für ein Ziel (roh, wie im Befehl): ``[{entry, kind, outside_lab, public}]``.
 
-    ``kind``: ``name`` (exakter Name), ``url_host`` (Host einer URL), ``ip``, ``wildcard``."""
+    ``kind``: ``name`` (exakter Name), ``url_host`` (Host einer URL), ``ip``, ``cidr`` (Netz), ``range``
+    (IPv4-Bereich), ``wildcard``."""
     allow = allowlist or LabAllowlist.default()
     t = _parse_target(raw) if isinstance(raw, str) else None
     if t is None:
@@ -91,8 +92,15 @@ def proposals(raw: str, allowlist: LabAllowlist | None = None) -> list[dict[str,
             e = _entry(str(addrs[0]), "ip", allow)
             if e is not None:
                 out.append(e)
-        for n in t.nets[:1]:
-            e = _entry(str(n), "ip", allow)
+        if t.nets:
+            # Ein IPv4-Bereich (nmap 10.0.0.1-50) zerfällt im Matcher in mehrere Netze; vorgeschlagen
+            # wird der ganze Bereich, nicht nur sein erstes Teilnetz
+            n0, n1 = t.nets[0], t.nets[-1]
+            if len(t.nets) > 1:
+                whole, kind = f"{n0.network_address}-{n1.broadcast_address}", "range"
+            else:
+                whole, kind = str(n0), "ip" if n0.num_addresses == 1 else "cidr"
+            e = _entry(whole, kind, allow)
             if e is not None:
                 out.append(e)
     seen: set[str] = set()

@@ -282,3 +282,80 @@ def test_ctl_cli_origin_not_customer_and_show(paths, operator):
                 await s.close()
 
     run_api(paths, operator, body, fixture=False)
+
+
+def test_user_case_cli_options_and_broad_wildcards(paths, operator, capsys):
+    """Fall aus dem Praxistest über das Terminal: ``ariadne scope add`` gegen den echten Daemon wirkt
+    wie das Dashboard (Warnung weg, Wert auto), ``ariadne scope undo`` stellt den alten Scope her.
+    Dazu ``GET /scope/options`` (Vorschläge zu Zielen ohne ``proposals``) und keine Wildcards auf ganze
+    Endungen (``*.com``, ``*.internal``)."""
+    import asyncio
+
+    from ariadne.cli.main import main
+
+    async def body(d, c, _fx, _bus, _ctx) -> None:
+        pid, _ws, shims = await lab(d, paths)
+        try:
+            base = f"{BASE}/p/{pid}"
+            ip_id = f"ip:default/{IP}"
+            # Vorschläge zu einem Ziel ohne mitgelieferte proposals (Out-of-Scope-Rand)
+            r = await c.get(f"{base}/scope/options", params={"value": URL})
+            assert r.status_code == 200, r.text
+            o = r.json()
+            assert o["verdict"] == "out" and o["value"] == URL and o["ctrl"] is False
+            assert [(x["entry"], x["kind"]) for x in o["options"]] == [
+                (NAME, "url_host"), ("*.vantis.internal", "wildcard")]
+            o = (await c.get(f"{base}/scope/options", params={"value": IP})).json()
+            assert o["verdict"] == "in" and o["options"] == []
+            o = (await c.get(f"{base}/scope/options", params={"value": "a\x1bb.lab"})).json()
+            assert o["ctrl"] is True and "\x1b" not in o["value"] and o["options"] == []
+            assert (await c.get(f"{base}/scope/options", params={"value": "x" * 3000})).status_code == 422
+            assert (await c.get(f"{base}/scope/options")).status_code == 422
+
+            # keine Wildcards auf ganze Endungen, auch nicht per dry_run
+            for broad in ("*", "*.com", "*.internal", "*.lab", "*.*.vantis.internal"):
+                req = {"op": "add", "entries": [broad], "dry_run": True}
+                r = await c.post(f"{base}/scope/changes", json=req)
+                assert r.status_code == 422, (broad, r.status_code)
+                assert broad not in r.text or broad == "*"
+            res = await ctl(paths.ctl_sock, "scope.change", action="add", entries=["*.com"], origin="cli",
+                            not_customer=True)
+            assert res["ok"] is False and res["error"]["code"] == "invalid"
+            # ausschliessen geht (schränkt nur ein)
+            res = await ctl_ok(paths.ctl_sock, "scope.change", action="exclude", entries=["*.com"],
+                               origin="cli", dry_run=True)
+            assert res["exclude_added"] == ["*.com"]
+
+            # Terminal: ariadne scope add <name> --yes (ohne TTY nur mit --yes)
+            assert await _claim(d, ip_id, "host.name", NAME) == ("quiet", "out_of_scope", "candidate")
+            capsys.readouterr()
+            rc = await asyncio.to_thread(main, ["scope", "add", NAME])
+            assert rc != 0 and d.project.settings_version == 1  # ohne Bestätigung nichts
+            rc = await asyncio.to_thread(main, ["scope", "add", NAME, "--yes"])
+            out = capsys.readouterr().out
+            assert rc == 0, out
+            assert f"Neu im Scope: {NAME}" in out and "ariadne scope undo" in out
+            assert d.project.settings_version == 2
+            await sync(d)
+            assert await _claim(d, ip_id, "host.name", NAME) == ("auto", "parser", "auto")
+            nx = (await c.get(f"{base}/next")).json()
+            assert nx["scope_warning"] is None and NAME not in [i["name"] for i in _names(nx)]
+            sc = (await c.get(f"{base}/scope")).json()
+            assert sc["history"][0]["origin"] == "cli" and sc["include"] == [NET, NAME]
+
+            # ariadne scope undo: alter Scope, Warnung und Klärung wieder da
+            rc = await asyncio.to_thread(main, ["scope", "undo", "--yes"])
+            assert rc == 0, capsys.readouterr().out
+            await sync(d)
+            assert d.project.settings["scope"]["include"] == [NET]
+            assert await _claim(d, ip_id, "host.name", NAME) == ("quiet", "out_of_scope", "candidate")
+            nx = (await c.get(f"{base}/next")).json()
+            assert nx["scope_warning"] is not None and NAME in [i["name"] for i in _names(nx)]
+            rc = await asyncio.to_thread(main, ["scope"])
+            out = capsys.readouterr().out
+            assert rc == 0 and "[rückgängig gemacht]" in out and "Terminal" in out
+        finally:
+            for s in shims:
+                await s.close()
+
+    run_api(paths, operator, body, fixture=False)

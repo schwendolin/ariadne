@@ -36,7 +36,7 @@ def test_daemon_extension_points():
     assert _params(core.Daemon.add_ops) == ["self", "ops"]
     assert "extensions" in _params(core.Daemon.__init__)
     assert set(core.NOTIFY_KINDS) == {"terminal", "project", "unlocked", "locked", "presentation", "stopping",
-                                      "job"}
+                                      "job", "scope"}  # «scope» additiv (E129)
     assert _params(core.Daemon.remove_listener) == ["self", "fn"]
     assert _params(IngestService.remove_listener) == ["self", "fn"]
     assert core.ctl_peer_pid() is None  # ausserhalb einer ctl-Operation

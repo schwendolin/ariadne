@@ -44,6 +44,10 @@ def test_additive_fields_from_real_server(paths, operator):
         assert cb["note"] == "forged_callback" and cb["related"] is None and cb["punycode"] is None
         assert cb["source"]["unit_id"] and cb["source"]["terminal_id"] == fx.extra["callback"]
         assert all(i["note"] in (None, "same_mac", "forged_callback") for i in g["oos"]["items"])
+        # E129 (web-api.md 20.4): Vorschläge aus der Kennung, nur bei Urteil «out»
+        assert cb["verdict"] == "out" and cb["proposals"] == [
+            {"entry": "10.10.10.99", "kind": "ip", "outside_lab": False, "public": False}]
+        assert all(i["proposals"] == [] for i in g["oos"]["items"] if i["verdict"] != "out")
         (summary,) = (await get("/hosts"))["hosts"]
         assert summary["ports"] == node["ports"] and summary["conflict_brief"] == node["conflict_brief"]
 

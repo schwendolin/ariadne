@@ -189,6 +189,15 @@ test('K2 übernehmen, K3 zusammenführen (mit Rückgängig): Ruhezustand mit dem
   await expect(col.locator('.card[data-item-key^="merge:"]')).toBeVisible();
   await page.keyboard.press('a');
   await expect(col.locator('.done')).toHaveCount(2);
+  // Praxistest 1 (E130): Namen, die nmap .105 zuordnet (feindliche Fixture-Namen, nur als Text),
+  // stehen als «In den Scope aufnehmen?»; nie automatisch. Verwerfen (x) mit d.suggestion.dismiss.
+  const e130 = col.locator('.card[data-item-key^="scope-name:"]');
+  for (let i = 0; i < 2; i++) {
+    await expect(e130).toContainText('gehört laut nmap zu 192.168.56.105. In den Scope aufnehmen?');
+    await expect(col.locator('.keys')).toContainText('a aufnehmen');
+    await page.keyboard.press('x');
+    await expect(col.locator('.done')).toHaveCount(3 + i);
+  }
   // Ruhezustand: Klären erledigt, Cursor auf dem ersten Denkanstoss, kein Ring auf der Karte
   await expect(col.locator('.group-head').first()).toContainText('erledigt');
   await expect(col.locator('.card')).toContainText('Prüfziel · Regel R-ANON-ZUGRIFF');

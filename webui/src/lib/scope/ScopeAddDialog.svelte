@@ -6,7 +6,7 @@
   in den Scope kommt; braucht es «kein Kundenauftrag» (`needs_not_customer`), bleibt «Aufnehmen»
   gesperrt mit Hinweis aufs Terminal.
   Danach Rückmeldung im Dialog: «Aufgenommen», «Ariadne wertet neu aus …», sobald per SSE
-  `changes` kommt «Neu ausgewertet.», mit «Rückgängig» (d.revoke) und «Schliessen».
+  `changes` kommt «Neu ausgewertet.», mit «Rückgängig» (`op: 'revert'`, nie d.revoke) und «Schliessen».
   Im Profil customer nur der Hinweis auf `ariadne scope`. Ziele und Einträge nur über Txt.
   Besitzer: ui.
 -->

@@ -41,6 +41,9 @@ def test_slug(slug, ok):
     ("*.lame.htb", "name", "*.lame.htb"),
     ("fe80::1", "ip", "fe80::1"),
     ("bücher.lab", "name", "xn--bcher-kva.lab"),
+    # IPv4-Bereich wie im ScopeMatcher (nicht als Name), gespeichert in der langen Form
+    ("10.0.0.1-50", "range", "10.0.0.1-10.0.0.50"),
+    (" 10.0.0.1-10.0.0.50 ", "range", "10.0.0.1-10.0.0.50"),
 ])
 def test_parse_target(raw, kind, value):
     t = parse_target(raw)
@@ -48,7 +51,8 @@ def test_parse_target(raw, kind, value):
 
 
 @pytest.mark.parametrize("raw", ["", "10.1", "167772165", "0x0a.1", "a b", "evil\x1b[31m.htb", "a..b",
-                                 "10.0.0.0/33", "-x.htb", "x" * 300])
+                                 "10.0.0.0/33", "-x.htb", "x" * 300, "10.0.0.50-10", "10.0.0.1-300",
+                                 "10.0.0.01-5"])
 def test_parse_target_rejects(raw):
     with pytest.raises(InvalidTarget):
         parse_target(raw)
@@ -59,7 +63,8 @@ def test_parse_target_rejects(raw):
     ("100.64.0.9", True), ("10.0.0.0/8", True), ("192.168.0.0/15", False), ("8.8.8.8", False),
     ("lame.htb", True), ("*.corp.local", True), ("dc01.lab", True), ("box.thm", True), ("x.vl", True),
     ("htb", False), ("example.com", False), ("notahtb", False), ("2001:db8::1", False),
-    ("127.0.0.1", False),
+    ("127.0.0.1", False), ("10.36.198.10-20", True), ("8.8.8.1-9", False),
+    ("10.255.255.250-11.0.0.3", False),
 ])
 def test_lab_allowlist(raw, allowed):
     assert LabAllowlist.default().allows(parse_target(raw)) is allowed

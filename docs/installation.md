@@ -143,7 +143,7 @@ ariadne ui --code         # nur den kurzen Anmeldecode zeigen (Browser schon off
 
 ```sh
 ariadne scope                               # Einschlüsse, Ausschlüsse, Zeitfenster, letzte Änderungen
-ariadne scope add recovery.vantis.internal  # IP, CIDR, Name oder '*.domain' (Wildcard in Anführungszeichen)
+ariadne scope add recovery.vantis.internal  # IP, CIDR, Bereich a.b.c.d-e, Name oder '*.domain' (Wildcard in Anführungszeichen)
 ariadne scope exclude 10.36.198.1           # ausschliessen (Ausschluss schlägt Einschluss)
 ariadne scope remove 10.36.198.1            # Eintrag wieder entfernen
 ariadne scope undo                          # jüngste Änderung rückgängig (oder: undo <decision_id>)

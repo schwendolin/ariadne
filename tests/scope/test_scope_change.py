@@ -8,6 +8,7 @@ from ariadne import events
 from ariadne.project.guardrails import LabAllowlist, is_public_name
 from ariadne.project.settings import default_settings, parse_settings
 from ariadne.scope.change import ScopeChangeError, plan_change, plan_revert, render_toml
+from ariadne.scope.matcher import ScopeMatcher
 from ariadne.scope.suggest import proposals, wildcard_of
 
 ALLOW = LabAllowlist.default()
@@ -86,7 +87,41 @@ def test_proposals_for_warning_targets():
         ("recovery.vantis.internal", "url_host"), ("*.vantis.internal", "wildcard")]
     assert [(p["entry"], p["kind"]) for p in proposals("ms2.lab")] == [("ms2.lab", "name")]
     assert [p["entry"] for p in proposals("10.36.199.4:8080")] == ["10.36.199.4"]
-    assert [p["entry"] for p in proposals("10.36.199.0/24")] == ["10.36.199.0/24"]
+    assert [(p["entry"], p["kind"]) for p in proposals("10.36.199.0/24")] == [("10.36.199.0/24", "cidr")]
     assert proposals("0x0a.1") == [] or all(p["kind"] == "ip" for p in proposals("0x0a.1"))
     assert proposals("a\x1bb") == [] and proposals("") == []
     assert wildcard_of("ms2.lab") is None and wildcard_of("a.b.lab") == "*.b.lab"
+
+
+def test_no_wildcard_on_whole_suffix_but_remove_and_exclude_stay_possible():
+    s = _settings(["10.36.198.0/24", "*.htb"])
+    for broad in ("*.com", "*.internal", "*.LAB."):
+        with pytest.raises(ScopeChangeError) as exc:
+            plan_change(s, "add", [broad], ALLOW)
+        assert exc.value.code == "invalid"
+    for bad in ("*", "*.*.vantis.internal", "**.lab", "*x.lab"):
+        with pytest.raises(ScopeChangeError):
+            plan_change(s, "add", [bad], ALLOW)
+    assert plan_change(s, "add", ["*.vantis.internal"], ALLOW).include_added == ("*.vantis.internal",)
+    # alte Projekte: ein *.htb aus dem Anlegen lässt sich entfernen, *.com ausschliessen
+    assert plan_change(s, "remove", ["*.htb"], ALLOW).include_removed == ("*.htb",)
+    assert plan_change(s, "exclude", ["*.com"], ALLOW).exclude_added == ("*.com",)
+
+
+def test_ipv4_range_like_the_matcher_not_as_name():
+    """``nmap 10.36.199.1-50``: der Bereich gilt als Bereich (wie im ScopeMatcher), nicht als Name.
+    Vorgeschlagen wird der ganze Bereich, nicht nur sein erstes Teilnetz (früher 10.36.199.1/32)."""
+    long = "10.36.199.1-10.36.199.50"
+    assert [(p["entry"], p["kind"]) for p in proposals("10.36.199.1-50")] == [(long, "range")]
+    p = plan_change(_settings(["10.36.198.0/24"]), "add", ["10.36.199.1-50"], ALLOW)
+    assert p.entries == (long,) and p.outside == () and p.verdicts == {long: "in"}
+    m = ScopeMatcher(p.include, p.exclude, [])
+    assert not m.errors and m.check("10.36.199.50").verdict == "in"
+    assert m.check("10.36.199.51").verdict == "out"
+    # derselbe Bereich in kurzer und langer Form ist ein Eintrag; öffentlich bleibt ausserhalb der Allowlist
+    again = plan_change(_settings(p.include), "add", [long, "8.8.8.1-9"], ALLOW)
+    assert again.include_added == ("8.8.8.1-8.8.8.9",) and again.outside == ("8.8.8.1-8.8.8.9",)
+    for bad in ("10.36.199.50-1", "10.36.199.1-256"):
+        with pytest.raises(ScopeChangeError) as exc:
+            plan_change(_settings(["10.36.198.0/24"]), "add", [bad], ALLOW)
+        assert exc.value.code == "invalid"

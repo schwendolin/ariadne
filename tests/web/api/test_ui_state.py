@@ -201,7 +201,8 @@ def test_scope_warning_content_and_ack(paths, operator):
         w = st["scope_warning"]
         assert w is not None, st
         assert w["text"] == "nmap -sn 10.10.10.99" and w["ctrl"] is False
-        assert w["targets"] == [{"value": "10.10.10.99", "verdict": "out", "ctrl": False}]
+        assert w["targets"] == [{"value": "10.10.10.99", "verdict": "out", "ctrl": False, "proposals": [
+            {"entry": "10.10.10.99", "kind": "ip", "outside_lab": False, "public": False}]}]
         assert w["scope"] == [TARGET]
         assert w["acked"] is False
         assert w["terminal"] == {"terminal_id": fx.shim.terminal_id, "ordinal": 1, "label": None}

@@ -186,6 +186,8 @@ def add_routes(router: APIRouter, api: Api) -> None:
                 gen, warning, refs = None, None, {}
             if warning is not None:
                 warning["acked"] = await _acked(p_now, str(warning["cmd_id"]))
+                # E129: «in den Scope aufnehmen» im Dashboard, im Profil customer nur im Terminal
+                warning["change_allowed"] = p_now.info.profile != "customer"
         stacks: dict[str, Any] = {}
         for ts in st.get("terminal_states") or []:
             if ts.get("state") != "held":

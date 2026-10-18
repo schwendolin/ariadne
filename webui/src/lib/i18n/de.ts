@@ -353,10 +353,14 @@ export const de = {
   'scope.add.kind.url_host': 'nur der Name aus der URL',
   'scope.add.excluded': 'Ausgeschlossen: Aufnehmen geht erst nach dem Entfernen des Ausschlusses (Einstellungen oder ariadne scope remove).',
   'scope.add.fromExclude': 'Fällt dafür aus den Ausschlüssen:',
-  'scope.edit.err.conflict': 'Eintrag steht schon so im Scope',
+  'scope.edit.err.conflict': 'Nicht möglich: schon so im Scope, nicht im Scope, letzter Einschluss oder schon rückgängig gemacht',
   'scope.edit.err.validation': 'Eintrag ungültig',
   'scope.edit.err.prefix': 'Scope nicht geändert',
   'scope.edit.err.undo': 'Nicht rückgängig gemacht',
+  'scope.edit.undoExclude': 'Rückgängig hebt den Ausschluss auf:',
+  'scope.edit.undoRemove': 'Rückgängig nimmt wieder in den Scope auf:',
+  'scope.edit.undoReexclude': 'Rückgängig schliesst wieder aus:',
+  'scope.edit.undoConfirm': 'Rückgängig machen',
 
   'notice.close': 'Meldung schliessen',
 } as const;

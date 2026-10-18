@@ -107,7 +107,7 @@ export interface Backend {
   ackScopeWarning(pid: string, cmdId: string): Promise<void>;
   /** Scope erweitern (E129, E130; Entwurf ui, Routen von «backend») */
   scope(pid: string, signal?: AbortSignal): Promise<ScopeView>;
-  /** Entwurf ui: Vorschläge zu einem Ziel ohne mitgelieferte `proposals` (404 bei älterem Server) */
+  /** GET /scope/options (web-api.md 20.4): Vorschläge zu einem Ziel ohne mitgelieferte `proposals` */
   scopeOptions(pid: string, value: string, signal?: AbortSignal): Promise<ScopeOptions>;
   /** POST /scope/changes mit `entries: [entry]` (web-api.md 20) */
   changeScope(pid: string, change: ScopeChange): Promise<ScopeChangeResult>;

@@ -58,11 +58,22 @@
   const distrusted = $derived(item.type === 'command' && item.distrusted !== null);
   const undoable = $derived(canUndo(item));
   let scopeBusy = $state(false);
+  // E129: Rückgängig kann den Scope auch erweitern (entfernt/ausgeschlossen -> wieder drin); deshalb erst
+  // nach einer Bestätigung, die Wirkung und Einträge zeigt
+  let confirmRevert = $state(false);
+  const REVERT_TEXT: Record<string, MessageKey> = {
+    add: 'tl.scopeRevert.add',
+    remove: 'tl.scopeRevert.remove',
+    exclude: 'tl.scopeRevert.exclude',
+    revert: 'tl.scopeRevert.revert',
+  };
+  const revertText = $derived(item.type === 'decision' && item.scope_change ? t(REVERT_TEXT[item.scope_change.op ?? ''] ?? 'tl.scopeRevert.other') : '');
   async function revertScope(): Promise<void> {
     if (item.type !== 'decision' || scopeBusy) return;
     scopeBusy = true;
     const ok = await project.scope.undo(item.decision_id);
     scopeBusy = false;
+    confirmRevert = false;
     if (ok) {
       app.ui.notify('info', t('scope.add.undone'));
       void project.timeline.load();
@@ -308,7 +319,7 @@
         }}>{t('tl.trustAgain')}</button>
       {:else if item.type === 'decision' && item.scope_change?.revertible && project.scope.editable}
         <!-- web-api.md 20.3: Scope-Änderung rückgängig (op 'revert'), nicht d.revoke -->
-        <button type="button" class="link" disabled={app.offline || scopeBusy} onclick={revertScope}>{t('tl.scopeRevert')}</button>
+        <button type="button" class="link" disabled={app.offline || scopeBusy} aria-expanded={confirmRevert} onclick={() => (confirmRevert = !confirmRevert)}>{t('tl.scopeRevert')}</button>
       {:else if undoable}
         <button type="button" class="undo" disabled={app.offline} aria-label={t('tl.undoFor', { ref: item.type === 'command' ? item.cmd.cmd_ref : '' })} onclick={onundo}
           >{t('tl.undo')} <kbd>u</kbd></button
@@ -316,6 +327,14 @@
       {/if}
     </span>
   </div>
+  {#if confirmRevert && item.type === 'decision' && item.scope_change}
+    <div class="below scope-revert" role="group" aria-label={t('tl.scopeRevert')} data-testid="scope-revert-confirm">
+      <span>{revertText}</span>
+      <span class="entries"><Txt value={item.scope_change.entries.join(', ')} mono max={300} /></span>
+      <button type="button" class="link" disabled={app.offline || scopeBusy} onclick={revertScope}>{t('tl.scopeRevert.confirm')}</button>
+      <button type="button" class="link" onclick={() => (confirmRevert = false)}>{t('tl.scopeRevert.cancel')}</button>
+    </div>
+  {/if}
   {#if below}<div class="below">{@render below(item)}</div>{/if}
 </li>
 
@@ -537,5 +556,15 @@
   }
   .below {
     padding: 6px 12px 10px 150px;
+  }
+  .scope-revert {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+  }
+  .scope-revert .entries {
+    font-weight: 600;
+    overflow-wrap: anywhere;
   }
 </style>

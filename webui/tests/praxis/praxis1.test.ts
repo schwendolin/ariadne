@@ -13,6 +13,7 @@ import ScopeAddDialog from '../../src/lib/scope/ScopeAddDialog.svelte';
 import ScopeEditDialog from '../../src/lib/scope/ScopeEditDialog.svelte';
 import LoginView from '../../src/lib/shell/LoginView.svelte';
 import SettingsPanel from '../../src/lib/shell/SettingsPanel.svelte';
+import TimelineRow from '../../src/lib/timeline/TimelineRow.svelte';
 import type { ProjectStore } from '../../src/lib/stores/project.svelte';
 import type { ScopeAddRequest } from '../../src/lib/stores/ui.svelte';
 import { url } from '../../src/lib/url/state.svelte';
@@ -177,6 +178,37 @@ describe('Klärung «In den Scope aufnehmen?» (E130)', () => {
   });
 });
 
+describe('Zeitachse: Rückgängig einer Scope-Änderung (web-api.md 20.3)', () => {
+  it('erst nach Bestätigung mit Wirkung und Eintrag, weil Rückgängig den Scope erweitern kann', async () => {
+    const { app, project: p, backend } = await project();
+    const res = await p.scope.change({ op: 'exclude', entry: '10.36.198.99', source: null });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const revert = vi.spyOn(backend, 'revertScope');
+    const base = backend.state.timeline.find((x) => x.type === 'decision') as Extract<(typeof backend.state.timeline)[number], { type: 'decision' }>;
+    const item = {
+      ...base,
+      decision_id: res.result.decision_id!,
+      kind: 'd.scope.update',
+      summary: 'Aus dem Scope ausgeschlossen (Version 2)',
+      scope_change: { op: 'exclude' as const, entries: ['10.36.198.99'], version: 2, revert_of: null, reverted_by: null, revertible: true },
+    };
+    render(TimelineRow, { props: { app, project: p, item, now: Date.now(), onselect: () => {}, onopen: () => {}, onundo: () => {} } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    expect(revert).not.toHaveBeenCalled();
+    const box = screen.getByTestId('scope-revert-confirm');
+    expect(text(box)).toContain('Rückgängig hebt den Ausschluss auf:');
+    expect(text(box)).toContain('10.36.198.99');
+    await fireEvent.click(within(box).getByRole('button', { name: 'Abbrechen' }));
+    expect(screen.queryByTestId('scope-revert-confirm')).toBeNull();
+    expect(revert).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    await fireEvent.click(within(screen.getByTestId('scope-revert-confirm')).getByRole('button', { name: 'Rückgängig machen' }));
+    await until(() => revert.mock.calls.length > 0);
+    expect(revert).toHaveBeenCalledWith(p.pid, res.result.decision_id);
+  });
+});
+
 describe('Vorschau mit dry_run (web-api.md 20.2)', () => {
   it('öffentliche Domain ausserhalb der Lab-Allowlist: Aufnehmen gesperrt, Hinweis aufs Terminal', async () => {
     const { app, project: p, backend } = await project();
@@ -235,6 +267,53 @@ describe('Einstellungen: Abschnitt Scope', () => {
     await until(() => !!screen.queryByTestId('scope-edit-done'));
     expect(change).toHaveBeenCalledWith(p.pid, { op: 'exclude', entry: '192.168.56.250', source: null });
     expect(backend.state.scope.exclude).toContain('192.168.56.250');
+  });
+
+  it('Ausschliessen: Eintrag wie gespeichert (dry_run), danach der gespeicherte; Rückgängig erst nach Bestätigung', async () => {
+    const { app, project: p, backend } = await project();
+    // der Server normalisiert (Kleinschreibung, Punkt am Ende); der Mock nicht, deshalb hier wie der Server
+    const preview = vi.spyOn(backend, 'previewScope').mockImplementation(async (_pid, c) => ({
+      decision_id: null, dry_run: true, version: 9, op: c.op, entries: [c.entry.trim().toLowerCase().replace(/\.$/, '')],
+    }));
+    const orig = backend.changeScope.bind(backend);
+    const change = vi.spyOn(backend, 'changeScope').mockImplementation((pid, c) => orig(pid, { ...c, entry: c.entry.toLowerCase().replace(/\.$/, '') }));
+    const revert = vi.spyOn(backend, 'revertScope');
+    render(ScopeEditDialog, { props: { app, project: p, op: 'exclude', onclose: () => undefined } });
+    await fireEvent.input(screen.getByLabelText('Eintrag: Adresse, Netz, Name oder *.domain'), { target: { value: 'Box.LAB.' } });
+    await until(() => text(screen.getByTestId('scope-edit-entry')) === 'box.lab');
+    expect(preview).toHaveBeenCalledWith(p.pid, { op: 'exclude', entry: 'Box.LAB.' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ausschliessen' }));
+    await until(() => !!screen.queryByTestId('scope-edit-done'));
+    expect(change).toHaveBeenCalledWith(p.pid, { op: 'exclude', entry: 'Box.LAB.', source: null });
+    expect(text(screen.getByTestId('scope-edit-saved'))).toBe('box.lab');
+    // Rückgängig hebt den Ausschluss auf, erweitert also den Scope: erst Wirkung und Eintrag zeigen
+    await fireEvent.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    expect(revert).not.toHaveBeenCalled();
+    expect(text(screen.getByTestId('scope-edit-undo-confirm'))).toBe('Rückgängig hebt den Ausschluss auf: box.lab');
+    await fireEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+    expect(screen.queryByTestId('scope-edit-undo-confirm')).toBeNull();
+    expect(revert).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Rückgängig machen' }));
+    await until(() => revert.mock.calls.length === 1);
+    expect(revert.mock.calls[0]?.[0]).toBe(p.pid);
+    await until(() => text(screen.getByTestId('scope-edit-done')).includes('Rückgängig gemacht.'));
+    expect(backend.state.scope.exclude).not.toContain('box.lab');
+  });
+
+  it('Ausschliessen: Fehler der Vorschau sperrt den Knopf, ohne Eingabe in der Meldung', async () => {
+    const { app, project: p, backend } = await project();
+    render(ScopeEditDialog, { props: { app, project: p, op: 'exclude', onclose: () => undefined } });
+    const change = vi.spyOn(backend, 'changeScope');
+    // 192.168.56.1 ist im Mock schon ausgeschlossen: dry_run meldet 409
+    await fireEvent.input(screen.getByLabelText('Eintrag: Adresse, Netz, Name oder *.domain'), { target: { value: '192.168.56.1' } });
+    await until(() => !!screen.queryByTestId('scope-edit-preview-error'));
+    expect(text(screen.getByTestId('scope-edit-preview-error'))).not.toContain('192.168.56.1');
+    const btn = screen.getByRole('button', { name: /^Ausschliessen\b/ });
+    expect(btn.hasAttribute('disabled')).toBe(true);
+    expect(btn.getAttribute('title')).toBe(text(screen.getByTestId('scope-edit-preview-error')));
+    await fireEvent.click(btn);
+    expect(change).not.toHaveBeenCalled();
   });
 
   it('Profil customer: nur Anzeige, Hinweis auf ariadne scope', async () => {

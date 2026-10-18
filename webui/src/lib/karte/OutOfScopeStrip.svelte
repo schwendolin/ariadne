@@ -58,7 +58,7 @@
 
   function addToScope(it: OosItem): void {
     app.ui.closePopover(ID);
-    app.ui.openDialog({ kind: 'scope-add', values: [{ value: it.label, ctrl: it.ctrl, proposals: it.proposals ?? null }], source: { identifier: it.identifier } });
+    app.ui.openDialog({ kind: 'scope-add', values: [{ value: it.label, ctrl: it.ctrl, verdict: it.verdict, proposals: it.proposals ?? null }], source: { identifier: it.identifier } });
   }
 
   function openEvidence(it: OosItem): void {

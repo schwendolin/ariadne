@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from ariadne.daemon.ops_util import OpError
 from ariadne.paths import Paths
+from ariadne.project.service import valid_slug
 from ariadne.web import api as api_mod
 from ariadne.web.app import build_app
 from ariadne.web.config import UiConfigError, load_ui
@@ -208,9 +209,27 @@ class WebExtension:
         """Alle Sitzungen und offenen Codes verwerfen (Ströme schliessen sich mit)."""
         return self.sessions.clear() if self.sessions is not None else 0
 
+    def _announce_end(self, kind: str, data: dict[str, Any]) -> None:
+        """Vor dem Sitzungsende den Grund an alle Ströme (SSE ``session``, web-api.md 14), damit die
+        Anmeldeseite sagt, warum (Praxistest: Passphrase im Feld «Anmeldecode» nach ``ariadne stop``).
+        Nur feste Wörter und der Slug, nie Zieldaten."""
+        if self.bus is None or self.sessions is None or len(self.sessions) == 0:
+            return
+        reason = data.get("reason") if kind == "project" else ("lock" if kind == "locked" else "shutdown")
+        slug = data.get("slug") if kind == "project" else None
+        if reason not in _END_REASONS:
+            return
+        if not (isinstance(slug, str) and valid_slug(slug)):
+            slug = None
+        try:
+            self.bus.end_sessions({"change": "ending", "reason": reason, "slug": slug})
+        except Exception as exc:  # der Grund ist nur ein Hinweis; das Sitzungsende gilt trotzdem
+            log.error("Grund des Sitzungsendes nicht gemeldet (%s)", type(exc).__name__)
+
     def _on_event(self, kind: str, data: dict[str, Any]) -> None:
         if kind in ("locked", "stopping") or (
                 kind == "project" and data.get("change") == "closed" and data.get("reason") in _END_REASONS):
+            self._announce_end(kind, data)
             n = self.end_all()
             if n:
                 log.info("Web-Sitzungen beendet (%s)", kind)

@@ -1,4 +1,5 @@
-"""``GET /p/{pid}/scope`` und ``POST /p/{pid}/scope/changes`` (``docs/web-api.md`` 20, E129).
+"""``GET /p/{pid}/scope``, ``GET /p/{pid}/scope/options`` und ``POST /p/{pid}/scope/changes``
+(``docs/web-api.md`` 20, E129).
 
 Scope ändern geht im Dashboard mit Bestätigungsdialog und im Terminal mit ``ariadne scope``. Beide
 Wege laufen über die ctl-Operation ``scope.change`` (Herkunft hier ``webui``): Jede Änderung ist ein
@@ -13,10 +14,13 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import Field
 from starlette.responses import Response
 
+from ariadne.project.guardrails import LabAllowlist
+from ariadne.scope.matcher import ScopeMatcher
+from ariadne.scope.suggest import proposals
 from ariadne.web.api.common import Api
 from ariadne.web.api.decisions import IdempotencyCache
 from ariadne.web.api.errors import ApiError
@@ -107,6 +111,20 @@ def add_routes(router: APIRouter, api: Api) -> None:
         if not isinstance(res, dict) or res.get("project_id") != p.info.id:
             raise ApiError("project_mismatch")
         return await api.respond(scope_view(res))
+
+    @router.get("/p/{pid}/scope/options", name="scope_options")
+    async def get_options(pid: str, value: str = Query(min_length=1, max_length=2048)) -> Response:  # noqa: B008
+        """Vorschläge zu einem Ziel ohne mitgelieferte ``proposals`` (20.4): Urteil des ScopeMatchers
+        und, nur bei ``out``, dieselben Vorschläge wie an der Scope-Warnung. Liest nur, keine DNS."""
+        p = api.project(pid)
+        matcher = ScopeMatcher.from_settings(p.settings, p.settings_version)
+        allow = LabAllowlist.from_config(api.daemon.paths.config_file)
+        verdict = matcher.check(value).verdict
+        b = api.bag().new()
+        shown = b(value) or ""
+        options = [{**pr, "entry": b(pr["entry"]) or ""} for pr in proposals(value, allow)] \
+            if verdict == "out" else []
+        return await api.respond({"value": shown, "ctrl": b.ctrl, "verdict": verdict, "options": options})
 
     @router.post("/p/{pid}/scope/changes", name="scope_changes", status_code=201)
     async def post_change(pid: str, body: ScopeChangeRequest) -> Response:

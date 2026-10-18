@@ -37,7 +37,10 @@ def test_next_carries_unacked_scope_warning_first(paths, operator):
         status = (await web.req("GET", "/api/v1/status", token=token)).json()["scope_warning"]
         assert w == status  # dieselbe Form und derselbe Inhalt wie in /status (18.4)
         assert w["text"] == "nmap -sn 10.10.10.99" and w["acked"] is False
-        assert w["targets"] == [{"value": "10.10.10.99", "verdict": "out", "ctrl": False}]
+        # E129, web-api.md 20.4: Vorschläge für «in den Scope aufnehmen»
+        assert w["targets"] == [{"value": "10.10.10.99", "verdict": "out", "ctrl": False, "proposals": [
+            {"entry": "10.10.10.99", "kind": "ip", "outside_lab": False, "public": False}]}]
+        assert w["change_allowed"] is True
         assert w["scope"] == [TARGET]
         assert body["open"] == open_before  # zählt nicht in «open» und hat keine Ordnungsnummer
         # quittieren: aus /next verschwunden, in /status als quittiert markiert

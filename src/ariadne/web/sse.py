@@ -95,6 +95,18 @@ class Subscription:
                 break
         self.queue.put_nowait(None)
 
+    def finish(self) -> None:
+        """Schliessen, sobald das schon Eingereihte hinaus ist (Grund des Sitzungsendes). Ist die
+        Schlange voll (zu langsamer Leser), sofort wie :meth:`close`."""
+        if self.closed:
+            return
+        try:
+            self.queue.put_nowait(None)
+        except asyncio.QueueFull:
+            self.close()
+            return
+        self.closed = True
+
 
 class EventBus:
     """Bus für SSE. ``publish`` nur im Loop-Thread; Abonnenten über :meth:`subscribe`."""
@@ -234,6 +246,32 @@ class EventBus:
         for s in subs:
             self._remove(s)
             s.close()
+        return len(subs)
+
+    def end_sessions(self, data: Mapping[str, Any]) -> int:
+        """Ende aller Sitzungen mit Grund (web-api.md 14): das laufende Fenster geht sofort hinaus, danach
+        ``session`` an jeden Strom, dann schliessen sich alle Ströme. ``session`` kommt nicht in den
+        Ring (kein Nachholen nach einer neuen Anmeldung). Gibt die Zahl der Ströme zurück."""
+        if self.closed:
+            return 0
+        payload = dict(data)
+        if len(json.dumps(payload, ensure_ascii=True, default=str)) > _MAX_DATA:
+            raise ValueError("SSE-Daten zu gross (nur Kennungen und Zahlen)")
+        self.flush()
+        eid = self._next
+        self._next += 1
+        chunk = encode_event(eid, "session", payload)
+        subs = list(self._subs)
+        for sub in subs:
+            self._remove(sub)
+            if sub.closed:
+                continue
+            try:
+                sub.queue.put_nowait(chunk)
+            except asyncio.QueueFull:
+                sub.close()
+                continue
+            sub.finish()
         return len(subs)
 
     def close_all(self) -> None:

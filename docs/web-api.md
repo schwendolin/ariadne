@@ -467,6 +467,7 @@ interface OosItem {
   verdict: 'out' | 'excluded' | 'outside_window' | 'unknown';
   rule: string | null; mentions: number;
   first_unit: string | null;          // Beleg
+  proposals: ScopeProposal[];         // E129, 20.4: «In den Scope aufnehmen», leer ausser bei verdict 'out'
 }
 ```
 
@@ -835,7 +836,7 @@ Ein globaler Strom pro Tab (löst den offenen Punkt «globaler Strom» aus v1). 
 - Der Server bündelt in 250-ms-Fenstern: ein nmap-Import ergibt ein `changes`, nicht 3000.
 - Herzschlag alle 15 s als Kommentar `: hb`. Die UI verbindet neu, wenn 45 s nichts kommt (Backoff 1, 2, 4, 8, 16, 30 s mit 20 % Streuung).
 - Ringpuffer der letzten 1000 Ereignisse für `Last-Event-ID`; liegt die ID ausserhalb, kommt zuerst `reset`.
-- Der Strom endet sofort (innerhalb 1 s), wenn die Sitzung endet (3). Danach ergibt jede Anfrage 401.
+- Der Strom endet sofort (innerhalb 1 s), wenn die Sitzung endet (3). Danach ergibt jede Anfrage 401. Enden die Sitzungen mit `ariadne stop`, Leerlauf, `lock` oder Daemon-Ende, kommt unmittelbar davor noch `session` mit dem Grund (nicht im Ringpuffer, also nie nachgeholt); bei Widerruf, Abmelden und Ablauf kommt kein eigenes Ereignis.
 - Höchstens 8 offene Ströme pro Sitzung; der neunte ersetzt den ältesten.
 
 ```
@@ -857,6 +858,7 @@ data: {"project_id":"0199…","generation":43,"entities":{"host":1,"claim":3}}
 | `project` | `{ project_id: string \| null, change: 'opened' \| 'closed' \| 'locked' \| 'unlocked', locked: boolean }` | **alle Daten verwerfen**, laufende Abrufe abbrechen, `/status` neu laden |
 | `reset` | `{ reason: 'reparse' \| 'buffer' \| 'restart' }` (auch, wenn die Generation zurückspringt) | alles neu laden |
 | `presentation` | `{ on: boolean }` | Kennzeichen, Logzeilen und offene Belege neu laden |
+| `session` | `{ change: 'ending', reason: 'stop' \| 'idle' \| 'lock' \| 'shutdown', slug: string \| null }` | Grund merken und auf der Anmeldeseite zeigen («Projekt lame wurde beendet (ariadne stop). Neue Anmeldung: ariadne ui»); der Strom endet gleich danach (Praxistest: Passphrase im Feld «Anmeldecode») |
 | `scope` | `{ project_id, version }` | nach jeder Scope-Änderung (Terminal oder Dashboard, 20): `/scope`, `/project`, `/next` nachladen; die Neuauswertung folgt mit `changes` |
 | `progress` | `{ job_id, kind, status, pct: number \| null, message: string \| null }` | v0.1 nur `reparse` (aus dem Daemon-Ereignis `job`; nach `done` folgt `reset` mit `reason: 'reparse'`); `message` ist fester deutscher Text, nie Ziel- oder Modelltext |
 
@@ -1726,7 +1728,7 @@ interface NextView {
 
 Stand: gebaut und getestet (Korrektur nach dem ersten Praxistest). Anlass: Der Scope liess sich nur beim Anlegen setzen; ein Name, den nmap einer IP im Scope zuordnete (`recovery.vantis.internal (10.36.198.11)`), blieb ausserhalb (E49), und die Scope-Warnung liess sich nur quittieren.
 
-Regeln (E129): Scope ändern geht im Dashboard (Vorrang, dort erscheint die Warnung) mit Bestätigungsdialog, der den genauen Eintrag zeigt, und im Terminal mit `ariadne scope`. Jede Änderung ist ein Entscheid `d.scope.update` mit neuer Version (vollständiger Snapshot der Einstellungen, dazu `change`), lässt sich rückgängig machen und löst eine Neuauswertung aus: Scope-Urteile aller Kennungen, Drei-Spuren-Regel (ein Name im Scope wird `auto`), Scope-Warnungen der Befehle (`activity`), stille Summen. Geprüft wird wie beim Anlegen (IP, CIDR, Name, `*.domain`; nie DNS), zusätzlich ohne Steuer- und Formatzeichen. Geurteilt wird nur mit dem `ScopeMatcher`. Im Profil customer (v0.3) nur im Terminal.
+Regeln (E129): Scope ändern geht im Dashboard (Vorrang, dort erscheint die Warnung) mit Bestätigungsdialog, der den genauen Eintrag zeigt, und im Terminal mit `ariadne scope`. Jede Änderung ist ein Entscheid `d.scope.update` mit neuer Version (vollständiger Snapshot der Einstellungen, dazu `change`), lässt sich rückgängig machen und löst eine Neuauswertung aus: Scope-Urteile aller Kennungen, Drei-Spuren-Regel (ein Name im Scope wird `auto`), Scope-Warnungen der Befehle (`activity`), stille Summen. Geprüft wird wie beim Anlegen (IP, CIDR, IPv4-Bereich `a.b.c.d-e` wie im `ScopeMatcher`, gespeichert als `a.b.c.d-a.b.c.e`, Name, `*.domain`; nie DNS), zusätzlich ohne Steuer- und Formatzeichen. Geurteilt wird nur mit dem `ScopeMatcher`. Im Profil customer (v0.3) nur im Terminal.
 
 ### 20.1 GET /api/v1/p/{pid}/scope
 
@@ -1776,10 +1778,11 @@ interface ScopeChangeResult {
 ```
 
 * `add`: Einträge kommen in `include`; steht derselbe Eintrag in `exclude`, fällt er dort weg. `remove`: Einträge fallen aus `include` und `exclude`; mindestens ein Einschluss bleibt. `exclude`: Einträge kommen in `exclude`.
+* Keine Wildcard auf eine ganze Endung: `add` mit `*.com`, `*.internal`, `*.lab` usw. (nur ein Label nach `*.`) ergibt 422, auch im Terminal und mit `--not-customer`; `*` allein ist kein gültiges Ziel. Entfernen und Ausschliessen solcher Einträge gehen (ältere Projekte, Einschränkung).
 * `revert`: die gespeicherte Änderung (`include_added` usw.) umgekehrt auf den **aktuellen** Stand; spätere Änderungen bleiben. Jede Änderung lässt sich einmal rückgängig machen; ein `revert` ist selbst wieder rückgängig zu machen.
 * Der Dialog im Dashboard ruft zuerst `dry_run: true` und zeigt `include_added` usw. wörtlich (Zieldaten, als Text); erst «Aufnehmen» schickt dieselbe Anfrage ohne `dry_run`.
 * Danach: SSE `scope` `{ project_id, version }`, nach der Neuauswertung `changes` und gegebenenfalls `inbox`.
-* Fehler: 422 `validation` (Schema, ungültiges Ziel, Steuerzeichen, mehr als 20 Einträge, `entries` bei `revert` bzw. fehlend), 409 `conflict` (nichts zu ändern, Eintrag steht nicht im Scope, letzter Einschluss, schon rückgängig gemacht), 404 (`decision_id` ist keine Scope-Änderung), 403 `policy` (Profil customer: «im Terminal möglich»), 403 `guardrail` (neuer Einschluss ausserhalb der Lab-Allowlist ohne Bestätigung «kein Kundenauftrag»; Text «Ziel ausserhalb der Lab-Allowlist: nur im Terminal mit ariadne scope add <ziel> --not-customer.»). Meldungen enthalten nie die Eingabe.
+* Fehler: 422 `validation` (Schema, ungültiges Ziel, Steuerzeichen, Wildcard auf eine ganze Endung, mehr als 20 Einträge, `entries` bei `revert` bzw. fehlend), 409 `conflict` (nichts zu ändern, Eintrag steht nicht im Scope, letzter Einschluss, schon rückgängig gemacht), 404 (`decision_id` ist keine Scope-Änderung), 403 `policy` (Profil customer: «im Terminal möglich»), 403 `guardrail` (neuer Einschluss ausserhalb der Lab-Allowlist ohne Bestätigung «kein Kundenauftrag»; Text «Ziel ausserhalb der Lab-Allowlist: nur im Terminal mit ariadne scope add <ziel> --not-customer.»). Meldungen enthalten nie die Eingabe.
 * `d.scope.update` und `d.lab.not_customer` über `POST /decisions` bleiben 403 `policy`; `d.revoke` auf eine Scope-Änderung ebenso (Rückgängig nur über `op: 'revert'`).
 * Lab-Allowlist: zu `.htb .local .lab .thm .vl` kommen `.internal .test .lan .home .localdomain .home.arpa` (Endungen ohne öffentliches DNS); RFC1918 wie bisher.
 
@@ -1793,20 +1796,36 @@ scope_change: { op: 'add' | 'remove' | 'exclude' | 'revert' | null; entries: str
                 revertible: boolean } | null   // true: Knopf «Rückgängig» -> POST /scope/changes { op: 'revert', decision_id }
 ```
 
+Das Dashboard schickt das erst nach einer Bestätigung in der Zeile, die die Einträge und die Wirkung zeigt (z. B. «Rückgängig hebt den Ausschluss auf: …»), weil ein Rückgängig den Scope auch erweitern kann (E129: Bestätigung mit dem genauen Eintrag). Ebenso der Dialog in den Einstellungen («Entfernen», «Ausschliessen»): «Rückgängig» zeigt erst Wirkung und gespeicherten Eintrag, geschickt wird erst mit «Rückgängig machen»; vor dem Ausschliessen zeigt er per `dry_run` den Eintrag so, wie er gespeichert wird. Die Leitplanke gilt auch hier (403 `guardrail`).
+
 `summary`: «Scope erweitert (Version 2)», «Aus dem Scope entfernt (…)», «Aus dem Scope ausgeschlossen (…)», «Scope-Änderung rückgängig (…)»; ohne `change` wie bisher «Scope gesetzt (Version 1)». `detail`: die Einträge, durch Komma getrennt; `reason`: der Grund.
 
 ### 20.4 Scope-Warnung: «In den Scope aufnehmen»
 
-`ScopeWarning.targets[]` (18.4, in `/status` und `/next`) bekommt `proposals: ScopeProposal[]` (leer ausser bei `verdict: 'out'`; ausgeschlossene Ziele bekommen keinen Vorschlag, dafür `ariadne scope remove`). In `/next` trägt `scope_warning` zusätzlich `change_allowed: boolean`.
+`ScopeWarning.targets[]` (18.4, in `/status` und `/next`) bekommt `proposals: ScopeProposal[]` (leer ausser bei `verdict: 'out'`; ausgeschlossene Ziele bekommen keinen Vorschlag, dafür `ariadne scope remove`). `scope_warning` trägt in `/status` und `/next` zusätzlich `change_allowed: boolean` (false im Profil customer: Hinweis auf `ariadne scope`); beide Formen bleiben gleich.
 
 ```ts
 interface ScopeProposal {
   entry: string;                        // genau dieser Eintrag geht an POST /scope/changes { op: 'add', entries: [entry] }
-  kind: 'name' | 'url_host' | 'ip' | 'wildcard';   // exakter Name, Host einer URL, IP bzw. Netz, Domain mit Wildcard
+  kind: 'name' | 'url_host' | 'ip' | 'cidr' | 'range' | 'wildcard';   // exakter Name, Host einer URL, IP, Netz, IPv4-Bereich (ganz, a.b.c.d-a.b.c.e), Domain mit Wildcard
   outside_lab: boolean;                 // ausserhalb der Lab-Allowlist: nur im Terminal mit --not-customer
   public: boolean;                      // Name mit öffentlicher Endung: zusätzlicher Warnhinweis
 }
 ```
+
+Dieselben Vorschläge trägt jeder Eintrag des Out-of-Scope-Rands der Karte: `OosItem.proposals: ScopeProposal[]` in `GET /p/{pid}/graph` (`oos.items`), berechnet aus der Kennung (`identifier`, nicht aus dem Anzeigenamen), leer ausser bei `verdict: 'out'`.
+
+Ziele ohne mitgelieferte Vorschläge fragt der Dialog einzeln ab: `GET /api/v1/p/{pid}/scope/options?value=<ziel>` (`value` 1 bis 2048 Zeichen, roh wie im Befehl, als Kennung oder URL). Nur lesend, keine DNS-Auflösung:
+
+```ts
+interface ScopeOptions {
+  value: string; ctrl: boolean;         // das Ziel als Text (Steuerzeichen sichtbar)
+  verdict: Verdict;                     // Urteil des ScopeMatchers jetzt
+  options: ScopeProposal[];             // wie oben, leer ausser bei verdict 'out'
+}
+```
+
+Fehler: 422 `validation` (fehlend, leer, zu lang), sonst wie überall.
 
 Beispiel `curl http://recovery.vantis.internal/login`: `[{ entry: 'recovery.vantis.internal', kind: 'url_host' }, { entry: '*.vantis.internal', kind: 'wildcard' }]`. Eine Wildcard gibt es nur, wenn die Domain mindestens zwei Labels hat (nie `*.lab`). Nach dem Aufnehmen verschwindet die Warnung, sobald kein Ziel des jüngsten Befehls mehr ausserhalb liegt (Neuauswertung).
 

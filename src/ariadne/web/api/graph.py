@@ -20,6 +20,7 @@ from starlette.responses import Response
 
 from ariadne.ingest import queries
 from ariadne.ingest.db import get_meta
+from ariadne.project.guardrails import LabAllowlist
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import Bag, iso
@@ -374,7 +375,17 @@ def _oos_notes(conn: Any, data: Mapping[str, Any]) -> tuple[dict[str, str], set[
     return same_mac, callbacks, related
 
 
-def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
+def _proposals(ident: str, verdict: str, b: Any, allowlist: Any) -> list[dict[str, Any]]:
+    """E129: Vorschläge für «in den Scope aufnehmen» aus der Kennung (nicht aus dem Anzeigenamen), nur
+    bei Urteil ``out`` (web-api.md 20.4)."""
+    from ariadne.scope.suggest import proposals
+
+    if verdict != "out":
+        return []
+    return [{**pr, "entry": b(pr["entry"]) or ""} for pr in proposals(ident, allowlist)]
+
+
+def _oos(conn: Any, data: Mapping[str, Any], bag: Bag, allowlist: Any = None) -> dict[str, Any]:
     own = set(data["own"])
     host_addrs: set[str] = set()
     items: list[dict[str, Any]] = []
@@ -410,6 +421,7 @@ def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
                 "punycode": b(puny),
                 "note": note,
                 "related": b(related),
+                "proposals": _proposals(hid, verdict, b, allowlist),
                 "ctrl": b.ctrl,
             }
         )
@@ -434,6 +446,7 @@ def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
                 "punycode": None,
                 "note": "forged_callback" if forged else None,
                 "related": b(cb_related.get(str(value))) if forged else None,
+                "proposals": _proposals(ident, str(verdict), b, allowlist),
                 "ctrl": b.ctrl,
             }
         )
@@ -466,7 +479,8 @@ def _oos_sources(conn: Any, items: list[dict[str, Any]], bag: Bag) -> None:
         it["source"] = unit_brief(u, cbag) if u else None
 
 
-def build_graph(conn: Any, settings: Any, layers: set[str], bag: Bag, project_id: str) -> dict[str, Any]:
+def build_graph(conn: Any, settings: Any, layers: set[str], bag: Bag, project_id: str,
+                allowlist: Any = None) -> dict[str, Any]:
     data = host_data(conn)
     nets = scope_nets(settings)
     nodes: list[dict[str, Any]] = [{"kind": "kali", "id": "kali", "label": "Kali", "addresses": data["own"]}]
@@ -494,7 +508,7 @@ def build_graph(conn: Any, settings: Any, layers: set[str], bag: Bag, project_id
     if "thread" in layers:
         ids = {str(h.get("host_id")) for h in shown}
         edges.extend(thread_edges(conn, ids, bag))
-    oos = _oos(conn, data, bag) if "oos" in layers else {"total": 0, "items": []}
+    oos = _oos(conn, data, bag, allowlist) if "oos" in layers else {"total": 0, "items": []}
     as_of = conn.execute(
         "SELECT ts_utc_ns FROM generation WHERE generation = (SELECT MAX(generation) FROM generation)"
     ).fetchone()
@@ -532,5 +546,6 @@ def add_routes(router: APIRouter, api: Api) -> None:
         wanted = parse_layers(layers)
         bag = api.bag()
         settings = p.settings
-        res = await api.query(p, lambda c: build_graph(c, settings, wanted, bag, p.info.id))
+        allowlist = LabAllowlist.from_config(api.daemon.paths.config_file)
+        res = await api.query(p, lambda c: build_graph(c, settings, wanted, bag, p.info.id, allowlist))
         return await api.respond(res)

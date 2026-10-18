@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from ariadne.scope.matcher import _RANGE, _range_nets
 from ariadne.scope.normalize import has_idna_deviation
 
 __all__ = [
@@ -54,8 +55,8 @@ class InvalidTarget(ValueError):
 
 @dataclass(frozen=True)
 class Target:
-    kind: Literal["ip", "cidr", "name"]
-    value: str  # normalisiert: IP, CIDR oder Name (ggf. mit führendem ``*.``)
+    kind: Literal["ip", "cidr", "range", "name"]
+    value: str  # normalisiert: IP, CIDR, IPv4-Bereich ``a.b.c.d-e.f.g.h`` oder Name (ggf. mit ``*.``)
 
     def __str__(self) -> str:
         return self.value
@@ -84,7 +85,9 @@ def _normalize_name(raw: str) -> str:
 
 
 def parse_target(raw: str) -> Target:
-    """IP, CIDR oder Hostname (auch ``*.domain``). Kurz-, Dezimal- und Hex-IPs werden abgelehnt."""
+    """IP, CIDR, IPv4-Bereich oder Hostname (auch ``*.domain``). Kurz-, Dezimal- und Hex-IPs werden
+    abgelehnt. Einen Bereich (``10.0.0.1-50`` oder ``10.0.0.1-10.0.0.50``) liest der ScopeMatcher als
+    Bereich; hier gilt dieselbe Lesart (früher: als Name), gespeichert in der langen Form."""
     s = raw.strip()
     if not s or len(s) > 260 or any(ord(c) < 0x21 or ord(c) == 0x7F for c in s):
         raise InvalidTarget("leeres oder ungültiges Ziel")
@@ -97,6 +100,11 @@ def parse_target(raw: str) -> Target:
             return Target("cidr", str(ipaddress.ip_network(s, strict=False)))
         except ValueError as exc:
             raise InvalidTarget("ungültiges Netz") from exc
+    if _RANGE.fullmatch(s):
+        nets = _range_nets(s)
+        if not nets:
+            raise InvalidTarget("ungültiger IP-Bereich (a.b.c.d-e, aufsteigend)")
+        return Target("range", f"{nets[0].network_address}-{nets[-1].broadcast_address}")
     return Target("name", _normalize_name(s))
 
 
@@ -139,6 +147,11 @@ class LabAllowlist:
         if target.kind == "cidr":
             net = ipaddress.ip_network(target.value)
             return any(net.version == n.version and net.subnet_of(n) for n in self.networks)  # type: ignore[arg-type]
+        if target.kind == "range":
+            parts = _range_nets(target.value)
+            return bool(parts) and all(
+                any(p.version == n.version and p.subnet_of(n) for n in self.networks)  # type: ignore[arg-type]
+                for p in parts)
         name = target.value[2:] if target.value.startswith("*.") else target.value
         return any(name.endswith(s) and len(name) > len(s) for s in self.suffixes)
 

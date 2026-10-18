@@ -130,7 +130,9 @@ def test_t6_sshd_code_from_readable_foreign_process_and_local_code_over_tunnel(p
 # --------------------------------------------------------------------------- #
 
 
-async def _ends(web: Web, trigger) -> None:
+async def _ends(web: Web, trigger, reason: str | None = None, slug: str | None = None) -> None:
+    """Sitzung endet, beide Ströme schliessen innerhalb 1 s. Mit ``reason``: vorher kam ``session`` mit
+    dem Grund (Praxistest, web-api.md 14); ohne: kein ``session`` (Widerruf, Abmelden)."""
     token = await web.login()
     streams = [Stream(web, token), Stream(web, token)]
     for s in streams:
@@ -140,6 +142,12 @@ async def _ends(web: Web, trigger) -> None:
     for s in streams:
         assert await s.ends_within(1.0), "Strom endet nicht innerhalb 1 s"
         await s.close()
+        ending = [json.loads(line.removeprefix("data: ")) for block in s.text.split("\n\n")
+                  if "event: session" in block for line in block.split("\n") if line.startswith("data: ")]
+        if reason is None:
+            assert ending == [], s.text
+        else:
+            assert ending == [{"change": "ending", "reason": reason, "slug": slug}], s.text
     assert (await web.req("GET", "/api/v1/test/whoami", token=token)).status_code == 401
     assert (await web.req("GET", "/api/v1/session", token=token)).status_code == 401
 
@@ -148,11 +156,12 @@ def test_t7_lock_stop_close_revoke_end_sessions_immediately(paths, operator):
     async def scenario(web: Web) -> None:
         sock = paths.ctl_sock
         await ctl_ok(sock, "start", slug="lame", targets=["10.10.10.3"])
-        await _ends(web, lambda: ctl_ok(sock, "project.close"))
+        await _ends(web, lambda: ctl_ok(sock, "project.close"), "stop", "lame")
         await ctl_ok(sock, "start", slug="lame")
-        await _ends(web, lambda: ctl_ok(sock, "lock"))  # E103: Projekt bleibt aktiv, Sitzung endet
+        # E103: Projekt bleibt aktiv, Sitzung endet
+        await _ends(web, lambda: ctl_ok(sock, "lock"), "lock", "lame")
         await ctl_ok(sock, "unlock", passphrase="Korrekt-Pferd-Batterie-9")
-        await _ends(web, lambda: ctl_ok(sock, "stop"))
+        await _ends(web, lambda: ctl_ok(sock, "stop"), "stop", "lame")
         await _ends(web, lambda: ctl_ok(sock, "ui.revoke"))
 
         async def revoke_one() -> None:
@@ -307,6 +316,8 @@ def test_t7_daemon_end_closes_streams(paths, operator):
         assert await stream.ends_within(1.0)
         assert time.monotonic() - t0 < 3.0
         await stream.close()
+        # Grund vor dem Ende (web-api.md 14): Daemon beendet
+        assert 'event: session\ndata: {"change":"ending","reason":"shutdown","slug":null}' in stream.text
         assert web.ext.server is None and not web.ext.running
 
     run_web(paths, operator, scenario)

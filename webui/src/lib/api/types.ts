@@ -352,7 +352,7 @@ export interface OosItem {
   punycode: string | null;
   note: 'same_mac' | 'forged_callback' | null;
   related: string | null;
-  /** E129: Vorschläge des Servers, falls mitgeliefert */
+  /** E129 (web-api.md 20.4): Vorschläge des Servers aus der Kennung, leer ausser bei verdict 'out' */
   proposals?: ScopeOption[] | null;
 }
 
@@ -1056,7 +1056,7 @@ export interface ScopeOption {
   outside_lab?: boolean;
   ctrl?: boolean;
 }
-/** Entwurf ui (nicht in web-api.md 20): Vorschläge zu einem Ziel ohne `proposals`; fehlt die Route, 404 */
+/** GET /p/{pid}/scope/options?value= (web-api.md 20.4): Vorschläge zu einem Ziel ohne `proposals` */
 export interface ScopeOptions {
   value: string;
   ctrl: boolean;
