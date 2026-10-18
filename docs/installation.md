@@ -12,7 +12,23 @@ pipx ensurepath          # danach ein neues Terminal öffnen
 
 Bricht die Installation später beim Paket `sqlcipher3` ab (kein fertiges Wheel für diese Python-Version), zusätzlich `sudo apt install build-essential python3-dev libsqlcipher-dev` und die Installation wiederholen.
 
-Das Repo ist privat. Wähle **einen** der drei Wege A, B oder C.
+Das Repo ist privat. Wähle **einen** der Wege A bis D. Am einfachsten ist D.
+
+Solange v0.1 nicht auf `main` liegt, steht der Code auf dem Branch `ccr-9333dca5-pkv7z6`; darum enden die Befehle unten mit `@ccr-9333dca5-pkv7z6` bzw. `--branch ccr-9333dca5-pkv7z6`.
+
+## D Klonen und aus dem Ordner installieren (am einfachsten)
+
+Auf GitHub einen Fine-grained Token erstellen: Settings, Developer settings, Personal access tokens, Fine-grained tokens. Repository access «Only select repositories» mit `schwendolin/ariadne`, Permissions «Contents: Read-only», Ablauf zum Beispiel 30 Tage. Dann in der Kali:
+
+```sh
+git clone --branch ccr-9333dca5-pkv7z6 https://github.com/schwendolin/ariadne.git ~/ariadne-src
+# Username: dein GitHub-Name, Password: den Token einfügen (wird nicht angezeigt)
+pipx install ~/ariadne-src
+```
+
+Nicht nach `~/ariadne` klonen: Diesen Ordner braucht Ariadne für die Projekte. Der Token steht so weder in der History noch in der Adresse des Repos.
+
+Aktualisieren: `ariadne stop`, dann `cd ~/ariadne-src && git pull` (fragt wieder nach Name und Token), `pipx install --force ~/ariadne-src`, `ariadne daemon stop`, `ariadne setup`, neue Terminals öffnen.
 
 ## A Aus dem Repo mit Deploy-Key (empfohlen)
 
@@ -34,10 +50,10 @@ Host github-ariadne
   IdentitiesOnly yes
 EOF
 chmod 600 ~/.ssh/config
-pipx install "git+ssh://git@github-ariadne/OWNER/ariadne.git"
+pipx install "git+ssh://git@github-ariadne/schwendolin/ariadne.git@ccr-9333dca5-pkv7z6"
 ```
 
-`OWNER` durch deinen GitHub-Namen ersetzen. Beim ersten Mal fragt `ssh` nach dem Hostkey von github.com; den Fingerabdruck mit der Liste auf docs.github.com vergleichen.
+Beim ersten Mal fragt `ssh` nach dem Hostkey von github.com; den Fingerabdruck mit der Liste auf docs.github.com vergleichen.
 
 ## B Aus dem Repo mit HTTPS-Token
 
@@ -48,7 +64,7 @@ printf 'Token: '; read -rs GH_TOKEN; echo
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
 export GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-pipx install "git+https://github.com/OWNER/ariadne.git"
+pipx install "git+https://github.com/schwendolin/ariadne.git@ccr-9333dca5-pkv7z6"
 unset GH_TOKEN GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 ```
 
