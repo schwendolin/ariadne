@@ -4,6 +4,7 @@
   Besitzer: ui-karte.
 -->
 <script lang="ts">
+  import { DOT } from '../karte/sep';
   import type { KaliNode } from '../api/types';
   import { t } from '../i18n';
   import type { AppState } from '../stores/app.svelte';
@@ -30,7 +31,7 @@
   <span class="k">{t('host.kali.terminals')}</span>
   <span class="list">
     {#each terms as tm (tm.terminal_id)}
-      <span>{termName(tm)} · <span class="muted">{tm.state}</span>{#if tm.context_label}{' · '}<Txt value={tm.context_label} ctrl={tm.ctrl} max={60} />{/if}</span>
+      <span>{termName(tm)} · <span class="muted">{tm.state}</span>{#if tm.context_label}{DOT}<Txt value={tm.context_label} ctrl={tm.ctrl} max={60} />{/if}</span>
     {/each}
   </span>
 </div>

@@ -35,7 +35,10 @@ if (!process.env.ARIADNE_E2E_MOCK_PORT) process.env.ARIADNE_E2E_MOCK_PORT = Stri
 if (!process.env.ARIADNE_E2E_DAEMON_PORT) process.env.ARIADNE_E2E_DAEMON_PORT = String(freePort());
 const MOCK_PORT = Number(process.env.ARIADNE_E2E_MOCK_PORT);
 const DAEMON_PORT = Number(process.env.ARIADNE_E2E_DAEMON_PORT);
-export const DAEMON_STATE = resolve(import.meta.dirname, '.e2e/daemon.json');
+// Zustandsdatei des Fixture-Daemons je Lauf (parallele Läufe stören sich nicht); die Worker lesen
+// sie über ARIADNE_E2E_STATE (e2e/fixtures.ts).
+if (!process.env.ARIADNE_E2E_STATE) process.env.ARIADNE_E2E_STATE = resolve(import.meta.dirname, `.e2e/daemon-${process.pid}.json`);
+export const DAEMON_STATE = process.env.ARIADNE_E2E_STATE;
 
 const servers = [];
 if (MODE === 'mock' || MODE === 'all') {

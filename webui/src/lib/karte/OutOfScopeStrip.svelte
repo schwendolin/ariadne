@@ -6,6 +6,7 @@
   im Terminal. Besitzer: ui-karte.
 -->
 <script lang="ts">
+  import { DOT } from './sep';
   import type { OosItem } from '../api/types';
   import { t, type MessageKey } from '../i18n';
   import type { AppState } from '../stores/app.svelte';
@@ -72,7 +73,7 @@
           {#snippet body()}
             <span class="value"><Txt value={it.label} mono ctrl={it.ctrl} max={90} />{#if it.punycode}<span class="puny"> <Txt value={it.punycode} mono max={90} /></span>{/if}</span>
             <span class="sub">
-              {#each details(it) as d, i (i)}{#if i > 0}<span aria-hidden="true">{' · '}</span>{/if}{d.text}{#if d.value}{d.text ? ' ' : ''}<Txt value={d.value} max={60} />{/if}{/each}
+              {#each details(it) as d, i (i)}{#if i > 0}<span aria-hidden="true">{DOT}</span>{/if}{d.text}{#if d.value}{d.text ? ' ' : ''}<Txt value={d.value} max={60} />{/if}{/each}
             </span>
           {/snippet}
           {#if ev}

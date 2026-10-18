@@ -321,6 +321,7 @@ def next_view(conn: Any, profile: str, bag: Bag, redactor: Any = None) -> dict[s
             }
         if out is None:
             continue
+        out["ordinal"] = None  # stabile Nummer («K2»), setzt die Route aus state.db (18.12)
         out["ctrl"] = b.ctrl
         clarify.append(out)
     return {
@@ -341,4 +342,12 @@ def add_routes(router: APIRouter, api: Api) -> None:
         bag = api.bag()
         profile = p.info.profile
         redactor = api.daemon.redactor
-        return await api.respond(await api.query(p, lambda c: next_view(c, profile, bag, redactor)))
+        view = await api.query(p, lambda c: next_view(c, profile, bag, redactor))
+        keys = [str(i["item_key"]) for i in view["clarify"]]
+        if keys:
+            from ariadne.web.api.ui_state import item_ordinals, state_call
+
+            ords = await state_call(api, p, item_ordinals, keys)
+            for item in view["clarify"]:
+                item["ordinal"] = ords.get(str(item["item_key"]))
+        return await api.respond(view)

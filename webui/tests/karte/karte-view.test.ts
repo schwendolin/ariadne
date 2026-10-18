@@ -49,8 +49,8 @@ describe('Karte', () => {
     expect(card(c, hostId('192.168.56.104'))?.textContent).toContain('Sackgasse · nur RDP');
     expect(card(c, 'kali')?.textContent).toContain('192.168.56.102');
     const wrap = card(c, H101)?.closest('.wrap');
-    expect(wrap?.querySelector('.ring-label')?.textContent).toBe('K1');
-    expect(card(c, H101)?.getAttribute('aria-label')).toContain('betrifft K1');
+    expect(wrap?.querySelector('.ring-label')?.textContent).toBe('K2');
+    expect(card(c, H101)?.getAttribute('aria-label')).toContain('betrifft K2');
   });
 
   it('Lagebild «Stand · 3 Hosts, 1 im Nebel · 1 mit Zugriff» und «+3 seit» lässt das Neue pulsieren', async () => {
@@ -143,7 +143,7 @@ describe('Spalte «Als Nächstes»', () => {
     expect(col.textContent).toContain('21 Werte ausserhalb des Scopes, 2 Erwähnungen');
     expect(col.querySelector('.card .head')?.textContent).toContain('Kontext klären · Vorschlag');
     expect(col.querySelector('.card')?.textContent).toContain('T3 «listener» · Reverse Shell');
-    expect(col.querySelector('.card')?.textContent).toContain('Darum mehrdeutig: zweiter Callback im Output, 16:53:02');
+    expect(col.querySelector('.card')?.textContent).toMatch(/Darum mehrdeutig: zweiter Callback im Output, \d\d:53:02/);
     expect(col.querySelector('button.line[data-item-key^="merge:"]')?.textContent).toContain('Zusammenführen?');
     expect(col.querySelector('.keys')?.textContent).toBe('j k wechseln · a übernehmen · ↵ Beleg · ? Hilfe');
     press('a');
@@ -177,6 +177,41 @@ describe('Spalte «Als Nächstes»', () => {
     expect(screen.getAllByRole('button', { name: 'Kopieren · Mac' }).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByRole('button', { name: /ausführen/i })).toBeNull();
     expect(screen.getByRole('button', { name: /Denkanstoss anfordern \(KI\)/ }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('Zustände danach: erledigt mit Titel und Rückgängig u, verworfen durchgestrichen mit «verworfen»', async () => {
+    const { app, view, project } = await mount('calm');
+    await app.prefs.set({ learning: false });
+    await settle();
+    const col = view.container.querySelector('.next') as HTMLElement;
+    const first = project.next.view?.suggestions[0];
+    await fireEvent.click(screen.getByRole('button', { name: 'Erledigt' }));
+    await until(() => project.next.done.length === 1);
+    const done = col.querySelector(`.done[data-done-key="${first?.suggestion_key}"]`) as HTMLElement;
+    expect(done.querySelector('.text')?.textContent).toContain('Unauthentisierten Zugriff auf');
+    expect(done.querySelector('.text')?.getAttribute('title')).toContain('192.168.56.101:21');
+    expect(done.querySelector('button.right')?.textContent).toContain('Rückgängig');
+    expect(done.querySelector('.right kbd')).not.toBeNull();
+    // der Cursor steht auf dem nächsten Denkanstoss; Verwerfen
+    await fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
+    await until(() => project.next.done.length === 2);
+    const dismissed = col.querySelector('.done.s-dismissed') as HTMLElement;
+    expect(dismissed.querySelector('.strike')?.textContent).toContain('Version recherchieren');
+    // nichts mehr offen: der Cursor bleibt auf dem verworfenen Eintrag, dort steht «Rückgängig u»
+    expect(dismissed.getAttribute('aria-current')).toBe('true');
+    expect(dismissed.querySelector('button.right')?.textContent).toContain('Rückgängig');
+    expect(done.querySelector('.right kbd')).toBeNull();
+    // nicht gewählt: «verworfen» wie im Design
+    press('k');
+    await settle();
+    expect(done.getAttribute('aria-current')).toBe('true');
+    expect(dismissed.querySelector('.right')?.textContent).toBe('verworfen');
+    expect(done.querySelector('.right kbd')).not.toBeNull();
+    press('j');
+    await settle();
+    press('u');
+    await until(() => project.next.done.length === 1);
+    await until(() => col.querySelector('.card')?.textContent?.includes('Version recherchieren') === true);
   });
 
   it('leeres Projekt: «Erste Schritte» statt der Liste', async () => {

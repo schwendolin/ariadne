@@ -33,9 +33,9 @@ const fact: Fact = {
 };
 
 const ITEMS: Record<string, NextItem> = {
-  value: { kind: 'decide_value', item_key: `claim:${fact.claim_key}`, group_ref: 'g1a2b3c4d', ts: '2026-10-08T14:00:00.000000Z', fact, reason: 'important_heuristic', unit: null },
+  value: { kind: 'decide_value', ordinal: 1, item_key: `claim:${fact.claim_key}`, group_ref: 'g1a2b3c4d', ts: '2026-10-08T14:00:00.000000Z', fact, reason: 'important_heuristic', unit: null },
   conflict: {
-    kind: 'conflict', item_key: `conflict:${hex64('c')}`, ts: '2026-10-08T13:10:00.000000Z',
+    kind: 'conflict', ordinal: 2, item_key: `conflict:${hex64('c')}`, ts: '2026-10-08T13:10:00.000000Z',
     conflict: {
       conflict_key: hex64('c'), subject: 'svc:ip:default/192.168.56.101|tcp/445', subject_label: '192.168.56.101 tcp/445', predicate: 'service.name', state: 'open', choice: null,
       values: [
@@ -45,12 +45,12 @@ const ITEMS: Record<string, NextItem> = {
     },
   },
   ctx: {
-    kind: 'ctx_unknown', item_key: `ctx:${T2}@99`, ts: '2026-10-08T14:30:00.000000Z', terminal_id: T2, from_off: 99, stage_kind: 'ssh', candidate: '10.10.10.5',
+    kind: 'ctx_unknown', ordinal: 3, item_key: `ctx:${T2}@99`, ts: '2026-10-08T14:30:00.000000Z', terminal_id: T2, from_off: 99, stage_kind: 'ssh', candidate: '10.10.10.5',
     units: 3, unit: null, terminal: { terminal_id: T2, ordinal: 2, label: 'msf' }, from_ts: '2026-10-08T14:30:00.000000Z', excerpt: null,
   },
-  orphan: { kind: 'orphan_decision', item_key: 'orphan:x', ts: '2026-10-08T12:00:00.000000Z', decision_id: '0199a3c2-9a09-7000-8000-00000000d009', decision_kind: 'd.claim.confirm', reason: 'Wert nach Reparse nicht mehr da', ref: null },
+  orphan: { kind: 'orphan_decision', ordinal: 4, item_key: 'orphan:x', ts: '2026-10-08T12:00:00.000000Z', decision_id: '0199a3c2-9a09-7000-8000-00000000d009', decision_kind: 'd.claim.confirm', reason: 'Wert nach Reparse nicht mehr da', ref: null },
   mass: {
-    kind: 'mass_find', item_key: 'mass:u1', ts: '2026-10-08T12:30:00.000000Z', hosts: 300, candidates: 290,
+    kind: 'mass_find', ordinal: 5, item_key: 'mass:u1', ts: '2026-10-08T12:30:00.000000Z', hosts: 300, candidates: 290,
     unit: { unit_id: `${T1}@100`, kind: 'command', cmd_id: `${T1}@100`, cmd_ref: 'c011@100', title: 'nmap -sn 10.0.0.0/16', ctrl: false, terminal_id: T1, parser: 'nmap.text', ts: null },
   },
 };
@@ -135,12 +135,15 @@ describe('Arten von «Klären»', () => {
     expect(url.get('zeile')).toBe(`${T1}@100`);
   });
 
-  it('ohne Verbindung sind die Aktionen gesperrt und nennen den Grund', async () => {
-    const { app } = await only(ITEMS.value as NextItem);
+  it('ohne Verbindung: die Spalte zeigt nur «Aktionen gesperrt …» (SCREENS 9), keine Aktionen', async () => {
+    const { app, view } = await only(ITEMS.value as NextItem);
+    expect(screen.getByRole('button', { name: /Annehmen/ }).hasAttribute('disabled')).toBe(false);
     app.offline = true;
     await settle();
-    const btn = screen.getByRole('button', { name: /Annehmen/ });
-    expect(btn.hasAttribute('disabled')).toBe(true);
-    expect(btn.getAttribute('title')).toBe('Daemon nicht erreichbar');
+    expect(view.container.querySelector('.next')?.textContent).toContain('Aktionen gesperrt, bis die Verbindung zurück ist.');
+    expect(screen.queryByRole('button', { name: /Annehmen/ })).toBeNull();
+    app.offline = false;
+    await settle();
+    expect(screen.getByRole('button', { name: /Annehmen/ }).hasAttribute('disabled')).toBe(false);
   });
 });

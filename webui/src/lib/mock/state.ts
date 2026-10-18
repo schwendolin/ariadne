@@ -120,7 +120,10 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     );
   }
   if (scenario === 'held') s.terminals = [...s.terminals, base.heldTerminal()];
-  if (scenario === 'hostile') s.next = { ...s.next, suggestions: [map.hostileSuggestion(), ...s.next.suggestions] };
+  if (scenario === 'hostile') {
+    s.next = { ...s.next, suggestions: [map.hostileSuggestion(), ...s.next.suggestions] };
+    s.findings = [...s.findings, history.findingHostile()];
+  }
   if (scenario === 'empty') {
     s.graph = { ...graph, nodes: graph.nodes.filter((n) => n.kind !== 'host'), edges: [], oos: { total: 0, items: [] }, summary: { hosts: 0, fog: 0, with_access: 0, services: 0, conflicts: 0 } };
     s.next = { clarify: [], confirm: [], suggestions: [], suggestions_available: true, quiet: { heuristic: 0, out_of_scope: 0, mentions: 0, system_accounts: 0 }, open: 0 };

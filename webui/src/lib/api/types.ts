@@ -228,6 +228,8 @@ export interface ContextResult {
   stored: boolean;
   stack: StageView[] | null;
   warnings: { code: 'scope_out' | 'scope_excluded' | 'scope_unknown' | 'host_unknown'; host: string }[];
+  /** 18.12: Entscheid von `set` und `accept` («Rückgängig» per d.revoke), sonst null */
+  decision_id: string | null;
 }
 
 // ------------------------------------------------------------------ Projekt (6)
@@ -356,7 +358,7 @@ export interface GraphView {
   as_of: string;
 }
 
-export type ChangeEntity = 'host' | 'service' | 'claim' | 'inbox' | 'keystep' | 'unit' | 'finding';
+export type ChangeEntity = 'host' | 'service' | 'claim' | 'inbox' | 'keystep' | 'unit' | 'finding' | 'credential' | 'url' | 'other';
 export interface ChangeSet {
   project_id: string;
   from: number;
@@ -472,10 +474,18 @@ export interface CtxExcerpt {
   lines: [number, number];
   text: string[];
   ctrl: boolean;
-  note: string | null;
+  note: 'second_callback' | 'callback' | null;
+  /** Zeit der Quelle (18.12) */
+  ts: string | null;
 }
 
-export type NextItem =
+/** Stabile Nummer einer Klärung («K2», 18.12), vergeben beim ersten Auftreten. */
+interface NextBase {
+  ordinal: number | null;
+}
+
+export type NextItem = NextBase &
+  (
   | {
       kind: 'decide_value';
       item_key: string;
@@ -538,7 +548,8 @@ export type NextItem =
       ref: string | null;
       ctrl?: boolean;
     }
-  | { kind: 'mass_find'; item_key: string; ts: string; unit: UnitBrief; hosts: number; candidates: number; ctrl?: boolean };
+  | { kind: 'mass_find'; item_key: string; ts: string; unit: UnitBrief; hosts: number; candidates: number; ctrl?: boolean }
+  );
 
 export type NextItemKind = NextItem['kind'];
 
@@ -667,7 +678,18 @@ export type TimelineItem = TimelineBase &
         ordinal: number;
         decision_id: string;
       }
-    | { type: 'context'; change: 'set' | 'push' | 'pop' | 'auto'; stack_label: string; source: StageSource }
+    | {
+        type: 'context';
+        change: 'set' | 'push' | 'pop' | 'auto';
+        stack_label: string;
+        source: StageSource;
+        /** 18.12: Host der Stufe einzeln («192.168.56.101»), Art und Benutzer */
+        host_label: string | null;
+        stage_kind: StageKind | null;
+        user: string | null;
+        /** Sitzungsnummer des Callbacks bei `auto` («msf session 1») */
+        session: string | null;
+      }
     | {
         type: 'decision';
         decision_id: string;
@@ -741,6 +763,8 @@ export interface UnitView extends UnitBrief {
   /** 18.8 */
   terminal: TermRef | null;
   chain_break_line: number | null;
+  /** Gerät des Terminals («/dev/pts/2», 18.12) */
+  tty: string | null;
 }
 
 export interface SgrSpan {

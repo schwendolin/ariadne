@@ -8,7 +8,7 @@
 
   let {
     count,
-    rowHeight = 20,
+    rowHeight = 22,
     overscan = 12,
     row,
     scrollTo = null,

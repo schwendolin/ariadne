@@ -43,6 +43,8 @@ export class ProjectStore implements ProjectCtx {
   private readonly parts: ProjectPart[];
   private changesTimer: ReturnType<typeof setTimeout> | null = null;
   private changesBusy = false;
+  /** `changes` kam, während ein Abruf lief: danach noch einmal holen (nichts geht verloren) */
+  private changesAgain = false;
 
   constructor(pid: string, slug: string, app: AppApi, generation: number | null = null) {
     this.pid = pid;
@@ -87,7 +89,10 @@ export class ProjectStore implements ProjectCtx {
         decisions.map((d) => ({ ...d, client_ref: d.client_ref ?? clientRef() })),
       );
     } catch (e) {
-      if (!opts.silent && !isAbort(e)) this.app.ui.notify('error', errorText(e, opts.errorPrefix ?? 'err.decisionPrefix'));
+      if (isAbort(e)) return null;
+      const text = errorText(e, opts.errorPrefix ?? 'err.decisionPrefix');
+      if (opts.onError) opts.onError(text);
+      else if (!opts.silent) this.app.ui.notify('error', text);
       return null;
     }
   }
@@ -115,8 +120,13 @@ export class ProjectStore implements ProjectCtx {
   }
 
   private async fetchChanges(): Promise<void> {
-    if (this.changesBusy || this.disposed) return;
+    if (this.disposed) return;
+    if (this.changesBusy) {
+      this.changesAgain = true;
+      return;
+    }
     this.changesBusy = true;
+    this.changesAgain = false;
     try {
       if (this.generation === null) {
         await this.loadAll();
@@ -133,6 +143,10 @@ export class ProjectStore implements ProjectCtx {
       if (!isAbort(e)) this.generation = null;
     } finally {
       this.changesBusy = false;
+      if (this.changesAgain && !this.disposed) {
+        this.changesAgain = false;
+        this.scheduleChanges();
+      }
     }
   }
 

@@ -33,6 +33,11 @@ export interface DecideOptions {
   errorPrefix?: MessageKey;
   /** Fehler nicht als Meldung zeigen (der Aufrufer zeigt sie selbst) */
   silent?: boolean;
+  /**
+   * Fehlertext (fester Text je Code mit Präfix, nie Zieldaten) an den Aufrufer statt als Meldung,
+   * etwa für die Anzeige in der Zeile oder im Formular. Schliesst `silent` ein.
+   */
+  onError?: (text: string) => void;
 }
 
 export interface ProjectCtx {

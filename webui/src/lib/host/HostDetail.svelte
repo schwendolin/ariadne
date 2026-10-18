@@ -13,6 +13,7 @@
   Besitzer: ui-karte.
 -->
 <script lang="ts">
+  import { COMMA, DOT, PLUS, SP } from '../karte/sep';
   import { onMount } from 'svelte';
   import type { AccessLevel, Keystep, WorkStatus } from '../api/types';
   import { t } from '../i18n';
@@ -162,7 +163,7 @@
     </div>
 
     {#if fog}
-      <p class="fogtext">{t('host.fogText')}</p>
+      <p class="fogtext">{d.first_source?.ts ? t('host.fogTextAt', { time: hhmm(d.first_source.ts) }) : t('host.fogText')}</p>
       <div class="actions pad-x">
         <Button
           variant="primary"
@@ -182,7 +183,7 @@
         <span class="k">{t('host.f.id')}</span><span><Txt value={d.label} mono max={80} /> · {t(`host.verdict.${d.identifiers.find((i) => i.key === d.id)?.verdict ?? 'in'}`)}</span>
         {#if d.first_source}
           <span class="k">{t('host.f.source')}</span>
-          <span><button type="button" class="link" onclick={openSource}><Txt value={d.first_source.title} mono max={60} />{#if d.first_source.ts}{' · '}{hhmm(d.first_source.ts)}{/if} · {t('next.a.evidence')} ›</button></span>
+          <span><button type="button" class="link" onclick={openSource}><Txt value={d.first_source.title} mono max={60} />{#if d.first_source.ts}{DOT}{hhmm(d.first_source.ts)}{/if} · {t('next.a.evidence')} ›</button></span>
         {/if}
         <span class="k">{t('host.f.services')}</span><span class="muted">{d.services.length === 0 ? t('host.noServices') : t('karte.services', { n: d.services.length })}</span>
       </div>
@@ -204,7 +205,7 @@
         <span class="k">{t('host.f.work')}</span>
         <span class="rel">
           <button type="button" class="drop" aria-haspopup="menu" aria-expanded={app.ui.popover === 'host-work'} disabled={!!blocked} onclick={() => app.ui.togglePopover('host-work')}>
-            {t(`host.work.${d.work}`)}{#if d.work === 'dead_end' && d.work_reason}{' · '}<Txt value={d.work_reason} max={40} />{/if} ▾
+            {t(`host.work.${d.work}`)}{#if d.work === 'dead_end' && d.work_reason}{DOT}<Txt value={d.work_reason} max={40} />{/if} ▾
           </button>
           <Popover open={app.ui.popover === 'host-work'} onclose={() => app.ui.closePopover('host-work')} label={t('host.workMenu')}>
             <div class="menu" role="menu">
@@ -227,7 +228,7 @@
         <span class="k">{t('host.f.thread')}</span>
         <span class="thread">
           {#each d.thread as s (s.id)}
-            <span><b class="seq">{s.seq}</b> {t(`karte.step.${s.step}`)}{#if s.note}{' · '}<Txt value={s.note} max={80} />{/if} · {hhmm(s.ts)}</span>
+            <span><b class="seq">{s.seq}</b> {t(`karte.step.${s.step}`)}{#if s.note}{DOT}<Txt value={s.note} max={80} />{/if} · {hhmm(s.ts)}</span>
           {:else}
             <span class="muted">{t('host.noThread')}</span>
           {/each}
@@ -338,7 +339,7 @@
         <button type="button" class="tag add note-add" disabled={!!blocked} onclick={editNote}>{t('host.noteAdd')}</button>
       {/if}
       {#if quietLine || namesOut.length}
-        <p class="quiet">{quietLine}{#if quietLine && namesOut.length}{' · '}{/if}{#each namesOut.slice(0, 4) as n, i (i)}{#if i > 0}{', '}{/if}<Txt value={n} max={60} />{/each}{#if namesOut.length > 4}{' +'}{namesOut.length - 4}{/if}{#if namesOut.length}{' '}{t('host.verdict.out')}{/if}</p>
+        <p class="quiet">{quietLine}{#if quietLine && namesOut.length}{DOT}{/if}{#each namesOut.slice(0, 4) as n, i (i)}{#if i > 0}{COMMA}{/if}<Txt value={n} max={60} />{/each}{#if namesOut.length > 4}{PLUS}{namesOut.length - 4}{/if}{#if namesOut.length}{SP}{t('host.verdict.out')}{/if}</p>
       {/if}
     </div>
 

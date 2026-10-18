@@ -239,13 +239,13 @@ export function next(): NextView {
   return {
     clarify: [
       {
-        kind: 'ctx_suggestion', item_key: `ctx:${T3}@412`, ts: at('16:52:31.447'), terminal_id: T3, from_off: 412, stage_kind: 'revshell', units: 1,
+        kind: 'ctx_suggestion', ordinal: 2, item_key: `ctx:${T3}@412`, ts: at('16:52:31.447'), terminal_id: T3, from_off: 412, stage_kind: 'revshell', units: 1,
         suggested_host: hostId(IP101), suggested_label: IP101, reason: 'Callback von 192.168.56.101 (nc:4445) um 16:52:31', claim_key: hex64('cb-101'),
         terminal: TERM[T3] ?? null, from_ts: at('16:52:31.447'),
-        excerpt: { unit_id: `${T3}@64`, lines: [3, 3], text: ['connect to [192.168.56.102] from (UNKNOWN) [10.66.66.66] 31337'], ctrl: false, note: 'zweiter Callback im Output, 16:53:02' },
+        excerpt: { unit_id: `${T3}@64`, lines: [3, 3], text: ['connect to [192.168.56.102] from (UNKNOWN) [10.66.66.66] 31337'], ctrl: false, note: 'second_callback', ts: at('16:53:02.118') },
       },
       {
-        kind: 'merge_suggestion', item_key: `merge:${hex64('merge-101').slice(0, 16)}`, ts: at('15:20:44.317'),
+        kind: 'merge_suggestion', ordinal: 3, item_key: `merge:${hex64('merge-101').slice(0, 16)}`, ts: at('15:20:44.317'),
         identifiers: [
           { key: hostId(IP101), label: IP101, verdict: 'in' },
           { key: 'ip:default/fd00:56::101', label: 'fd00:56::101', verdict: 'out' },

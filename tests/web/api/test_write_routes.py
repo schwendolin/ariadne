@@ -278,6 +278,8 @@ def test_context_routes_and_suggestion(paths, operator):
         rec = list(d.project.journal.iter_events(kinds=["d.ctx.set"], terminal_id=tid))[-1]
         assert rec.origin == "webui" and rec.header["from_off"] == sug["from_off"]
         assert rec.header["host"] == "ip:default/10.10.10.99"
+        assert r.json()["decision_id"] == rec.id  # «Rückgängig» in der Spalte (d.revoke)
+        accepted = r.json()["decision_id"]
         # die Sitzung läuft noch (nc ohne Ende): der Live-Stapel zeigt den Zielhost
         live = (await c.get(f"{BASE}/terminals")).json()["terminals"]
         stack = next(t for t in live if t["terminal_id"] == tid)["stack"]
@@ -288,6 +290,15 @@ def test_context_routes_and_suggestion(paths, operator):
         assert r.status_code == 409  # schon entschieden
         r = await c.post(f"{BASE}/terminals/{tid}/context", json={"op": "accept", "item_key": "merge:x"})
         assert r.status_code == 404
+        # Rückgängig: d.revoke auf den übernommenen Kontext öffnet den Vorschlag wieder
+        r = await c.post(f"{BASE}/p/{fx.pid}/decisions", json=_dec("d.revoke", {"decision_id": accepted}))
+        assert r.status_code == 201, r.text
+        await sync(d)
+        nx = (await c.get(f"{BASE}/p/{fx.pid}/next")).json()
+        assert any(i["item_key"] == sug["item_key"] for i in nx["clarify"])
+        # push und pop nennen keinen Entscheid zum Widerrufen
+        r = await c.post(url, json={"op": "push", "kind": "ssh", "host": TARGET})
+        assert r.status_code == 200 and r.json()["decision_id"] is None
         detach()
 
     run_api(paths, operator, body, extra=True)

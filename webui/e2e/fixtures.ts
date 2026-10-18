@@ -14,7 +14,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { resolve } from 'node:path';
 
-export const DAEMON_STATE = resolve(import.meta.dirname, '../.e2e/daemon.json');
+/** Zustandsdatei des gemeinsamen Fixture-Daemons (je Lauf, gesetzt in playwright.config.ts) */
+export const DAEMON_STATE = process.env.ARIADNE_E2E_STATE ?? resolve(import.meta.dirname, '../.e2e/daemon.json');
 
 interface Guard {
   violations: string[];
@@ -96,8 +97,11 @@ export function ctl(sock: string, op: string, args: Record<string, unknown> = {}
   });
 }
 
-/** Anmeldung wie über die Startdatei: Code aus dem Daemon, `#c=` im Fragment. */
-export async function loginDaemon(page: Page, path = '/karte'): Promise<DaemonState> {
+/**
+ * Anmeldung wie über die Startdatei: Code aus dem Daemon, `#c=` im Fragment. Standard ist genau die
+ * Adresse der Startdatei (`/#c=…`, Wurzel), damit die Umleitung `/` → `/karte` mitgeprüft ist.
+ */
+export async function loginDaemon(page: Page, path = '/'): Promise<DaemonState> {
   const st = await daemonState();
   const res = await ctl(st.ctl, 'ui.code', { via: 'local', typed: false });
   await page.goto(`${path}#c=${String(res.code)}`);

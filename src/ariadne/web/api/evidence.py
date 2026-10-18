@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -237,6 +238,19 @@ def chain_break_line(conn: Any, journal: Any, u: Mapping[str, Any]) -> int | Non
     return None
 
 
+def _tty(journal: Any, tid: Any) -> str | None:
+    """Gerät des Terminals aus ``term.open`` («/dev/pts/2»; Quelle in der Belegansicht)."""
+    jconn = getattr(journal, "conn", None)
+    if jconn is None or not isinstance(tid, str):
+        return None
+    row = jconn.execute(
+        "SELECT header FROM event WHERE kind = 'term.open' AND terminal_id = ? ORDER BY seq LIMIT 1", (tid,)
+    ).fetchone()
+    header = loads(row[0], {}) if row else {}
+    tty = header.get("tty") if isinstance(header, Mapping) else None
+    return tty if isinstance(tty, str) and re.fullmatch(r"/dev/[A-Za-z0-9/._-]{1,40}", tty) else None
+
+
 def unit_detail(
     conn: Any, unit_id: str, chain_ok: bool, bag: Bag, journal: Any = None
 ) -> dict[str, Any] | None:
@@ -267,6 +281,7 @@ def unit_detail(
             "chain_ok": bool(chain_ok),
             "terminal": term_ref(u.get("terminal_id"), term_refs(conn), b),
             "chain_break_line": chain_break_line(conn, journal, u) if journal is not None else None,
+            "tty": _tty(journal, u.get("terminal_id")),
         }
     )
     out["ctrl"] = bool(out.get("ctrl")) or b.ctrl

@@ -32,7 +32,8 @@ describe('Auswahl und Bewegung', () => {
     const n = project.next;
     expect(n.rows.map((r) => r.type)).toEqual(['clarify', 'clarify', 'suggestion', 'suggestion']);
     expect(n.selectedKey).toBe(`ctx:${T3}@412`);
-    expect(n.ordinal(`ctx:${T3}@412`)).toBe('K1');
+    // stabile Nummer vom Server (18.12), nicht die Position in der Liste
+    expect(n.ordinal(`ctx:${T3}@412`)).toBe('K2');
     expect(n.ordinal(n.suggestionItems[1]?.suggestion_key ?? '')).toBe('D2');
     expect(n.linkedHosts).toEqual(['ip:default/192.168.56.101']);
     expect(n.open).toBe(2);
@@ -72,8 +73,9 @@ describe('eigene Entscheide', () => {
     expect(done?.state).toBe('done');
     expect(done?.msg?.key).toBe('next.d.ctx');
     expect(done?.msg?.params).toEqual({ term: 'T3', host: '192.168.56.101' });
-    expect(done?.decisionId).toBeNull();
-    expect(done?.ctx).toEqual({ terminalId: T3, fromOff: 412 });
+    // ContextResult.decision_id (18.12): «Rückgängig» per d.revoke statt nur «Ändern …»
+    expect(done?.decisionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(done?.ctx).toBeNull();
     expect(n.isBusy(k2.item_key)).toBe(false);
     expect(n.selectedRow?.type === 'clarify' && n.selectedRow.item.kind).toBe('merge_suggestion');
     expect(n.rowsOf('clarify').map((r) => r.type)).toEqual(['done', 'clarify']);
@@ -188,7 +190,7 @@ describe('anderer Tab, Rückkehr ins Dashboard, Lernmodus, Beleg', () => {
     await settle();
     const { search } = await import('../../src/lib/shell/palette');
     const hits = search('zusammenführen');
-    expect(hits.some((h) => h.group === 'next' && h.hint === 'K2')).toBe(true);
+    expect(hits.some((h) => h.group === 'next' && h.hint === 'K3')).toBe(true);
     const all = search('denkanstoss').filter((h) => h.group === 'next');
     expect(all.map((h) => h.hint)).toEqual(['D1', 'D2']);
     all[0]?.run();

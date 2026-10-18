@@ -64,6 +64,12 @@ def test_additive_fields_from_real_server(paths, operator):
         (sug,) = [i for i in nx["clarify"] if i["kind"] == "ctx_suggestion"]
         assert sug["terminal"] == {"terminal_id": fx.extra["callback"], "ordinal": 4, "label": None}
         assert sug["from_ts"].endswith("Z") and "excerpt" in sug  # Auszug erst mit gespeicherten Zeilen
+        # stabile Nummern der Klärungen («K2», 18.12): eindeutig, beim zweiten Abruf gleich
+        ords = {i["item_key"]: i["ordinal"] for i in nx["clarify"]}
+        assert all(isinstance(o, int) and o >= 1 for o in ords.values())
+        assert len(set(ords.values())) == len(ords)
+        again = await get("/next")
+        assert {i["item_key"]: i["ordinal"] for i in again["clarify"]} == ords
 
         # Entscheide mit Zielbezug; Zugriff kommt danach «per Entscheid»
         r = await web.req(
@@ -100,12 +106,16 @@ def test_additive_fields_from_real_server(paths, operator):
         dec = next(i for i in tl if i["type"] == "decision" and i["decision_id"] == access_id)
         assert dec["detail"] == f"Zugriff root auf {TARGET}" and dec["effect"] is None and dec["ref"] is None
         assert all("terminal" in i for i in tl)
+        for i in tl:
+            if i["type"] == "context":  # 18.12: Host, Art und Benutzer einzeln
+                assert {"host_label", "stage_kind", "user"} <= set(i)
 
         # Kopf einer Einheit: Terminal-Bezug; Bruchstelle der Kette nach einer Manipulation
         unit = await get(f"/units/{urllib.parse.quote(nm['unit_id'], safe='')}")
         assert (
             unit["terminal"]["ordinal"] == 1 and unit["chain_break_line"] is None and unit["chain_ok"] is True
         )
+        assert unit["tty"] == "/dev/pts/7"  # Gerät aus term.open (Belegansicht «Quelle pts/7»)
         start = await d.ingest.query(
             lambda c: c.execute("SELECT start_off FROM unit WHERE unit_id = ?", (nm["unit_id"],)).fetchone()[
                 0

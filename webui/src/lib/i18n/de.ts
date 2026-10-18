@@ -232,6 +232,7 @@ export const de = {
   'secret.hint.input': 'Eingabe ohne Echo',
 
   'common.close': 'Schliessen',
+  'common.closeVerb': 'schliessen',
   'common.cancel': 'Abbrechen',
   'common.save': 'Speichern',
   'common.back': 'Zurück',

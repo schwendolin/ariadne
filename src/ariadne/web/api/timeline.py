@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from starlette.responses import Response
 
+from ariadne.daemon.terminal import STAGE_KINDS
 from ariadne.ingest import inputs, queries
 from ariadne.ingest.pipeline import SILENCE_NS
 from ariadne.ingest.proj_build import display
@@ -34,6 +35,7 @@ __all__ = [
 ]
 
 TYPES = ("command", "segment", "file", "keystep", "context", "decision", "gap", "project", "input")
+_STAGE_KINDS = STAGE_KINDS
 DEFAULT_TYPES = frozenset(TYPES) - {"input"}
 UNITS_MAX = 5000  # so viele jüngste Einträge aus Einheiten und Schritten trägt die Zeitachse
 INPUTS_MAX = 1000
@@ -213,10 +215,12 @@ def _collect(conn: Any, journal: Any, types: frozenset[str], terminal: str | Non
                     ),
                     source=_SOURCE.get(str(rec.origin), "auto"),
                     host_id=h.get("host"),
+                    stage_kind=stage["kind"] if rec.kind != "d.ctx.pop" else None,
+                    user=h.get("user") if rec.kind != "d.ctx.pop" else None,
                 )
             )
-        for tid, opened, host in conn.execute(
-            "SELECT terminal_id, opened_at, host FROM ctx_auto LIMIT 10000"
+        for tid, opened, host, claim_key in conn.execute(
+            "SELECT terminal_id, opened_at, host, claim_key FROM ctx_auto LIMIT 10000"
         ):
             row = conn.execute(
                 "SELECT ts_utc_ns, mono_ns, boot_id FROM unit WHERE terminal_id = ? AND start_off >= ? "
@@ -225,6 +229,24 @@ def _collect(conn: Any, journal: Any, types: frozenset[str], terminal: str | Non
             ).fetchone()
             if row is None:
                 continue
+            kind_row = conn.execute(
+                "SELECT ctx_kind FROM obs_unit WHERE terminal_id = ? AND ctx_opened_at = ? LIMIT 1",
+                (tid, int(opened)),
+            ).fetchone()
+            # Der Callback, der den Kontext setzte: Zeit und Sitzung («msf session 1», 18.12)
+            cb = conn.execute(
+                "SELECT cs.ts_utc_ns, o.attrs_json FROM claim_source cs "
+                "JOIN observation o ON o.obs_id = cs.obs_id "
+                "JOIN obs_unit u ON u.unit_id = cs.unit_id WHERE cs.claim_key = ? AND u.terminal_id = ? "
+                "AND u.ctx_opened_at = ? ORDER BY cs.ts_utc_ns LIMIT 1",
+                (claim_key, tid, int(opened)),
+            ).fetchone()
+            attrs = loads(cb[1], {}) if cb else {}
+            session = attrs.get("session") if isinstance(attrs, Mapping) else None
+            if not (isinstance(session, str) and session.isdigit() and len(session) <= 9):
+                session = None
+            if cb and isinstance(cb[0], int):
+                row = (cb[0], None, row[2])  # Zeit des Callbacks; Ordnung über denselben Systemstart
             out.append(
                 _entry(
                     f"a:{tid}@{opened}",
@@ -241,6 +263,9 @@ def _collect(conn: Any, journal: Any, types: frozenset[str], terminal: str | Non
                     ),
                     source="auto",
                     host_id=host,
+                    stage_kind=str(kind_row[0]) if kind_row and isinstance(kind_row[0], str) else None,
+                    user=None,
+                    session=session,
                 )
             )
     if "gap" in types:
@@ -462,11 +487,19 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
             }
         )
     elif t == "context":
+        host = e.get("host_id")
+        host = host if isinstance(host, str) and host and host != "local" else None
+        kind = e.get("stage_kind")
         item.update(
             {
                 "change": e.get("change"),
                 "stack_label": b(e.get("stack_label")) or "",
                 "source": e.get("source"),
+                # 18.12: einzeln für die Zeile «Kontext automatisch: 192.168.56.101 (auto)»
+                "host_label": b(display(host)) if host else None,
+                "stage_kind": kind if isinstance(kind, str) and kind in _STAGE_KINDS else None,
+                "user": b(e.get("user")) if isinstance(e.get("user"), str) else None,
+                "session": e.get("session") if isinstance(e.get("session"), str) else None,
             }
         )
         item["context_label"] = item["stack_label"]

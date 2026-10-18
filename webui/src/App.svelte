@@ -5,7 +5,8 @@
     gedämpfte Ansicht mit gesperrten Aktionen (Klasse `offline-dim`, AppState.offline).
   - Kopfzeile immer (ausser bei der Anmeldung); Reiter Karte, Terminals, Zeitachse, Findings.
   - Höchstens ein Dialog (UiStore.dialog), höchstens eine Tafel (URL `beleg` oder `tafel`); die
-    Scope-Warnung ist eine nicht modale Meldung (UiStore.scopeCard).
+    Scope-Warnung ist eine nicht modale Meldung (UiStore.scopeCard); solange eine Tafel offen ist,
+    tritt sie zurück (das Kennzeichen in der Kopfzeile bleibt) und erscheint danach wieder.
   - Globale Kürzel: ⌘K Palette, ? Hilfe, 1 bis 4 Reiter, ⇧P Präsentationsmodus (nur mit Fokus
     ausserhalb von Eingabefeldern), Esc schliesst Tafel bzw. Detail (in den Komponenten).
   - Palette: Quelle «actions» (Reiter, Präsentation, Darstellung, Einstellungen, Scope, Hilfe,
@@ -88,7 +89,7 @@
   </div>
 {/if}
 
-{#if app.ui.scopeCard && phase === 'project'}
+{#if app.ui.scopeCard && phase === 'project' && !evidence && !settingsOpen}
   <ScopeWarningDialog {app} onclose={() => (app.ui.scopeCard = false)} />
 {/if}
 

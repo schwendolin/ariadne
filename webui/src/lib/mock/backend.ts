@@ -192,7 +192,8 @@ export class MockBackend implements Backend {
       }
       const host = op.op === 'set' ? (op.host ?? null) : null;
       const warnings: ContextResult['warnings'] = host && !host.startsWith('192.168.56.') ? [{ code: 'scope_out', host }] : [];
-      return { stored: true, stack: t.stack, warnings };
+      const decision_id = op.op === 'accept' || op.op === 'set' ? `0199a3c2-9b${String(Date.now() % 100).padStart(2, '0')}-7000-8000-0000000c0de1` : null;
+      return { stored: true, stack: t.stack, warnings, decision_id };
     });
   }
   prefs(): Promise<PrefsView> {
@@ -305,7 +306,9 @@ export class MockBackend implements Backend {
     return this.wait(() => {
       this.check(pid);
       let items = this.state.timeline;
+      // wie der Server (web-api.md 10): ohne `types` keine Eingaben
       if (q.types?.length) items = items.filter((i) => q.types?.includes(i.type));
+      else items = items.filter((i) => i.type !== 'input');
       if (q.terminal) items = items.filter((i) => i.terminal_id === q.terminal);
       if (q.host) items = items.filter((i) => i.host_id === q.host);
       return { items: clone(items.slice(0, q.limit ?? 200)), next_cursor: null };

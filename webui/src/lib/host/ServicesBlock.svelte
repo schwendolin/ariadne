@@ -6,6 +6,7 @@
   Besitzer: ui-karte.
 -->
 <script lang="ts">
+  import { COMMA, DOT } from '../karte/sep';
   import type { ServiceView } from '../api/types';
   import { t } from '../i18n';
   import Txt from '../ui/Txt.svelte';
@@ -67,7 +68,7 @@
         onclick={() => (all = false)}>{t('host.servicesLess')}</button
       >{/if}
     {#if history.length > 0}
-      {#if hidden > 0 || all}<span aria-hidden="true">{' · '}</span>{/if}{t('host.history', { items: '' })}{#each history as h, i (h.key)}{#if i > 0}{', '}{/if}{h.port} <Txt value={h.old} max={40} /> → <Txt value={h.now} max={40} />{/each}
+      {#if hidden > 0 || all}<span aria-hidden="true">{DOT}</span>{/if}{t('host.history', { items: '' })}{#each history as h, i (h.key)}{#if i > 0}{COMMA}{/if}{h.port} <Txt value={h.old} max={40} /> → <Txt value={h.now} max={40} />{/each}
     {/if}
   </p>
 {/if}

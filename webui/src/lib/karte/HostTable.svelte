@@ -7,6 +7,7 @@
   Besitzer: ui-karte.
 -->
 <script lang="ts">
+  import { DOT } from './sep';
   import { onMount } from 'svelte';
   import type { HostSummary, ServiceClass, ServiceView } from '../api/types';
   import { t, type MessageKey } from '../i18n';
@@ -171,7 +172,7 @@
                 <span class="muted">{knowledge(h.knowledge, h.claim_state === 'candidate')}</span>
                 <span class="mono ports">{(h.ports ?? []).join(' · ')}</span>
                 <span class="hint">
-                  {#if h.conflicts > 0}{t('table.conflict', { what: conflictWhat(h, tk) ?? '' }).replace(/: $/, '')}{:else if h.work === 'dead_end'}{t('karte.deadEnd')}{#if h.work_reason}{' · '}<Txt value={h.work_reason} max={40} />{/if}{/if}
+                  {#if h.conflicts > 0}{t('table.conflict', { what: conflictWhat(h, tk) ?? '' }).replace(/: $/, '')}{:else if h.work === 'dead_end'}{t('karte.deadEnd')}{#if h.work_reason}{DOT}<Txt value={h.work_reason} max={40} />{/if}{/if}
                 </span>
               </button></div>
             {/if}

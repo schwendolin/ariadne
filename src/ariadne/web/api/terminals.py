@@ -248,10 +248,13 @@ def add_routes(router: APIRouter, api: Api) -> None:
                 warnings = host_warnings(p.settings, ident, known)
         bag = api.bag()
         stack_out = res.get("stack") if isinstance(res, dict) else None
+        did = (res or {}).get("decision_id") if isinstance(res, dict) else None
         return await api.respond(
             {
                 "stored": bool((res or {}).get("stored")),
                 "stack": stack_views(stack_out, bag) if isinstance(stack_out, list) else None,
                 "warnings": warnings,
+                # Entscheid zum Widerrufen («Rückgängig» per d.revoke); nur bei set und accept
+                "decision_id": did if isinstance(did, str) and not isinstance(body, PushOp | PopOp) else None,
             }
         )

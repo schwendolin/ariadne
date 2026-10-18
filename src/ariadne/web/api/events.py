@@ -29,6 +29,11 @@ def _count_open(conn: Any) -> int:
     return int(conn.execute("SELECT COUNT(*) FROM v_inbox").fetchone()[0])
 
 
+def _inbox_keys(conn: Any) -> list[str]:
+    rows = conn.execute("SELECT item_key FROM v_inbox ORDER BY created_ts, group_key, item_key LIMIT 2000")
+    return [str(r[0]) for r in rows]
+
+
 def _count_suggestions(conn: Any, profile: str) -> int | None:
     """Zahl offener Denkanstösse (web-api.md 18.9); ``None``, solange die Regel-Engine ein Stub ist."""
     if rules_api.STUB:
@@ -56,6 +61,10 @@ class _Sources:
             log.error("SSE-Ereignis nicht veröffentlicht (%s)", type(exc).__name__)
 
     def _reset_project(self, pid: str | None) -> None:
+        if pid != self.pid:
+            # Schnappschuss der Regel-Engine des alten Projekts verwerfen (Projektwechsel, Sperre)
+            with contextlib.suppress(Exception):
+                rules_api.clear_cache()
         self.pid, self.gen, self.open, self.sugg = pid, None, None, None
 
     # ------------------------------------------------------------------ Daemon
@@ -151,6 +160,9 @@ class _Sources:
                 return
             if self.pid != p.info.id:
                 self._reset_project(p.info.id)
+            await self._ordinals(p, ing)
+            if self.closed or self.d.project is not p:
+                return
             if n != self.open:
                 self.open = n
                 self._pub("inbox", {"project_id": p.info.id, "open": n})
@@ -159,6 +171,18 @@ class _Sources:
                 self._pub("suggestion", {"project_id": p.info.id, "open": sugg})
             if not self.again:
                 return
+
+    async def _ordinals(self, p: Any, ing: Any) -> None:
+        """Stabile Nummern («K2») für neue Klärungen, sobald sie entstehen, nicht erst beim
+        nächsten Abruf von /next (web-api.md 18.12)."""
+        from ariadne.web.api.ui_state import item_ordinals
+
+        try:
+            keys = await ing.query(_inbox_keys)
+            if keys:
+                await asyncio.to_thread(item_ordinals, p, keys)
+        except Exception as exc:  # Nummern dürfen das Ereignis «inbox» nie verhindern
+            log.error("Nummern der Klärungen nicht vergeben (%s)", type(exc).__name__)
 
     def detach(self) -> None:
         self.closed = True

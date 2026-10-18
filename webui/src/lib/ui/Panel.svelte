@@ -51,7 +51,7 @@
 <section class="panel" class:locked aria-label={title} tabindex="-1" bind:this={node} use:slideInRight>
   <header class="head">
     {#if header}{@render header()}{:else}<h2>{title}</h2>{/if}
-    {#if !locked}<button type="button" class="close" onclick={close} aria-label={t('common.close')}>{t('common.close')} <kbd>{t('common.esc')}</kbd></button>{/if}
+    {#if !locked}<button type="button" class="close" onclick={close} aria-label={t('common.close')}><kbd>{t('common.esc')}</kbd> {t('common.closeVerb')}</button>{/if}
   </header>
   <div class="body">{@render children()}</div>
   {#if footer}<footer class="foot">{@render footer()}</footer>{/if}

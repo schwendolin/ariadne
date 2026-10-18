@@ -143,10 +143,12 @@
 <section class="next" aria-label={t('next.label')}>
   <header class="head">
     <h2>{t('next.title')}</h2>
-    {#if quiet}<p class="quiet">{quiet}</p>{/if}
+    {#if app.offline}<p class="quiet">{t('state.offline.column')}</p>{:else if quiet}<p class="quiet">{quiet}</p>{/if}
   </header>
   <div class="body" bind:this={body}>
-    {#if !v && next.error}
+    {#if app.offline}
+      <!-- SCREENS 9 «Keine Verbindung»: keine Einträge, bis die Verbindung zurück ist -->
+    {:else if !v && next.error}
       <p class="error" role="alert">{t('next.error')}</p>
     {:else if !v}
       <p class="muted">{t('next.loading')}</p>

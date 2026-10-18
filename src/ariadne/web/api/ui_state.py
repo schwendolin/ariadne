@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,8 @@ __all__ = [
     "state_get",
     "state_set",
     "seen_view",
+    "item_ordinals",
+    "state_call",
 ]
 
 log = logging.getLogger("ariadne.web.api")
@@ -148,6 +151,47 @@ def state_set(p: Any, key: str, value: str) -> None:
         conn.close()
 
 
+UI_ITEM_SQL = "CREATE TABLE IF NOT EXISTS ui_item (item_key TEXT PRIMARY KEY, ordinal INTEGER NOT NULL)"
+ITEM_KEYS_MAX = 2000
+_ITEM_LOCK = threading.Lock()  # zwei Tabs fragen /next gleichzeitig: Nummern nie doppelt vergeben
+
+
+def item_ordinals(p: Any, keys: list[str]) -> dict[str, int]:
+    """Stabile Nummer je Klärung («K2», web-api.md 18.12): beim ersten Auftreten in ``/next`` in der
+    Reihenfolge der Liste vergeben und in ``state.db`` (Tabelle ``ui_item``) gemerkt, damit sich die
+    Nummer am Ring auf der Karte nicht verschiebt, wenn eine frühere Klärung erledigt ist."""
+    keys = [k for k in dict.fromkeys(keys) if isinstance(k, str) and k][:ITEM_KEYS_MAX]
+    if not keys:
+        return {}
+    with _ITEM_LOCK:
+        return _item_ordinals(p, keys)
+
+
+def _item_ordinals(p: Any, keys: list[str]) -> dict[str, int]:
+    conn = p.connect_state()
+    try:
+        conn.execute(UI_ITEM_SQL)
+        with conn:
+            known: dict[str, int] = {}
+            for i in range(0, len(keys), 500):
+                part = keys[i : i + 500]
+                marks = ",".join("?" * len(part))
+                for key, ordinal in conn.execute(
+                    f"SELECT item_key, ordinal FROM ui_item WHERE item_key IN ({marks})",  # noqa: S608
+                    tuple(part),
+                ):
+                    known[str(key)] = int(ordinal)
+            top = int(conn.execute("SELECT COALESCE(MAX(ordinal), 0) FROM ui_item").fetchone()[0])
+            for key in keys:
+                if key not in known:
+                    top += 1
+                    known[key] = top
+                    conn.execute("INSERT INTO ui_item (item_key, ordinal) VALUES (?, ?)", (key, top))
+    finally:
+        conn.close()
+    return known
+
+
 def _seen_ns(raw: str | None) -> int | None:
     if raw is None or not raw.isdigit() or len(raw) > 20:
         return None
@@ -168,6 +212,12 @@ def seen_view(seen_ns: int | None, new: dict[str, Any] | None) -> dict[str, Any]
             **{k: list(new.get(k) or []) for k in ("hosts", "access", "services", "items", "keysteps")},
         },
     }
+
+
+async def state_call(api: Api, p: Any, fn: Any, *args: Any) -> Any:
+    """``fn(p, *args)`` mit eigener Verbindung zu ``state.db`` in einem Thread; danach muss
+    dasselbe Projekt noch offen sein (E70)."""
+    return await _state(api, p, fn, *args)
 
 
 async def _state(api: Api, p: Any, fn: Any, *args: Any) -> Any:

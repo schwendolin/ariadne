@@ -236,10 +236,10 @@ export class NextStore implements ProjectPart {
     return this.rows.find((r) => r.key === key) ?? null;
   }
 
-  /** «K2», «D1»: Nummer eines offenen Eintrags in seiner Gruppe */
+  /** «K2», «D1»: stabile Nummer einer Klärung vom Server (18.12), sonst die Position in der Gruppe */
   ordinal(key: string): string | null {
     const ci = this.clarifyItems.findIndex((i) => i.item_key === key);
-    if (ci >= 0) return `K${ci + 1}`;
+    if (ci >= 0) return `K${this.clarifyItems[ci]?.ordinal ?? ci + 1}`;
     const si = this.suggestionItems.findIndex((s) => s.suggestion_key === key);
     return si >= 0 ? `D${si + 1}` : null;
   }
@@ -439,8 +439,9 @@ export class NextStore implements ProjectPart {
       state: 'done',
       msg: { key: 'next.d.ctx', params: { term, host: item.suggested_label }, mono: ['host'] },
       line: itemLine(item),
-      decisionId: null,
-      ctx: { terminalId: item.terminal_id, fromOff: item.from_off },
+      // Rückgängig per d.revoke, wenn der Server den Entscheid nennt; sonst nur «Ändern …»
+      decisionId: res.decision_id ?? null,
+      ctx: res.decision_id ? null : { terminalId: item.terminal_id, fromOff: item.from_off },
     });
     return true;
   }
@@ -561,7 +562,7 @@ export class NextStore implements ProjectPart {
         id: `next:${item.item_key}`,
         group: 'next',
         label: `${line.kind}${text ? ` · ${text}` : ''}`,
-        hint: `K${i + 1}`,
+        hint: `K${item.ordinal ?? i + 1}`,
         keywords: `${line.kind} ${text} klären`.toLowerCase(),
         run: () => url.go('karte', { sel: item.item_key, host: null }, { keep: true }),
       });

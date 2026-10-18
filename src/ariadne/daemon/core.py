@@ -1423,8 +1423,12 @@ class Daemon:
         t.ctx_version += 1
         self._notify("terminal", terminal_id=tid, change="context")
         stored = self._can_store_decision(t) and t.recording
+        decision_id: str | None = None
         if stored:
             self.writer.add_event(AppendItem(kind, header, origin=origin, terminal_id=tid, stream_off=off), t)
+            if source == "webui":
+                # Die Web-API nennt den Entscheid («Rückgängig» per d.revoke, web-api.md 5): sofort schreiben.
+                decision_id = _record_id(self.writer.flush_now(), kind, origin, tid)
         else:
             if self.state_of(t) in ("preroll", "locked"):
                 # Im Vorlauf als Schnappschuss halten: bei der Übernahme gilt er ab dieser Stelle.
@@ -1434,7 +1438,10 @@ class Daemon:
             if origin == "shim":
                 self._flash(t, "Kontext gesetzt, gespeichert ab ariadne start")
         self._send_state(t)
-        return {"stack": t.stack.snapshot(), "stored": stored}
+        out: dict[str, Any] = {"stack": t.stack.snapshot(), "stored": stored}
+        if decision_id is not None:
+            out["decision_id"] = decision_id
+        return out
 
     def _keystep(self, t: Terminal, obj: dict[str, Any]) -> None:
         step = obj.get("step")
@@ -2148,8 +2155,11 @@ class Daemon:
                                      "kind": kind}.items() if v is not None}
         self.submit(AppendItem("d.ctx.set", header, origin=_origin(source), terminal_id=tid,
                                stream_off=from_off))
-        self.writer.flush_now()
-        return {"stack": None, "stored": True}
+        decision_id = _record_id(self.writer.flush_now(), "d.ctx.set", _origin(source), tid)
+        out: dict[str, Any] = {"stack": None, "stored": True}
+        if decision_id is not None:
+            out["decision_id"] = decision_id
+        return out
 
     def op_ctx_set(self, args: dict[str, Any]) -> dict[str, Any]:
         return self._op_ctx("set", args)
@@ -2502,6 +2512,15 @@ def _decided_host(t: Terminal) -> str | None:
 
 def _origin(source: str) -> str:
     return {"hotkey": "shim", "webui": "webui", "cli": "cli"}.get(source, "daemon")
+
+
+def _record_id(records: list[Any], kind: str, origin: str, terminal_id: str) -> str | None:
+    """``id`` des jüngsten geschriebenen Entscheids dieser Art für dieses Terminal (oder ``None``,
+    wenn der Commit scheiterte und der Writer später nachschreibt)."""
+    for rec in reversed(records):
+        if rec.kind == kind and rec.origin == origin and rec.terminal_id == terminal_id:
+            return str(rec.id)
+    return None
 
 
 def _error(exc: BaseException) -> dict[str, Any]:

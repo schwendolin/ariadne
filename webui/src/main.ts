@@ -5,15 +5,17 @@
  * wählen (Daemon oder Mock), Tastatur installieren, App starten. Theme: bis die Vorlieben vom
  * Server da sind, folgt die Oberfläche dem System (kein Browser-Speicher, E112).
  */
+// Zuerst: Einmalcode aus dem Fragment nehmen, bevor ein anderes Modul die Adresse ändert
+// (der URL-Zustand leitet `/` beim Laden auf `/karte` um).
+import { startCode } from './lib/api/startcode';
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
-import { takeCodeFromLocation } from './lib/api/auth';
 import { selectBackend } from './lib/api/select';
 import { installKeymap } from './lib/keys/keymap';
 import { AppState } from './lib/stores/app.svelte';
 
-const code = takeCodeFromLocation();
+const code = startCode;
 const backend = await selectBackend();
 const app = new AppState(backend);
 installKeymap(window);

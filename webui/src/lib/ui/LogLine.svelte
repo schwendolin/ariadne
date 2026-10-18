@@ -20,7 +20,7 @@
     display: flex;
     font-family: var(--font-mono);
     font-size: var(--fs-s);
-    line-height: 20px;
+    line-height: 22px;
     white-space: pre;
     color: var(--fg-2);
   }

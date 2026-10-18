@@ -12,8 +12,9 @@
   Zieldaten nur über Txt. Besitzer: ui-karte.
 -->
 <script lang="ts">
+  import { DOT } from '../karte/sep';
   import { untrack } from 'svelte';
-  import type { NextItem, StageKind } from '../api/types';
+  import type { CtxExcerpt, NextItem, StageKind } from '../api/types';
   import { t, type MessageKey } from '../i18n';
   import type { AppState } from '../stores/app.svelte';
   import { itemEvidence, itemLine } from '../stores/next.svelte';
@@ -53,6 +54,14 @@
   function termTitle(tr: { ordinal: number | null; label: string | null; terminal_id?: string } | null, tid: string | null): string {
     const base = termShort(tr ?? (tid ? { ordinal: null, terminal_id: tid } : null));
     return tr?.label ? `${base} «${tr.label}»` : base;
+  }
+
+  /** Kopf des Logauszugs (18.8): «Darum mehrdeutig: zweiter Callback im Output, 16:53:02». */
+  function excerptNote(ex: CtxExcerpt): string {
+    const time = ex.ts ? hhmm(ex.ts, { seconds: true }) : null;
+    if (ex.note === 'second_callback') return t('next.ambiguous', { note: time ? t('next.ex.second', { time }) : t('next.ex.secondPlain') });
+    if (ex.note === 'callback') return time ? t('next.ex.callback', { time }) : t('next.ex.callbackPlain');
+    return t('next.ambiguousPlain');
   }
 
   function verdictText(v: string | null): string {
@@ -133,7 +142,7 @@
     <div class="head"><span class="dot" aria-hidden="true"></span>{t(`next.kind.${item.kind}` as MessageKey)}</div>
 
     {#if item.kind === 'ctx_suggestion'}
-      <h3 class="title">{termTitle(item.terminal, item.terminal_id)}{#if item.stage_kind}{' · '}{stageName(item.stage_kind)}{/if}</h3>
+      <h3 class="title">{termTitle(item.terminal, item.terminal_id)}{#if item.stage_kind}{DOT}{stageName(item.stage_kind)}{/if}</h3>
       <div class="grid">
         <span class="k">{t('next.f.suggestion')}</span><span class="mono"><Txt value={item.suggested_label} mono max={80} /></span>
         <span class="k">{t('next.f.reason')}</span><span><Txt value={item.reason} ctrl={item.ctrl ?? false} max={240} /></span>
@@ -141,7 +150,7 @@
       </div>
       {#if item.excerpt}
         <div class="excerpt">
-          <span class="ex-note">{item.excerpt.note ? t('next.ambiguous', { note: '' }) : t('next.ambiguousPlain')}{#if item.excerpt.note}<Txt value={item.excerpt.note} max={120} />{/if}</span>
+          <span class="ex-note">{excerptNote(item.excerpt)}</span>
           {#each item.excerpt.text as l, i (i)}<span class="ex-line"><Txt value={l} mono ctrl={item.excerpt.ctrl} max={240} /></span>{/each}
         </div>
       {/if}
@@ -152,7 +161,7 @@
       </div>
     {:else if item.kind === 'ctx_unknown'}
       <h3 class="title">
-        {#if item.terminal_id}{termTitle(item.terminal, item.terminal_id)}{#if item.stage_kind}{' · '}{stageName(item.stage_kind)}{/if}{:else if item.unit}<Txt value={item.unit.title} mono ctrl={item.unit.ctrl} max={80} />{/if}
+        {#if item.terminal_id}{termTitle(item.terminal, item.terminal_id)}{#if item.stage_kind}{DOT}{stageName(item.stage_kind)}{/if}{:else if item.unit}<Txt value={item.unit.title} mono ctrl={item.unit.ctrl} max={80} />{/if}
       </h3>
       <div class="grid">
         {#if item.from_ts}<span class="k">{t('next.f.effect')}</span><span>{t('next.retroFrom', { time: hhmm(item.from_ts, { seconds: true }) })}</span>{/if}
@@ -162,7 +171,7 @@
       </div>
       {#if item.excerpt}
         <div class="excerpt">
-          <span class="ex-note">{item.excerpt.note ? t('next.ambiguous', { note: '' }) : t('next.ambiguousPlain')}{#if item.excerpt.note}<Txt value={item.excerpt.note} max={120} />{/if}</span>
+          <span class="ex-note">{excerptNote(item.excerpt)}</span>
           {#each item.excerpt.text as l, i (i)}<span class="ex-line"><Txt value={l} mono ctrl={item.excerpt.ctrl} max={240} /></span>{/each}
         </div>
       {/if}
@@ -194,7 +203,7 @@
       <div class="grid">
         <span class="k">{t('next.f.value')}</span><span class="mono"><Txt value={item.fact.value} mono ctrl={item.fact.ctrl} max={200} /></span>
         <span class="k">{t('next.f.reason')}</span><span>{t(`next.reason.${['important_heuristic', 'offered', 'suspect', 'ai', 'ocr'].includes(item.reason) ? item.reason : 'other'}` as MessageKey)}</span>
-        {#if item.unit}<span class="k">{t('next.f.source')}</span><span><Txt value={item.unit.title} mono ctrl={item.unit.ctrl} max={80} />{#if item.unit.ts}{' · '}{hhmm(item.unit.ts)}{/if}</span>{/if}
+        {#if item.unit}<span class="k">{t('next.f.source')}</span><span><Txt value={item.unit.title} mono ctrl={item.unit.ctrl} max={80} />{#if item.unit.ts}{DOT}{hhmm(item.unit.ts)}{/if}</span>{/if}
       </div>
       {#if item.fact.suspect || item.fact.from_target}
         <p class="flags">
