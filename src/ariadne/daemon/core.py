@@ -577,6 +577,10 @@ class Daemon:
             use_global = bool(self.project.settings.get("secrets", {}).get("use_global", True))
         if self.operator is not None and use_global:
             secrets.extend(self.operator.own_secrets)
+        if self.operator is not None:
+            # API-Keys aus dem Tresor sind immer eigene Secrets, auch ohne globale Liste (E72, E99)
+            op = self.operator
+            secrets.extend((f"api_key:{n}", v) for n in op.api_key_names() if (v := op.get_api_key(n)))
         self.redactor.update_secrets(secrets)
 
     def _lock_operator(self, *, notify: bool = True, always: bool = False) -> None:

@@ -9,12 +9,15 @@
 Fehler der Aufnahme haben eigene Codes (``shot_display``, ``shot_wayland``, ``shot_window``,
 ``shot_region``, ``shot_failed``, alle 503) mit festen Texten im gemeinsamen Fehlerformat.
 Fenstertitel sind Zieldaten: Ausgang nur über :meth:`Api.respond` (Redaktor, sichtbare Zeichen).
+Fenstertitel und Notiz werden zudem mit den bekannten Secret-Werten (``secret_value``) maskiert wie in
+Suche, Belegen und Denkanstössen (E99): Ein Ziel kann den Titel setzen (OSC-Titel, Browser).
 
 Besitzer: Teil «screenshots» (Bau v0.1-Screenshots).
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Query
@@ -24,7 +27,8 @@ from starlette.responses import Response
 from ariadne.daemon.ops_util import OpError
 from ariadne.web.api.common import Api, valid_tid
 from ariadne.web.api.errors import ApiError, JsonResponse, from_ctl
-from ariadne.web.api.text import iso
+from ariadne.web.api.text import iso, mask_known
+from ariadne.web.api.views import secret_values
 
 __all__ = ["add_routes", "shot_view", "SHOT_STATUS"]
 
@@ -74,8 +78,16 @@ def _int(v: Any) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
-def shot_view(pid: str, h: dict[str, Any], *, presentation: bool) -> dict[str, Any]:
-    """Ein Screenshot für die API (nur bekannte Felder mit Typprüfung)."""
+def _masked(v: Any, known: Sequence[str]) -> str | None:
+    t = _str(v)
+    return mask_known(t, known) if t is not None else None
+
+
+def shot_view(
+    pid: str, h: dict[str, Any], *, presentation: bool, known: Sequence[str] = ()
+) -> dict[str, Any]:
+    """Ein Screenshot für die API (nur bekannte Felder mit Typprüfung). ``known``: bekannte Secret-Werte,
+    längste zuerst; sie werden in Fenstertitel und Notiz maskiert."""
     blob_id = _str(h.get("blob_id"))
     out = {
         "id": _str(h.get("id")),
@@ -90,13 +102,13 @@ def shot_view(pid: str, h: dict[str, Any], *, presentation: bool) -> dict[str, A
         "height": _int(h.get("height")),
         "sha256": _str(h.get("sha256")),
         "dhash": _str(h.get("dhash")),
-        "window_title": None if presentation else _str(h.get("window_title")),
+        "window_title": None if presentation else _masked(h.get("window_title"), known),
         "wm_class": None if presentation else _str(h.get("wm_class")),
         "terminal_id": _str(h.get("terminal_id")),
         "stream_off": _int(h.get("stream_off")),
         "host": _str(h.get("host")),
         "host_auto": h.get("host_auto") is True,
-        "note": None if presentation else _str(h.get("note")),
+        "note": None if presentation else _masked(h.get("note"), known),
     }
     return out
 
@@ -122,7 +134,9 @@ def add_routes(router: APIRouter, api: Api) -> None:
             raise from_ctl({"code": exc.code}) from None
         api.same(p)
         presentation = bool(api.daemon.presentation)
-        return await api.respond({"screenshot": shot_view(pid, res, presentation=presentation)}, 201)
+        known = await api.query(p, secret_values)
+        view = shot_view(pid, res, presentation=presentation, known=known)
+        return await api.respond({"screenshot": view}, 201)
 
     @router.get("/p/{pid}/screenshots", name="screenshots_list")
     async def list_(pid: str, limit: int = Query(default=200, ge=1, le=500)) -> Response:  # noqa: B008
@@ -131,7 +145,8 @@ def add_routes(router: APIRouter, api: Api) -> None:
         p = api.project(pid)
         presentation = bool(api.daemon.presentation)
         items = await api.query_journal(p, lambda _conn, journal: list_shots(journal, limit))
+        known = await api.query(p, secret_values)
         return await api.respond({
-            "items": [shot_view(pid, h, presentation=presentation) for h in items],
+            "items": [shot_view(pid, h, presentation=presentation, known=known) for h in items],
             "presentation": presentation,
         })

@@ -60,6 +60,9 @@ REASONS: dict[str, str] = {
     "profile": "Im Profil customer ist die Cloud-KI aus; nur lokal (Ollama).",
     "public_scope": "Öffentliche Adressen im Scope: zuerst «kein Kundenauftrag» im Terminal bestätigen.",
     "busy": "Ein KI-Auftrag läuft schon.",
+    "no_project": (
+        "Für die Cloud-KI zuerst ein Projekt öffnen: ariadne start <slug>, danach ariadne ai allow-cloud."
+    ),
 }
 
 JOB_TEXT: dict[str, str] = {

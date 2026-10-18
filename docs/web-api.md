@@ -1308,7 +1308,10 @@ interface AiJob {
   dropped: number;                      // verworfene Einträge (Prüfung), davon
   injection_suspect: number;            //   als Injection-Verdacht gezählt
   refusal: { category: string | null; text: string } | null;   // Ablehnung des Modells, wörtlich (Klartext)
-  error: null | 'unreachable' | 'auth' | 'schema' | 'truncated' | 'project_changed' | 'internal';
+  error: null | 'unreachable' | 'auth' | 'schema' | 'truncated' | 'project_changed' | 'internal'
+    | 'model'        // Modell-ID beim Anbieter unbekannt (404) oder in Ollama nicht geladen
+    | 'overloaded'   // 429, 503, 529: Ratenlimit oder Überlast
+    | 'tls';         // Kette nicht gültig gegen die Mozilla-Liste (fremde CA, Aufbruch)
   // status 'done' mit created 0: «Keine gültigen Denkanstösse in der Antwort.»
   // lokal nicht erreichbar: error 'unreachable', message «Ollama auf 127.0.0.1 nicht erreichbar: …»
 }

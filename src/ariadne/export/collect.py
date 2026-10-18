@@ -418,7 +418,8 @@ def _shots(
                     check_png(data)
             except Exception:  # noqa: BLE001 - fehlt oder kein kanonisches PNG: nur vermerken
                 data = None
-        title = h.get("window_title") or h.get("note")
+        title, note, host = h.get("window_title"), h.get("note"), h.get("host")
+        tid, off = h.get("terminal_id"), h.get("stream_off")
         out.append(
             {
                 "unit_id": None,
@@ -426,6 +427,10 @@ def _shots(
                 "ts": iso_ms(r.ts_utc_ns),
                 "data": data if isinstance(data, bytes) and len(data) <= _IMG_MAX else None,
                 "title": m.target(title) if isinstance(title, str) and title else None,
+                "note": m.target(note) if isinstance(note, str) and note else None,
+                "host": m.target(host) if isinstance(host, str) and host else None,
+                "terminal_id": tid if isinstance(tid, str) and tid else None,
+                "stream_off": off if isinstance(off, int) and not isinstance(off, bool) else None,
             }
         )
     return out

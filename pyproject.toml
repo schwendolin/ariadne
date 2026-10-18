@@ -22,6 +22,8 @@ dependencies = [
   "tomlkit>=0.12",
   "pyte>=0.8",
   "anthropic>=1.0",
+  # Mozilla-Liste für die Cloud-KI: TLS nie gegen den Zertifikatsspeicher des Systems (E98)
+  "certifi>=2024.2.2",
   "mss>=9",
   "python-xlib>=0.33",
 ]
@@ -44,7 +46,11 @@ packages = ["src/ariadne"]
 artifacts = ["src/ariadne/web/static/**"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["webui/node_modules", "webui/dist", "webui/test-results", ".venv"]
+# Hatch liest nur die .gitignore im Wurzelverzeichnis: alles aus webui/.gitignore hier ausdrücklich ausschliessen
+exclude = [
+  "webui/node_modules", "webui/dist", "webui/test-results", "webui/.e2e", "webui/.vite",
+  "webui/coverage", "webui/playwright-report", "webui/**/*.log", ".venv",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

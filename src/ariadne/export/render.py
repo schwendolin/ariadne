@@ -468,6 +468,24 @@ def _beleg(b: Any) -> str:
     return "\n".join(out)
 
 
+def _shot_context(im: Mapping[str, Any]) -> list[str]:
+    """Zusammenhang eines Screenshots (Notiz, Fenstertitel, Host, Terminal mit Stream-Offset). Notiz,
+    Titel und Host sind Zieldaten: schon maskiert (collect), hier nur Markdown-sicher."""
+    out: list[str] = []
+    if im.get("note"):
+        out.append(f"  - Notiz: {_t(im['note'])}")
+    if im.get("title"):
+        out.append(f"  - Fenster: {_t(im['title'])}")
+    if im.get("host"):
+        out.append(f"  - Host: {_t(im['host'])}")
+    tid = im.get("terminal_id")
+    if isinstance(tid, str) and tid:
+        off = im.get("stream_off")
+        where = f", Stream-Offset {off}" if isinstance(off, int) and not isinstance(off, bool) else ""
+        out.append(f"  - Terminal: {_t(tid)}{where}")
+    return out
+
+
 def _images(data: Mapping[str, Any]) -> str:
     out = ["# Screenshots", "", _HINWEIS, ""]
     for im in data["images"]:
@@ -476,5 +494,6 @@ def _images(data: Mapping[str, Any]) -> str:
             out.append(f"- {_ts(im['ts'])}: {_link(name)}")
         else:
             out.append(f"- {_ts(im['ts'])}: Bild nicht exportiert (fehlt oder kein PNG)")
+        out += _shot_context(im)
     out.append("")
     return "\n".join(out)

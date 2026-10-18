@@ -24,6 +24,13 @@ ariadne status
 
 Öffne zwei Terminals: eines in QTerminal, eines in der Webkonsole (Terminal im Kali-Desktop über den Browser). Beide sollen in `ariadne status` erscheinen.
 
+Trage dein sudo-Passwort als **eigenes Secret** ein (Eingabe ohne Echo). Nur eingetragene Werte ersetzt Ariadne vor Export und KI; ohne diesen Schritt kann Schritt 11 nichts zeigen:
+
+```sh
+ariadne secrets add sudo
+ariadne secrets list      # «Eigene Secrets: sudo»
+```
+
 ## 3 Scan
 
 ```sh
@@ -31,6 +38,15 @@ nmap -sV -sC 192.168.56.101 -oX ~/ms2-sv-sc.xml
 ```
 
 Öffne `ariadne ui` (Firefox in der Kali). Erwartet: ein Host mit etwa 20 Diensten auf der Karte, in «Als Nächstes» **ein** Denkanstoss «Versionen recherchieren: 192.168.56.101 (… Dienste)» mit der Liste und je einem `searchsploit`-Befehl zum Kopieren (E119).
+
+**Optional: KI-Denkanstoss.** Nur wenn du die KI nach [Installation](installation.md) 2 eingerichtet hast (`ariadne ai setup`, `ariadne ai check` ohne `fail`):
+
+```sh
+ariadne ai allow-cloud    # nur bei Anbieter cloud
+ariadne ai status         # «bereit», Verbrauch des Monats notieren
+```
+
+Im Dashboard unter «Als Nächstes» «Denkanstoss anfordern (KI)» drücken. Erwartet: Fortschritt mit Tokens und Zahl der maskierten Werte, danach ein bis drei KI-Denkanstösse. Einen davon «erledigt», einen «verwerfen». Danach `ariadne ai status`: Verbrauch gestiegen. Bei einem Fehler die Meldung im Dashboard wörtlich notieren (z. B. Modell-ID unbekannt, Ollama ohne Modell, TLS-Aufbruch, Ablehnung).
 
 ## 4 Exploit
 
@@ -86,9 +102,18 @@ ariadne export --template cys
 ariadne export --liste
 ```
 
-Öffne die Markdown-Datei. Eigene Secrets (z. B. dein sudo-Passwort) müssen als `****` erscheinen.
+Öffne die Markdown-Dateien (`02 Writeup.md`, `Belege/*.md`). Erwartet:
+
+- Eigene Secrets aus Schritt 2 (dein sudo-Passwort), wo sie im Klartext standen (z. B. `echo PASSWORT | sudo -S id`): als Sternchen gleicher Länge. Im Rohtext der Datei stehen sie mit Backslash (`\*\*\*\*…`), in einer Markdown-Vorschau als `****…`.
+- Eingaben ohne Echo (Passwortabfrage von `sudo`, `ssh`): als `••••••••`.
+- Bekannte Credentials aus dem Ziel (Hashes, Passwörter aus Ausgaben): als `••••••••`.
+- Unter `Belege/Screenshots.md` das Bild aus Schritt 10 mit Notiz «root-Shell», Fenster und Terminal.
+
+Steht dein sudo-Passwort irgendwo im Klartext: Problem, Datei und Zeile notieren (nicht das Passwort).
 
 ## 12 Stop und Sicherung
+
+Voraussetzung: Empfänger der Sicherung in `~/.config/ariadne/backup-recipients.txt` (siehe [Installation](installation.md) 1). Fehlt die Datei, bricht `backup` mit «Keine Empfänger für die Sicherung» ab.
 
 ```sh
 ariadne stop
@@ -118,7 +143,8 @@ Pro Punkt: **ok**, **Problem** (was genau, Uhrzeit) oder **nicht geprüft**.
 | 12 | Denkanstoss «Versionen recherchieren» ein Mal pro Host, Liste vollständig, Befehle kopierbar | |
 | 13 | Scope-Warnung als erster Eintrag, Quittieren wirkt, kommt bei neuem Ziel ausserhalb wieder | |
 | 14 | Pause: nichts aus der Pause in der Zeitachse | |
-| 15 | Export: lesbar, eigene Secrets ersetzt | |
+| 15 | Export: lesbar, eigenes Secret (sudo) als Sternchen, Eingaben ohne Echo als `••••••••`, Screenshot mit Notiz | |
+| 15a | Optional KI: Ergebnis (Anzahl Denkanstösse, brauchbar?), Kosten laut `ariadne ai status`, Meldung bei Fehlern wörtlich, erledigt/verwerfen wirkt | |
 | 16 | Sicherung: Datei vorhanden, Kettenkopf notiert | |
 | 17 | Sonst aufgefallen (Geschwindigkeit, Abstürze, unklare Texte) | |
 

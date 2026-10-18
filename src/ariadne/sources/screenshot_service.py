@@ -252,7 +252,27 @@ async def op_shot_take(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
                          note=args.get("note"))
     except shot.ShotError as exc:
         raise OpError(exc.code, shot.SHOT_ERRORS[exc.code]) from None
+    res = await _mask_known_secrets(d, res)
     out, _labels = d.redactor.redact_json(res)
+    return out
+
+
+async def _mask_known_secrets(d: Daemon, res: dict[str, Any]) -> dict[str, Any]:
+    """Fenstertitel und Notiz für die CLI mit den bekannten Secret-Werten maskieren (E99). Ist die
+    Auswertung nicht bereit, fallen beide Felder weg (lieber nichts als Klartext)."""
+    from ariadne.web.api.text import mask_known
+    from ariadne.web.api.views import secret_values
+
+    out = dict(res)
+    try:
+        ing = await d._sync_ingest()
+        known = await ing.query(secret_values)
+    except Exception:
+        out["window_title"] = out["note"] = None
+        return out
+    for k in ("window_title", "note"):
+        if isinstance(out.get(k), str):
+            out[k] = mask_known(out[k], known)
     return out
 
 

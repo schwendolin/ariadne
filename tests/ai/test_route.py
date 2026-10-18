@@ -328,3 +328,144 @@ def test_ctl_status_and_key_never_returned(paths, operator):
         assert job["status"] == "failed" and job["error"] == "unreachable" and "Ollama" in job["message"]
 
     run_api(paths, operator, body)
+
+
+# --------------------------------------------------------------------------- Befunde der Prüfung (Etappe 4)
+
+KEY_CANARY = "sk-ant-api03-REVIEWCANARY0123456789abcdef"
+
+
+def test_api_key_is_own_secret_at_every_exit(paths, operator):
+    """SEC4-KI-2: Der API-Key aus dem Operator-Tresor ist ein eigenes Secret des Redaktors. Steht er in einer
+    aufgenommenen Ausgabe, gibt ihn weder ``redact_for_exit`` noch Zeitachse noch Export wörtlich aus."""
+
+    async def body(d, c, fx, bus, ctx):
+        from ariadne.export import service
+
+        assert (await d.call("ai.key.set", {"value": KEY_CANARY}))["ok"]
+        _red, labels = d.redactor.redact_for_exit(f"x {KEY_CANARY} y")
+        assert labels and KEY_CANARY not in str(_red)
+        await fx.term.command(
+            "python3 -c 'import os; print(os.environ)'",
+            f"environ({{'ANTHROPIC_API_KEY': '{KEY_CANARY}'}})\r\n".encode(),
+            cwd=str(fx.ws),
+        )
+        await sync(d)
+        r = await c.get(f"{BASE}/p/{fx.pid}/timeline")
+        assert r.status_code == 200 and "REVIEWCANARY" not in r.text
+        out = await service.run_export(d, template="cys")
+        exp = fx.ws / out["path"]
+        hits = [p.name for p in exp.rglob("*.md") if "REVIEWCANARY" in p.read_text("utf-8")]
+        assert hits == []
+        # nach dem Entfernen ist der Key kein Muster mehr (der Redaktor folgt dem Tresor)
+        assert (await d.call("ai.key.remove", {}))["ok"]
+        assert d.redactor.redact_for_exit(f"x {KEY_CANARY} y")[1] == []
+
+    run_api(paths, operator, body)
+
+
+def test_ai_state_survives_reparse(paths, operator):
+    """R7: Erledigt und verworfen bleiben bei KI-Denkanstössen über ``reparse`` erhalten."""
+    from tests.core.fakeshim import ctl as ctl_call
+
+    async def body(d, c, fx, bus, ctx):
+        P = f"{BASE}/p/{fx.pid}"
+        await _setup(d, paths)
+        await d.call("ai.allow_cloud", {})
+        second = _item(art="frage", titel="Zweite Frage", vorlagen=[], belege=["S1"])
+        tr = Transport(_message(json.dumps(_answer([_item(), second]))))
+        ctx.extra["ai"].provider_factory = tr.factory
+        r = await c.post(f"{P}/ai/denkanstoss", json={})
+        job = await _wait(c, P, r.json()["job"]["job_id"])
+        assert job["status"] == "done", job
+        await sync(d)
+        items = (await c.get(f"{P}/ai/denkanstoesse")).json()["suggestions"]
+        assert len(items) == 2, items
+        a, b = items
+        done = {"suggestion_key": a["suggestion_key"], "basis": a["basis"]}
+        r = await c.post(f"{P}/decisions", json={"decisions": [
+            {"kind": "d.suggestion.done", "payload": done},
+            {"kind": "d.suggestion.dismiss", "payload": {"suggestion_key": b["suggestion_key"]}},
+        ]})
+        assert r.status_code == 201, r.text
+        await sync(d)
+
+        async def states() -> dict[str, str]:
+            got = (await c.get(f"{P}/suggestions", params={"state": "all"})).json()["suggestions"]
+            return {s["suggestion_key"]: s["state"] for s in got if s["origin"] == "ai"}
+
+        before = await states()
+        assert (await ctl_call(paths.ctl_sock, "reparse"))["ok"]
+        await sync(d)
+        after = await states()
+        nxt = [s["suggestion_key"] for s in (await c.get(f"{P}/next")).json()["suggestions"]
+               if s.get("origin") == "ai"]
+        assert before == after == {a["suggestion_key"]: "done", b["suggestion_key"]: "dismissed"}
+        assert nxt == []
+
+    run_api(paths, operator, body)
+
+
+def test_fallback_content_with_partial_text_ends_done(paths, operator):
+    """R1: serverseitiger Fallback mit Teiltext des ablehnenden Modells vor dem ``fallback``-Block."""
+
+    async def body(d, c, fx, bus, ctx):
+        P = f"{BASE}/p/{fx.pid}"
+        await _setup(d, paths)
+        await d.call("ai.allow_cloud", {})
+        msg = _message(json.dumps(_answer([_item()])))
+        good = msg["content"][0]
+        msg["content"] = [
+            {"type": "text", "text": '{"anstoesse": ['},
+            {"type": "fallback", "from": {"model": "test-model"}, "to": {"model": "test-model-2"},
+             "trigger": {"type": "refusal", "category": "cyber"}},
+            good,
+        ]
+        msg["model"] = "test-model-2"
+        ctx.extra["ai"].provider_factory = Transport(msg).factory
+        r = await c.post(f"{P}/ai/denkanstoss", json={})
+        job = await _wait(c, P, r.json()["job"]["job_id"])
+        assert job["status"] == "done" and job["created"] == 1, job
+
+    run_api(paths, operator, body)
+
+
+def test_ai_scope_name_only_with_verdict_in(paths, operator):
+    """SEC4-KI-3: Ein Name, der keinen Scope verleiht (PTR, nmap, Urteil ``out``), geht nicht ins Lagebild,
+    auch nicht als erlaubte Adresse für den Freitext."""
+
+    async def body(d, c, fx, bus, ctx):
+        from ariadne.ai.situation import build_situation
+        from ariadne.rules.engine import evaluate
+
+        nmap = (
+            b"Nmap scan report for dc01.kunde-ag.ch (10.10.10.3)\r\n"
+            b"Host is up (0.00030s latency).\r\n"
+            b"PORT   STATE SERVICE VERSION\r\n"
+            b"22/tcp open  ssh     OpenSSH 4.7p1\r\n\r\n"
+            b"Nmap done: 1 IP address (1 host up) scanned in 1.00 seconds\r\n"
+        )
+        await fx.term.command("nmap -sV 10.10.10.3", nmap, cwd=str(fx.ws))
+        await sync(d)
+        ing = await d._sync_ingest()
+        verdicts = await ing.query(lambda conn: dict(evaluate(conn, profile="lab")[0].name_verdict))
+        assert verdicts.get("dc01.kunde-ag.ch") == "out", verdicts
+        sit = await ing.query(lambda conn: build_situation(conn, profile="lab", redactor=d.redactor))
+        assert "kunde-ag" not in sit.text
+        assert not any("kunde-ag" in a for a in sit.allowed_addrs)
+        assert any(ln.startswith("H") and "10.10.10.3" in ln for ln in sit.text.splitlines())
+
+    run_api(paths, operator, body)
+
+
+def test_ctl_status_without_project_says_no_project(paths, operator):
+    """R6: Ohne offenes Projekt nennt ``ai.status`` nicht ``allow-cloud`` (das ginge ohne Projekt nicht)."""
+
+    async def body(d, c, fx, bus, ctx):
+        await _setup(d, paths)
+        assert (await d.call("project.close", {}))["ok"]
+        out = (await d.call("ai.status", {}))["result"]
+        assert out["project"] is None and out["reason"] == "no_project", out
+        assert "ariadne start" in out["reason_text"] and "allow-cloud" in out["reason_text"]
+
+    run_api(paths, operator, body)

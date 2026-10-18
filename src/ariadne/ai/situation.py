@@ -179,7 +179,9 @@ def build_situation(
         ip = enc.ip(h.ip) if h.ip else "-"
         if ip not in ("-", CUT):
             local_addrs.add(ip)
-        _addrs, names = h.addr_names()
+        # Nur Namen mit Urteil «in»: Namen aus PTR, nmap oder TLS verleihen nie Scope (Urteil «out») und
+        # entgingen sonst der Sperre public_scope (project_flags prüft nur Namen im Scope).
+        names = [n for n, v in h.names if v == "in"]
         name_txt = ""
         if names:
             nm = enc.name(names[0])

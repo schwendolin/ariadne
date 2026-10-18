@@ -229,7 +229,8 @@ def test_render_write_with_screenshot(tmp_path):
         "timeline": [],
         "credentials": [{"kind": "-----BEGIN OPENSSH PRIVATE KEY-----", "value": MASK, "ref": "s1"}],
         "images": [
-            {"unit_id": "i1", "sha256": sha, "ts": None, "data": png, "title": None},
+            {"unit_id": "i1", "sha256": sha, "ts": None, "data": png, "title": "root@ms2: ~ *fett*",
+             "note": "root-Shell", "host": "10.10.10.3", "terminal_id": "t-abc", "stream_off": 4096},
             {"unit_id": "i2", "sha256": None, "ts": None, "data": None, "title": None},
         ],
         "masked": 0,
@@ -239,6 +240,9 @@ def test_render_write_with_screenshot(tmp_path):
     assert (root / "Belege" / "img" / f"{sha[:16]}.png").read_bytes() == png
     shots = (root / "Belege" / "Screenshots.md").read_text("utf-8")
     assert f"img/{sha[:16]}.png" in shots and "nicht exportiert" in shots
+    # R5: Zusammenhang des Bildes (Notiz, Fenster, Host, Terminal), Markdown-sicher
+    assert "Notiz: root\\-Shell" in shots and "Host: 10.10.10.3" in shots
+    assert "Stream-Offset 4096" in shots and "*fett*" not in shots
     assert unsafe_markdown(shots) == []
     wu = (root / "02 Writeup.md").read_text("utf-8")
     assert "Lessons Learned" in wu and "Privilege Escalation" in wu

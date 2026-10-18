@@ -153,3 +153,19 @@ def test_stamp_script_writes_the_same_manifest(tmp_path):
     assert data["files"] == ui_files(static) and data["source_sha256"] == ui_source_hash(web)
     script = (ROOT / "scripts" / "build-ui.sh").read_text(encoding="utf-8")
     assert "npm run build" in script and "scripts/ui_stamp.py" in script and "npm install" not in script
+
+
+def test_sdist_excludes_everything_webui_ignores():
+    """SEC4-PKG-1: Hatch wertet nur die .gitignore der Wurzel aus. Was webui/.gitignore ausschliesst
+    (Testausgaben, Screenshots aus Durchläufen), muss im sdist ausdrücklich fehlen."""
+    import tomllib
+
+    conf = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    exclude = set(conf["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"])
+    for line in (ROOT / "webui" / ".gitignore").read_text(encoding="utf-8").splitlines():
+        entry = line.strip().rstrip("/")
+        if not entry or entry.startswith("#"):
+            continue
+        want = f"webui/**/{entry}" if entry.startswith("*") else f"webui/{entry}"
+        assert want in exclude, f"{want} fehlt in [tool.hatch.build.targets.sdist] exclude"
+    assert any(d.startswith("certifi") for d in conf["project"]["dependencies"])

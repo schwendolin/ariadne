@@ -68,6 +68,14 @@ describe('KI: Anzeige (ai/view)', () => {
     expect(aiResultText({ ...base, status: 'done', error: null, created: 0 })).toBe('Keine neuen Denkanstösse');
     expect(aiResultText({ ...base, status: 'done', error: null, created: 2 })).toBe('2 neue KI-Denkanstösse');
   });
+
+  it('Ergebnis: Modell fehlt, Überlast, TLS-Aufbruch (eigene Texte)', () => {
+    const base = { status: 'failed', error: 'model', provider: 'local', created: 0 } as AiJob;
+    expect(aiResultText(base)).toContain('ollama pull');
+    expect(aiResultText({ ...base, provider: 'cloud' })).toContain('Modell-ID');
+    expect(aiResultText({ ...base, error: 'overloaded' })).toContain('ausgelastet');
+    expect(aiResultText({ ...base, provider: 'cloud', error: 'tls' })).toContain('ai check');
+  });
 });
 
 describe('KI: Auftrag im Mock wie der Daemon', () => {

@@ -96,6 +96,12 @@ export function aiResultText(job: AiJob): string {
       return t('next.ai.err.truncated');
     case 'project_changed':
       return t('next.ai.err.project_changed');
+    case 'model':
+      return t(job.provider === 'local' ? 'next.ai.err.modelLocal' : 'next.ai.err.model');
+    case 'overloaded':
+      return t('next.ai.err.overloaded');
+    case 'tls':
+      return t('next.ai.err.tls');
     default:
       return t('next.ai.err.internal');
   }

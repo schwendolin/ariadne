@@ -73,6 +73,8 @@ async def op_status(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
         if cfg is not None
         else "config"
     )
+    if p is None and reason in ("cloud_not_allowed", "public_scope"):
+        reason = "no_project"  # Freigabe hängt am Projekt: zuerst eines öffnen
     return {
         "provider": cfg.provider if cfg is not None else None,
         "model": (cfg.model or None) if cfg is not None else None,
@@ -103,6 +105,7 @@ async def op_key_set(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
         raise OpError("invalid", "API-Key enthält unzulässige Zeichen")
     op.set_api_key(KEY_NAME, value)
     await asyncio.to_thread(op.save)
+    d._update_redactor()  # der Key ist ab sofort ein eigenes Secret des Redaktors
     return {"key_present": True}
 
 
@@ -112,6 +115,7 @@ async def op_key_remove(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     if had:
         op.set_api_key(KEY_NAME, None)
         await asyncio.to_thread(op.save)
+        d._update_redactor()
     return {"removed": had, "key_present": False}
 
 

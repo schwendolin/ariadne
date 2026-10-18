@@ -1052,7 +1052,8 @@ export interface AiJob {
   injection_suspect: number;
   /** Ablehnung des Modells, wörtlich (Modelltext, nur als Text) */
   refusal: { category: string | null; text: string } | null;
-  error: null | 'unreachable' | 'auth' | 'schema' | 'truncated' | 'project_changed' | 'internal';
+  error: null | 'unreachable' | 'auth' | 'schema' | 'truncated' | 'project_changed' | 'internal'
+    | 'model' | 'overloaded' | 'tls';
 }
 export interface AiStatus {
   provider: AiProvider;

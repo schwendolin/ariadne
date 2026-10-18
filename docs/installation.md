@@ -90,6 +90,14 @@ ariadne init              # Operator-Tresor mit Passphrase (mindestens 8 Zeichen
 
 Nach einem VM-Reset mit Sicherung **nicht** `init`, sondern zurückspielen (siehe [Anleitung Fernzugriff](anleitung-fernzugriff.md) 8).
 
+**Empfänger der Sicherung** eintragen, sonst bricht `ariadne backup` mit «Keine Empfänger für die Sicherung» ab. Ein öffentlicher age-Schlüssel (`age1…`) pro Zeile, mindestens der Mac-Schlüssel und der Recovery-Schlüssel aus [Anleitung Fernzugriff](anleitung-fernzugriff.md) 4 (bei Weg B erledigt das `kali-setup.sh --recipient`):
+
+```sh
+install -d -m 700 ~/.config/ariadne
+printf '%s\n' 'age1…MAC' 'age1…RECOVERY' > ~/.config/ariadne/backup-recipients.txt
+chmod 600 ~/.config/ariadne/backup-recipients.txt
+```
+
 ## 2 KI (optional)
 
 ```sh
@@ -98,9 +106,9 @@ ariadne ai check          # ok, warn oder fail: TLS ohne fremde CA, kein Proxy, 
 ariadne ai status         # Anbieter, Modell, Verbrauch des Monats, Schlüssel vorhanden
 ```
 
-Die Modell-ID setzt du selbst (aus der Liste deines Anbieters); Ariadne kennt keinen Standard. Ohne `ai setup` läuft alles ausser den KI-Denkanstössen. Was an die KI geht, läuft vorher durch den Redaktor (E72).
+Die Modell-ID setzt du selbst (aus der Liste deines Anbieters; lokal zuerst `ollama pull <ID>`); Ariadne kennt keinen Standard. Ist sie falsch, meldet das Dashboard «Modell-ID beim Anbieter unbekannt» bzw. «Modell in Ollama nicht geladen». Ohne `ai setup` läuft alles ausser den KI-Denkanstössen. Was an die KI geht, läuft vorher durch den Redaktor (E72).
 
-- **cloud:** Der API-Key liegt verschlüsselt im Operator-Tresor (darum zuerst `ariadne init`). Pro Projekt braucht es zusätzlich die Freigabe im Terminal: `ariadne ai allow-cloud` (nach `ariadne start`). Im Profil customer und bei öffentlichen Adressen im Scope ohne `--not-customer` bleibt die Cloud gesperrt.
+- **cloud:** Der API-Key liegt verschlüsselt im Operator-Tresor (darum zuerst `ariadne init`) und gilt als eigenes Secret: Steht er in einer Ausgabe, ersetzt ihn Ariadne vor Export, Dashboard und KI. TLS prüft Ariadne nur gegen die Mozilla-Liste (`certifi`), nie gegen CAs, die im System installiert sind (Burp, Schulnetz): Bei einem Aufbruch scheitert die Verbindung, statt den Key durchzureichen. Pro Projekt braucht es zusätzlich die Freigabe im Terminal: `ariadne ai allow-cloud` (nach `ariadne start`). Im Profil customer und bei öffentlichen Adressen im Scope ohne `--not-customer` bleibt die Cloud gesperrt.
 - **local:** Ollama auf `127.0.0.1` (`ollama serve`), Port 11434; ein anderer Port steht in `~/.config/ariadne/ai.toml` unter `[local]` als `port = …`.
 - Die Preise in `ai.toml` unter `[prices]` sind vorsichtige Platzhalter; an die Preisliste deines Modells anpassen, sonst rechnet das Budget zu hoch.
 
@@ -112,7 +120,7 @@ ariadne status
 ariadne ui                # Dashboard im Browser der Kali (Einmal-Code)
 ```
 
-Im Terminal: `F12 s` nimmt einen Screenshot des aktiven Fensters auf (nur X11, Xfce), `ariadne shot monitor` den ganzen Bildschirm. Bericht: `ariadne export` (Vorlage `cys`, mit `--template htb` die HTB-Vorlage) schreibt nach `~/ariadne/<projekt>/exports/`; dasselbe geht im Dashboard über «Export». Vom Mac aus: [Anleitung Fernzugriff](anleitung-fernzugriff.md). Ende der Session: `ariadne stop`, danach `ariadne backup --to-file PFAD.age`.
+Im Terminal: `F12 s` nimmt einen Screenshot des aktiven Fensters auf (nur X11, Xfce), `ariadne shot monitor` den ganzen Bildschirm. Bericht: `ariadne export` (Vorlage `cys`, mit `--template htb` die HTB-Vorlage) schreibt nach `~/ariadne/<projekt>/exports/`; dasselbe geht im Dashboard über «Export». Vom Mac aus: [Anleitung Fernzugriff](anleitung-fernzugriff.md). Ende der Session: `ariadne stop`, danach `ariadne backup --to-file PFAD.age` (braucht die Empfänger aus Abschnitt 1).
 
 ## 4 Aktualisieren und entfernen
 
