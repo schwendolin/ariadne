@@ -29,6 +29,7 @@ import type {
   CopyResult,
   DecisionInput,
   DecisionResponse,
+  DecisionResult,
   FactSources,
   FindingDetail,
   FindingSummary,
@@ -46,6 +47,10 @@ import type {
   PrefsView,
   ProjectView,
   RevealResponse,
+  ScopeChange,
+  ScopeChangeResult,
+  ScopeOptions,
+  ScopeView,
   SearchResult,
   SecretRef,
   SeenView,
@@ -68,6 +73,7 @@ import * as e4 from './data/etappe4';
 import * as history from './data/history';
 import { applyHistoryDecision } from './handlers/history';
 import { applyMapDecision } from './handlers/map';
+import { applyScopeChange, revokeScopeDecision, scopeOptions, scopeView } from './handlers/scope';
 import { createState, newDecisionId, scenarioFromLocation, type MockState, type Scenario } from './state';
 
 /**
@@ -167,7 +173,9 @@ export class MockBackend implements Backend {
     return this.wait(() => {
       const s = this.state;
       const st = base.status(s.terminals, s.generation, s.presentation, s.origin);
+      if (s.scopeWarning) st.scope_warning = s.scopeWarning;
       if (st.scope_warning) st.scope_warning = { ...st.scope_warning, acked: s.scopeAcked };
+      if (st.project) st.project = { ...st.project, profile: s.profile };
       if (s.scenario === 'noproject') {
         return { ...st, project: null, active: null, terminals: st.terminals.map((t) => ({ ...t, state: 'preroll' as const, pause_until: null, ordinal: null, label: null })), idle: null, generation: null, scope_warning: null, preroll: { ...st.preroll, terminals: 3, seconds: 900 } };
       }
@@ -243,7 +251,8 @@ export class MockBackend implements Backend {
   project(pid: string): Promise<ProjectView> {
     return this.wait(() => {
       this.check(pid);
-      return base.project();
+      const sc = this.state.scope;
+      return { ...base.project(), profile: this.state.profile, scope: { include: [...sc.include], exclude: [...sc.exclude], version: sc.version } };
     });
   }
   graph(pid: string, _layers?: GraphLayer[]): Promise<GraphView> {
@@ -291,6 +300,60 @@ export class MockBackend implements Backend {
     });
   }
 
+  // ------------------------------------------------------------------ Scope erweitern (E129, E130)
+  scope(pid: string): Promise<ScopeView> {
+    return this.wait(() => {
+      this.check(pid);
+      return scopeView(this.state);
+    });
+  }
+  scopeOptions(pid: string, value: string): Promise<ScopeOptions> {
+    return this.wait(() => {
+      this.check(pid);
+      if (!value.trim()) throw err('validation', 422);
+      return scopeOptions(this.state, value);
+    });
+  }
+  changeScope(pid: string, change: ScopeChange): Promise<ScopeChangeResult> {
+    return this.wait(() => {
+      this.check(pid);
+      // E129: im Profil customer nur im Terminal; im Präsentationsmodus nie
+      if (this.state.profile === 'customer' || this.state.presentation) throw err('policy', 403);
+      const r = applyScopeChange(this.state, change, newDecisionId());
+      if (r === 'validation') throw err('validation', 422);
+      if (r === 'conflict') throw err('conflict', 409);
+      this.afterScopeChange(pid);
+      return r;
+    });
+  }
+
+  /** Neuauswertung wie der Daemon: `changes`, danach `inbox` (Klärungen aus E130 fallen weg). */
+  private afterScopeChange(pid: string): void {
+    const s = this.state;
+    setTimeout(() => {
+      this.emit({ name: 'changes', id: null, data: { project_id: pid, generation: s.generation } });
+      this.emit({ name: 'inbox', id: null, data: { project_id: pid, open: s.next.open } });
+    }, 150);
+  }
+
+  /** E130 «Verwerfen» bzw. d.revoke auf eine Scope-Änderung (aus decide) */
+  private scopeDecision(d: DecisionInput, id: string): DecisionResult | null {
+    if (d.kind === 'd.revoke' && typeof d.payload.decision_id === 'string' && revokeScopeDecision(this.state, d.payload.decision_id)) {
+      this.afterScopeChange(base.PID);
+      return { decision_id: id, seq: null, client_ref: null, effect: null };
+    }
+    if (d.kind === 'd.scope.dismiss' && typeof d.payload.item_key === 'string') {
+      const key = d.payload.item_key;
+      const s = this.state;
+      if (!s.next.clarify.some((i) => i.item_key === key)) return { decision_id: null, seq: null, client_ref: null, effect: null };
+      const clarify = s.next.clarify.filter((i) => i.item_key !== key);
+      s.next = { ...s.next, clarify, open: clarify.length };
+      queueMicrotask(() => this.emit({ name: 'inbox', id: null, data: { project_id: base.PID, open: s.next.open } }));
+      return { decision_id: id, seq: null, client_ref: null, effect: null };
+    }
+    return null;
+  }
+
   // ------------------------------------------------------------------ Hosts
   hosts(pid: string): Promise<HostSummary[]> {
     return this.wait(() => {
@@ -324,8 +387,9 @@ export class MockBackend implements Backend {
       this.check(pid);
       const s = this.state;
       const st = base.status(s.terminals, s.generation, s.presentation, s.origin);
+      const sw = s.scopeWarning ?? st.scope_warning;
       // E120: nicht quittierte Scope-Warnung als erster Eintrag der Spalte
-      const warn = !s.scopeAcked && st.scope_warning ? { ...st.scope_warning, acked: false } : null;
+      const warn = !s.scopeAcked && sw ? { ...sw, acked: false } : null;
       return clone({ ...s.next, scope_warning: warn });
     });
   }
@@ -398,7 +462,7 @@ export class MockBackend implements Backend {
       if (decisions.length === 0 || decisions.length > 500) throw err('validation', 422);
       const results = decisions.map((d) => {
         const id = newDecisionId();
-        const r = applyMapDecision(this.state, d, id) ?? applyHistoryDecision(this.state, d, id);
+        const r = this.scopeDecision(d, id) ?? applyMapDecision(this.state, d, id) ?? applyHistoryDecision(this.state, d, id);
         if (!r) throw err('validation', 422);
         if (r.decision_id === null) throw err('conflict', 409);
         this.state.decisions.push({ decision_id: id, kind: d.kind, payload: d.payload });

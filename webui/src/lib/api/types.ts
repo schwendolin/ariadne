@@ -868,7 +868,9 @@ export type DecisionKind =
   | 'd.entity.split' | 'd.status.work' | 'd.status.access' | 'd.note.set' | 'd.tag.add' | 'd.tag.remove'
   | 'd.terminal.label' | 'd.keystep.mark' | 'd.revoke' | 'd.unit.distrust' | 'd.suggestion.done'
   | 'd.suggestion.dismiss' | 'd.finding.create' | 'd.finding.update' | 'd.finding.evidence.add'
-  | 'd.finding.evidence.remove' | 'd.finding.delete';
+  | 'd.finding.evidence.remove' | 'd.finding.delete'
+  /** Entwurf ui (E130): Klärung «In den Scope aufnehmen?» verwerfen */
+  | 'd.scope.dismiss';
 
 export interface DecisionResult {
   decision_id: string | null;

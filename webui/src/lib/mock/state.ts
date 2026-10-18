@@ -30,6 +30,10 @@ import type {
   PendingResponse,
   PositionsView,
   PrefsView,
+  Profile,
+  ScopeChange,
+  ScopeView,
+  ScopeWarning,
   SeenView,
   ServiceView,
   StreamEvent,
@@ -41,6 +45,7 @@ import * as base from './data/base';
 import * as e4 from './data/etappe4';
 import * as history from './data/history';
 import * as map from './data/map';
+import { praxisClarify, praxisWarning } from './handlers/scope';
 
 export const SCENARIOS = [
   'normal', 'calm', 'empty', 'noproject', 'locked', 'held', 'offline', 'many', 'hostile', 'login', 'chain', 'noclip',
@@ -49,6 +54,8 @@ export const SCENARIOS = [
   'grow',
   // Etappe 4: KI-Zustände, E119 gruppierte Versionen
   'ki', 'kiwarn', 'kiover', 'kigone', 'kirefuse', 'kiinject', 'kirun', 'kioff', 'versions',
+  // Praxistest 1: Scope erweitern (E129, E130), Profil customer, Abmeldung mit Grund
+  'praxis', 'customer',
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
@@ -71,6 +78,12 @@ export interface MockState {
   pending: PendingResponse;
   positions: PositionsView;
   scopeAcked: boolean;
+  /** Scope-Warnung (Status und Spalte); null: Standard aus base.status */
+  scopeWarning: ScopeWarning | null;
+  /** Scope des Projekts (E129) und Profil */
+  scope: Omit<ScopeView, 'editable'>;
+  profile: Profile;
+  scopeDecisions: { decision_id: string; change: ScopeChange }[];
   /** Etappe 4: KI-Modus, letzter Auftrag, Screenshots, Exporte, Phasenkorrekturen */
   aiMode: e4.AiMode;
   aiJob: AiJob | null;
@@ -131,6 +144,10 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     pending: history.pending(),
     positions: { positions: {}, updated_at: null },
     scopeAcked: true,
+    scopeWarning: null,
+    scope: { include: [base.SCOPE], exclude: [], windows: [], version: 1 },
+    profile: 'lab',
+    scopeDecisions: [],
     aiMode: AI_MODES[scenario] ?? 'off',
     aiJob: null,
     screenshots: e4.screenshots(),
@@ -144,6 +161,14 @@ export function createState(scenario: Scenario = 'normal'): MockState {
   if (scenario === 'allon') s.terminals = s.terminals.map((x) => ({ ...x, state: 'on' as const, pause_until: null }));
   if (scenario === 'present') s.presentation = true;
   if (scenario === 'scope') s.scopeAcked = false;
+  if (scenario === 'praxis' || scenario === 'customer') {
+    s.scopeAcked = false;
+    s.scopeWarning = praxisWarning();
+    s.next = { ...s.next, clarify: [...praxisClarify(), ...s.next.clarify] };
+    s.next = { ...s.next, open: s.next.clarify.length };
+    s.scope = { ...s.scope, exclude: ['192.168.56.1'], windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], from: '08:00', to: '18:00', tz: 'Europe/Zurich' }] };
+  }
+  if (scenario === 'customer') s.profile = 'customer';
   if (scenario === 'local') s.origin = 'local';
   if (scenario === 'budget') {
     s.terminals = s.terminals.map((x) =>
