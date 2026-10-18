@@ -38,7 +38,24 @@ export class UiStore {
   notices = $state<Notice[]>([]);
   pulseToken = $state(0);
   pulseIds = $state.raw<Set<string>>(new Set());
+  /**
+   * Ein Formular mit ungespeicherten Änderungen ist offen (Finding, Notiz). Solange sperren die
+   * Reiterkürzel 1 bis 4 und melden das, statt den Entwurf zu verwerfen (Korrektur A6, A11).
+   */
+  dirtyForms = $state.raw<Set<string>>(new Set());
   private nextNotice = 1;
+
+  setDirty(id: string, dirty: boolean): void {
+    if (dirty === this.dirtyForms.has(id)) return;
+    const next = new Set(this.dirtyForms);
+    if (dirty) next.add(id);
+    else next.delete(id);
+    this.dirtyForms = next;
+  }
+
+  get hasDirtyForm(): boolean {
+    return this.dirtyForms.size > 0;
+  }
 
   openDialog(req: DialogRequest): void {
     if (req.kind === 'scope-warning') {

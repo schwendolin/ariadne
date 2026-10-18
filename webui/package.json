@@ -19,8 +19,9 @@
     "lint": "eslint .",
     "test:e2e": "ARIADNE_E2E=mock playwright test --project=mock",
     "test:e2e:daemon": "ARIADNE_E2E=daemon playwright test --project=daemon",
-    "test:e2e:all": "ARIADNE_E2E=all playwright test --project=mock --project=daemon",
-    "shots": "ARIADNE_E2E=mock playwright test --project=shots"
+    "test:e2e:all": "npm run build && ARIADNE_E2E=all playwright test --project=mock --project=daemon --project=nutzer",
+    "shots": "ARIADNE_E2E=mock playwright test --project=shots",
+    "test:e2e:nutzer": "npm run build && ARIADNE_E2E=nutzer playwright test --project=nutzer"
   },
   "dependencies": {
     "cytoscape": "3.34.3",

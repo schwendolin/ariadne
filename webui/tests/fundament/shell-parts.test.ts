@@ -174,8 +174,10 @@ describe('Scope-Warnung (Briefing 4.5)', () => {
     backend.state.scopeAcked = false;
     const onclose = vi.fn(() => (app.ui.scopeCard = false));
     render(ScopeWarningDialog, { props: { app, onclose } });
-    const card = screen.getByRole('alertdialog', { name: /Ziel ausserhalb des Scopes/ });
-    expect(card.getAttribute('aria-modal')).toBe('false');
+    const card = screen.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ });
+    // Korrektur A14: Live-Region (role=alert), nicht modal, nimmt keinen Fokus
+    expect(card.getAttribute('aria-modal')).toBeNull();
+    expect(card.contains(document.activeElement)).toBe(false);
     expect(card.textContent?.replace(/\s+/g, ' ')).toMatch(/T1: nmap -6 -sV -oX scans\/v6\.xml fd00:56::101/);
     expect(card.textContent).toMatch(/fd00:56::101\s*liegt nicht in 192\.168\.56\.0\/24 · gestartet \d\d:\d\d:\d\d/);
     const ack = vi.spyOn(backend, 'ackScopeWarning');

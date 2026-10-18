@@ -20,6 +20,12 @@ async function ready(scenario: Parameters<typeof makeApp>[0] = 'normal') {
   return { ...h, project: h.app.project as ProjectStore };
 }
 
+function clarifyTemplate(p: ProjectStore): NextItem {
+  const it = p.next.clarifyItems[0];
+  if (!it) throw new Error('keine Klärung');
+  return it;
+}
+
 function clarify(p: ProjectStore, kind: NextItem['kind']) {
   const it = p.next.clarifyItems.find((i) => i.kind === kind);
   if (!it) throw new Error(`kein ${kind}`);
@@ -135,16 +141,100 @@ describe('eigene Entscheide', () => {
 });
 
 describe('anderer Tab, Rückkehr ins Dashboard, Lernmodus, Beleg', () => {
-  it('in einem anderen Tab entschieden: Zeile bleibt mit Hinweis stehen, der Cursor springt nicht', async () => {
+  it('ohne Entscheid verschwunden (Auswertung): still «erledigt», kein «anderer Tab», der Cursor springt nicht (A5)', async () => {
     const { project, backend } = await ready();
     const n = project.next;
     const k2key = n.selectedKey;
     backend.state.next = { ...backend.state.next, clarify: backend.state.next.clarify.filter((i) => i.kind !== 'ctx_suggestion'), open: 1 };
     backend.inject({ name: 'inbox', id: null, data: { project_id: project.pid, open: 1 } });
     await until(() => n.done.length === 1);
-    expect(n.done[0]?.state).toBe('other_tab');
+    await settle();
+    expect(n.done[0]?.state).toBe('done');
     expect(n.selectedKey).toBe(k2key);
     expect(n.selectedRow?.type).toBe('done');
+  });
+
+  it('in einem anderen Tab entschieden: nur mit fremdem Entscheid, Zeile bleibt mit Hinweis stehen (A5)', async () => {
+    const { project, backend } = await ready();
+    const n = project.next;
+    const merge = clarify(project, 'merge_suggestion');
+    if (merge.kind !== 'merge_suggestion') throw new Error('merge');
+    n.select(merge.item_key);
+    // ein anderer Tab entscheidet direkt am Server (nicht über diesen Projekt-Store)
+    await backend.decide(project.pid, [{ kind: 'd.entity.merge', payload: { identifiers: merge.identifiers.filter((i) => i.key !== merge.shared).map((i) => i.key) } }]);
+    backend.inject({ name: 'inbox', id: null, data: { project_id: project.pid, open: 1 } });
+    await until(() => n.done.find((d) => d.key === merge.item_key)?.state === 'other_tab');
+    expect(n.selectedKey).toBe(merge.item_key);
+  });
+
+  it('im selben Tab anderswo entschieden (Host-Detail, ctx.decide): «erledigt» mit Rückgängig, nie «anderer Tab» (A5)', async () => {
+    const { project } = await ready();
+    const n = project.next;
+    const merge = clarify(project, 'merge_suggestion');
+    if (merge.kind !== 'merge_suggestion') throw new Error('merge');
+    const res = await project.decide([{ kind: 'd.entity.merge', payload: { identifiers: merge.identifiers.filter((i) => i.key !== merge.shared).map((i) => i.key) } }]);
+    expect(res).not.toBeNull();
+    await until(() => n.done.some((d) => d.key === merge.item_key));
+    await settle();
+    const d = n.done.find((x) => x.key === merge.item_key);
+    expect(d?.state).toBe('done');
+    expect(d?.decisionId).toBe(res?.results[0]?.decision_id);
+  });
+
+  it('neue Klärung reisst die Auswahl ohne `sel` nicht weg (A4)', async () => {
+    const { project, backend } = await ready();
+    const n = project.next;
+    const template = clarifyTemplate(project);
+    // Ruhezustand: alle Klärungen weg, der Cursor steht ohne `sel` auf dem ersten Denkanstoss
+    backend.state.next = { ...backend.state.next, clarify: [], open: 0 };
+    backend.inject({ name: 'inbox', id: null, data: { project_id: project.pid, open: 0 } });
+    await until(() => n.clarifyItems.length === 0);
+    url.set({ sel: null });
+    await settle();
+    const first = n.suggestionItems[0]?.suggestion_key ?? null;
+    n.select(null);
+    url.set({ sel: null });
+    expect(n.rows.find((r) => r.type === 'suggestion')?.key).toBe(first);
+    const extra = { ...template, item_key: 'ctx:neu@1', ordinal: 9 } as NextItem;
+    backend.state.next = { ...backend.state.next, clarify: [extra], open: 1 };
+    backend.inject({ name: 'inbox', id: null, data: { project_id: project.pid, open: 1 } });
+    await until(() => n.clarifyItems.some((i) => i.item_key === 'ctx:neu@1'));
+    expect(n.selectedKey).toBe(first);
+  });
+
+  it('`sel` nur auf dem Reiter Karte in die URL (A19)', async () => {
+    const { project, backend } = await ready();
+    const n = project.next;
+    const merge = clarify(project, 'merge_suggestion');
+    n.select(merge.item_key);
+    url.go('zeitachse', {});
+    await backend.decide(project.pid, [{ kind: 'd.entity.merge', payload: { identifiers: merge.kind === 'merge_suggestion' ? merge.identifiers.filter((i) => i.key !== merge.shared).map((i) => i.key) : [] } }]);
+    backend.inject({ name: 'inbox', id: null, data: { project_id: project.pid, open: 1 } });
+    await until(() => n.done.some((d) => d.key === merge.item_key));
+    await settle();
+    expect(url.route).toBe('zeitachse');
+    expect(url.get('sel')).toBeNull();
+    expect(n.selectedKey).toBe(merge.item_key);
+  });
+
+  it('Denkanstoss in einem anderen Tab verworfen: «In einem anderen Tab entschieden»', async () => {
+    const { project, backend } = await ready();
+    const n = project.next;
+    const key = n.suggestionItems[0]?.suggestion_key ?? '';
+    await backend.decide(project.pid, [{ kind: 'd.suggestion.dismiss', payload: { suggestion_key: key } }]);
+    await until(() => n.done.some((d) => d.key === key));
+    expect(n.done.find((d) => d.key === key)?.state).toBe('other_tab');
+  });
+
+  it('Denkanstoss ohne Entscheid verschwunden (Anlass weg): keine Zeile «anderer Tab»', async () => {
+    const { project, backend } = await ready();
+    const n = project.next;
+    const key = n.suggestionItems[1]?.suggestion_key ?? '';
+    backend.state.next = { ...backend.state.next, suggestions: backend.state.next.suggestions.filter((x) => x.suggestion_key !== key) };
+    backend.inject({ name: 'suggestion', id: null, data: { project_id: project.pid, open: 1 } });
+    await until(() => !n.suggestionItems.some((x) => x.suggestion_key === key));
+    await settle();
+    expect(n.done.some((d) => d.key === key)).toBe(false);
   });
 
   it('Erledigte verschwinden beim nächsten Wechsel ins Dashboard (Tab wieder sichtbar)', async () => {

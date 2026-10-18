@@ -38,6 +38,24 @@
     });
   });
 
+  // Korrektur A13: Das Formular wird durch die Rückmeldung ersetzt; der Fokus geht auf sie (bzw.
+  // auf «Wieder vertrauen») statt auf body.
+  let feedback: HTMLDivElement | undefined = $state();
+  let wasAsking = true;
+  $effect(() => {
+    const ask = asking;
+    const fb = feedback;
+    if (ask) {
+      wasAsking = true;
+      return;
+    }
+    if (!wasAsking || !fb) return;
+    wasAsking = false;
+    const active = document.activeElement;
+    if (active && active !== document.body && document.contains(active)) return;
+    (fb.querySelector<HTMLElement>('button') ?? fb).focus({ preventScroll: true });
+  });
+
   function submit(e: SubmitEvent): void {
     e.preventDefault();
     if (tooLong || undo.phase === 'busy') return;
@@ -78,7 +96,7 @@
     {#if undo.phase === 'error' && undo.error}<p class="error-box" role="alert">{undo.error}</p>{/if}
   </form>
 {:else}
-  <div class="feedback" class:bad={undo.phase === 'trust_error'} role="status" use:fadeIn>
+  <div class="feedback" class:bad={undo.phase === 'trust_error'} role="status" tabindex="-1" bind:this={feedback} use:fadeIn>
     {#if undo.phase === 'done'}
       <span>{t('tl.undo.done', { rejected: undo.effect?.rejected ?? 0, weakened: undo.effect?.weakened ?? 0 })}</span>
       {#if undo.decisionId}

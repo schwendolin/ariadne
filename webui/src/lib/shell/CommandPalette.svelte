@@ -123,7 +123,7 @@
   {#if results.length === 0}
     <p class="empty">{q ? t('palette.empty', { q }) : t('palette.placeholder')}</p>
   {:else}
-    <ul id="palette-list" role="listbox" aria-label={t('palette.title')} bind:this={listEl}>
+    <ul id="palette-list" role="listbox" tabindex="-1" aria-label={t('palette.title')} bind:this={listEl}>
       {#each results as item, i (item.id)}
         {#if i === 0 || results[i - 1]?.group !== item.group}<li class="group" role="presentation">{t(GROUP_LABEL[item.group])}</li>{/if}
         <li role="option" id="palette-opt-{i}" aria-selected={i === index} data-index={i}>

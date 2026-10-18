@@ -13,11 +13,13 @@
   import { onMount, tick } from 'svelte';
   import { t } from '../i18n';
   import { registerKeys } from '../keys/keymap';
+  import { focusInZone, pageKeysActive } from '../keys/page';
   import { attrValue, ipShortener } from '../karte/model';
   import type { AppState } from '../stores/app.svelte';
   import type { Row } from '../stores/next.svelte';
   import type { ProjectStore } from '../stores/project.svelte';
   import Button from '../ui/Button.svelte';
+  import { url } from '../url/state.svelte';
   import ClarifyItem from './ClarifyItem.svelte';
   import DoneRow from './DoneRow.svelte';
   import SuggestionItem from './SuggestionItem.svelte';
@@ -126,21 +128,26 @@
     return true;
   }
 
+  // Korrektur A2: nur ohne offene Tafel. A8: Ist die Host-Tabelle sichtbar, gehören j k ↵ ihr,
+  // ausser der Fokus liegt in der Spalte (feste Zuständigkeit statt Einhängereihenfolge).
+  const page = () => pageKeysActive('karte');
+  const tableShown = () => project.map.tableOnly || url.get('ansicht') === 'tabelle';
+  const listKeys = () => page() && (!tableShown() || focusInZone('next'));
   onMount(() =>
     registerKeys([
-      { keys: ['j'], help: 'help.k.lists', run: () => next.move(1) },
-      { keys: ['k'], run: () => next.move(-1) },
-      { keys: ['Enter'], when: () => !onButton(), run: () => next.openEvidence() },
-      { keys: ['a'], help: 'help.k.decide', when: () => !app.offline, run: primary },
-      { keys: ['x'], when: () => !app.offline, run: reject },
-      { keys: ['e'], when: () => !app.offline, run: edit },
-      { keys: ['u'], when: () => !app.offline, run: undo },
-      { keys: ['n'], help: 'help.k.nextSuggestion', run: () => next.nextSuggestion() },
+      { keys: ['j'], help: 'help.k.lists', when: listKeys, run: () => next.move(1) },
+      { keys: ['k'], when: listKeys, run: () => next.move(-1) },
+      { keys: ['Enter'], when: () => listKeys() && !onButton(), run: () => next.openEvidence() },
+      { keys: ['a'], help: 'help.k.decide', when: () => page() && !app.offline, run: primary },
+      { keys: ['x'], when: () => page() && !app.offline, run: reject },
+      { keys: ['e'], when: () => page() && !app.offline, run: edit },
+      { keys: ['u'], when: () => page() && !app.offline, run: undo },
+      { keys: ['n'], help: 'help.k.nextSuggestion', when: page, run: () => next.nextSuggestion() },
     ]),
   );
 </script>
 
-<section class="next" aria-label={t('next.label')}>
+<section class="next" aria-label={t('next.label')} data-keyzone="next">
   <header class="head">
     <h2>{t('next.title')}</h2>
     {#if app.offline}<p class="quiet">{t('state.offline.column')}</p>{:else if quiet}<p class="quiet">{quiet}</p>{/if}
@@ -192,10 +199,13 @@
       </div>
     {/if}
   </div>
-  <footer class="foot">
-    <Button disabled reason={t('next.askAiDisabled')}>{t('next.askAi')}</Button>
-    <span class="keys">{keysLine}</span>
-  </footer>
+  {#if !app.offline}
+    <!-- Korrektur D12: ohne Verbindung keine Fusszeile (keine Einträge, Aktionen gesperrt) -->
+    <footer class="foot">
+      <Button disabled reason={t('next.askAiDisabled')}>{t('next.askAi')}</Button>
+      <span class="keys">{keysLine}</span>
+    </footer>
+  {/if}
 </section>
 
 <style>
@@ -231,10 +241,15 @@
     flex-direction: column;
     gap: 6px;
   }
+  /* Korrektur D5: Zeilen ohne Abstand (Raster 34 px wie im Design), Abstand nur um die Karte */
   .rows {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 0;
+  }
+  .rows :global(.card) {
+    margin: 4px 0 6px;
+    line-height: 1.3;
   }
   .group-head {
     display: flex;

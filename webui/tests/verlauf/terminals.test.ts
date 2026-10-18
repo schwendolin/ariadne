@@ -413,3 +413,15 @@ describe('Kontext-Dialog', () => {
     expect(spy.mock.calls[0]?.[1]).toEqual({ op: 'set', host: '192.168.56.101', from_off: 20480 });
   });
 });
+
+describe('Terminals: Korrektur A1', () => {
+  it('Enter auf «Pause für T3» öffnet nicht den Kontext-Dialog des gewählten Terminals', async () => {
+    const { view, app } = await mount();
+    const t3 = rowOf(view.container, T3);
+    const btn = within(t3).getByRole('button', { name: /Pause für T3/ });
+    btn.focus();
+    const ev = press('Enter', {}, btn);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(app.ui.dialog).toBeNull();
+  });
+});

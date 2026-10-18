@@ -6,9 +6,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { installKeymap, resetKeymapForTests } from '../../src/lib/keys/keymap';
 import KarteView from '../../src/lib/karte/KarteView.svelte';
-import { hostId } from '../../src/lib/mock/data/base';
+import { at, hostId } from '../../src/lib/mock/data/base';
 import type { ProjectStore } from '../../src/lib/stores/project.svelte';
 import { url } from '../../src/lib/url/state.svelte';
+import { hhmm } from '../../src/lib/util/time';
 import { makeApp, press, settle, stopAll, until } from '../fundament/helpers';
 
 const H101 = hostId('192.168.56.101');
@@ -173,7 +174,8 @@ describe('Spalte «Als Nächstes»', () => {
     await app.prefs.set({ learning: false });
     await settle();
     const sug2 = col.querySelector('.card') as HTMLElement;
-    expect(sug2.textContent).toContain('Beleg: nmap -sV · 14:02 · Zeile 6');
+    // Label vom Server ohne Uhrzeit, die Zeit der Quelle (ts) in Lokalzeit eingesetzt (18.12)
+    expect(sug2.textContent).toContain(`Beleg: nmap -sV · ${hhmm(at('14:02:11.204'))} · Zeile 6`);
     expect(screen.getAllByRole('button', { name: 'Kopieren · Mac' }).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByRole('button', { name: /ausführen/i })).toBeNull();
     expect(screen.getByRole('button', { name: /Denkanstoss anfordern \(KI\)/ }).hasAttribute('disabled')).toBe(true);
@@ -191,7 +193,8 @@ describe('Spalte «Als Nächstes»', () => {
     expect(done.querySelector('.text')?.textContent).toContain('Unauthentisierten Zugriff auf');
     expect(done.querySelector('.text')?.getAttribute('title')).toContain('192.168.56.101:21');
     expect(done.querySelector('button.right')?.textContent).toContain('Rückgängig');
-    expect(done.querySelector('.right kbd')).not.toBeNull();
+    // Korrektur D7: Tastenhinweis «u» nur am gewählten Eintrag (der Cursor steht schon weiter)
+    expect(done.querySelector('.right kbd')).toBeNull();
     // der Cursor steht auf dem nächsten Denkanstoss; Verwerfen
     await fireEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
     await until(() => project.next.done.length === 2);

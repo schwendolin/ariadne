@@ -25,7 +25,7 @@ from ariadne.web.ctx import SessionInfo, WebContext
 if TYPE_CHECKING:
     from ariadne.project.service import OpenProject
 
-__all__ = ["Api", "ALLOWED_OPS", "session_view", "valid_pid", "valid_tid"]
+__all__ = ["Api", "ALLOWED_OPS", "guard_templates", "session_view", "valid_pid", "valid_tid"]
 
 T = TypeVar("T")
 
@@ -61,6 +61,57 @@ def valid_pid(pid: str) -> bool:
 
 def valid_tid(tid: str) -> bool:
     return 8 <= len(tid) <= 64 and set(tid.lower()) <= _HEXDASH
+
+
+_TEMPLATE_KEYS = frozenset({"template_id", "rendered", "command", "parts", "values"})
+
+
+def guard_templates(obj: Any, redactor: Any) -> Any:
+    """Korrektur SEC-RULES-1: Eine fertige Befehlsvorlage (``CommandTemplate``, web-api.md 18.6),
+    in der der Redaktor am Ausgang ein eigenes Secret ersetzen würde, verlöre ihre Zusage aus E68:
+    Aus ``root`` würde ``****``, ein Glob in der Shell. Solche Vorlagen gelten als nicht gerendert
+    (``rendered: false``, ``command: null``, ``parts: []``, ``blocked_reason: 'own_secret'``); die
+    betroffenen Einzelwerte bekommen ``safe: false``. Gibt eine Kopie zurück, wo etwas geändert
+    wurde; der Rest bleibt dasselbe Objekt."""
+
+    def hit(text: Any) -> bool:
+        if not isinstance(text, str) or not text:
+            return False
+        out, _labels = redactor.redact_for_exit(text)
+        return bool(out != text)
+
+    def walk(v: Any, depth: int) -> Any:
+        if depth > 40:
+            return v
+        if isinstance(v, dict):
+            if _TEMPLATE_KEYS <= v.keys() and v.get("rendered") is True and hit(v.get("command")):
+                values = v.get("values")
+                return {
+                    **v,
+                    "rendered": False,
+                    "command": None,
+                    "parts": [],
+                    "blocked_reason": "own_secret",
+                    "values": [
+                        {**x, "safe": False} if isinstance(x, dict) and hit(x.get("value")) else x
+                        for x in (values if isinstance(values, list) else [])
+                    ],
+                }
+            changed = False
+            out: dict[Any, Any] = {}
+            for k, x in v.items():
+                y = walk(x, depth + 1)
+                changed = changed or y is not x
+                out[k] = y
+            return out if changed else v
+        if isinstance(v, list | tuple):
+            items = [walk(x, depth + 1) for x in v]
+            if any(a is not b for a, b in zip(items, v, strict=True)):
+                return type(v)(items)
+            return v
+        return v
+
+    return walk(obj, 0)
 
 
 def session_view(s: SessionInfo) -> dict[str, Any]:
@@ -166,18 +217,28 @@ class Api:
         return Bag(d.redactor, presentation=bool(d.presentation))
 
     async def respond(
-        self, obj: Any, status: int = 200, headers: dict[str, str] | None = None
+        self,
+        obj: Any,
+        status: int = 200,
+        headers: dict[str, str] | None = None,
+        *,
+        multiline: tuple[str, ...] = (),
     ) -> JsonResponse:
         """Ausgang: eigene Secrets ersetzen (E72), danach jeden String sichtbar machen (zweite Schicht).
 
+        ``multiline``: Schlüssel der obersten Ebene mit mehrzeiligem Markdown des Menschen (Notiz,
+        Beschreibung, Massnahme); dort bleiben LF und Tabulator (Korrektur SEC-UI-1/K1).
+
         Läuft in einem Thread, damit grosse Antworten (2000 Logzeilen) die Aufnahme nicht aufhalten;
         der Redaktor liest dabei nur seine Muster."""
-        body = await asyncio.to_thread(self._finish, obj)
+        body = await asyncio.to_thread(self._finish, obj, multiline)
         return JsonResponse(body, status_code=status, headers=headers)
 
-    def _finish(self, obj: Any) -> Any:
-        red, _labels = self.daemon.redactor.redact_json(obj)
-        return deep_visible(red)
+    def _finish(self, obj: Any, multiline: tuple[str, ...] = ()) -> Any:
+        redactor = self.daemon.redactor
+        obj = guard_templates(obj, redactor)
+        red, _labels = redactor.redact_json(obj)
+        return deep_visible(red, multiline)
 
     @staticmethod
     def now_ns() -> int:

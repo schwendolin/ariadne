@@ -25,6 +25,7 @@ __all__ = [
     "MissingSecrets",
     "mask_known",
     "visible_text",
+    "visible_multiline",
     "deep_visible",
     "iso",
     "ns_str",
@@ -46,6 +47,17 @@ def visible_text(text: str) -> str:
         for ch, rep in _SEPARATORS.items():
             out = out.replace(ch, rep)
     return out
+
+
+def visible_multiline(text: str) -> str:
+    """Wie :func:`visible_text`, lässt aber Zeilenumbruch (LF) und Tabulator stehen.
+
+    Nur für mehrzeiligen Markdown-Text des Menschen (Host-Notiz, Beschreibung und Massnahme eines
+    Findings, Korrektur SEC-UI-1/K1): Alle übrigen Steuer-, Bidi-, Zero-Width- und Tag-Zeichen
+    werden sichtbar wie überall, auch CR (``<CR>``)."""
+    if "\n" not in text and "\t" not in text:
+        return visible_text(text)
+    return "\n".join("\t".join(visible_text(p) for p in line.split("\t")) for line in text.split("\n"))
 
 
 def _char_visible(ch: str) -> str:
@@ -101,6 +113,20 @@ class Bag:
             self.ctrl = True
         return out
 
+    def text(self, value: Any) -> str | None:
+        """Mehrzeiliger Markdown-Text des Menschen: wie :meth:`__call__`, aber LF und Tabulator
+        bleiben (:func:`visible_multiline`); ``ctrl`` nur für die übrigen Zeichen. Die Antwort muss
+        das Feld in :meth:`ariadne.web.api.common.Api.respond` als ``multiline`` nennen."""
+        if value is None:
+            return None
+        s = value if isinstance(value, str) else str(value)
+        if self._red is not None and s:
+            s, _labels = self._red.redact_for_exit(s)
+        out = visible_multiline(s)
+        if out != s:
+            self.ctrl = True
+        return out
+
     def cmd(self, value: Any) -> str | None:
         """Befehlstext (oder ein Titel daraus): bekannte Secrets maskiert, dann wie :meth:`__call__`.
 
@@ -128,8 +154,19 @@ class Bag:
         return Bag(self._red, sorted(set(known), key=len, reverse=True), presentation=self.presentation)
 
 
-def deep_visible(obj: Any) -> Any:
-    """Zweite Schicht vor dem Ausliefern: jeder String (auch Schlüssel) ohne Steuerzeichen."""
+def deep_visible(obj: Any, multiline: Iterable[str] = ()) -> Any:
+    """Zweite Schicht vor dem Ausliefern: jeder String (auch Schlüssel) ohne Steuerzeichen.
+
+    ``multiline``: Schlüssel der obersten Ebene eines Objekts, deren String-Wert mehrzeiliger
+    Markdown des Menschen ist (:meth:`Bag.text`); dort bleiben LF und Tabulator stehen."""
+    keep = frozenset(multiline)
+    if keep and isinstance(obj, Mapping):
+        return {
+            (visible_text(k) if isinstance(k, str) else k): (
+                visible_multiline(v) if k in keep and isinstance(v, str) else deep_visible(v)
+            )
+            for k, v in obj.items()
+        }
     if isinstance(obj, str):
         return visible_text(obj)
     if isinstance(obj, Mapping):

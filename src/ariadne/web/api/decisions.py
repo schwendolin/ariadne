@@ -15,8 +15,8 @@ Der einzige allgemeine Schreibweg (Architektur 7.1). Ablauf «alle oder keiner»
 
 from __future__ import annotations
 
+import asyncio
 import json
-import re
 import time
 from collections import OrderedDict
 from typing import Any
@@ -65,8 +65,8 @@ WRITABLE = frozenset(
 CRITICAL = frozenset({"d.scope.update", "d.lab.not_customer"})  # v0.1 nur im Terminal (Briefing 9.10)
 LATER = frozenset({"d.artifact", "d.hypothesis", "d.goal.status"})
 OLD_FINDING = "d.finding"  # altes Modell ohne Felder: ersetzt durch d.finding.* (422)
-_ATTACK_RE = re.compile(r"^T\d{4}(\.\d{3})?$")
-_CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
+_ATTACK_RE = events.ATTACK_ID_RE  # fullmatch, nur ASCII-Ziffern (Korrektur SEC-FIND-1)
+_CVE_RE = events.CVE_ID_RE
 _CTX = frozenset({"d.ctx.set", "d.ctx.push", "d.ctx.pop", "d.ctx.accept"})
 _SUBJECT = frozenset({"d.status.work", "d.status.access", "d.note.set", "d.tag.add", "d.tag.remove"})
 _CACHE_S = 600.0
@@ -134,8 +134,13 @@ def _finding_shape(i: int, kind: str, payload: dict[str, Any]) -> None:
             raise _bad_at(i, [key], typ)
         for j, r in enumerate(refs):
             rid = r.get("id") if isinstance(r, dict) else None
-            if not isinstance(rid, str) or not rx.match(rid):
+            if not isinstance(rid, str) or not rx.fullmatch(rid):
                 raise _bad_at(i, [key, j, "id"], typ)
+            if "supported" in r and not isinstance(r["supported"], bool):  # kein 'yes' als true
+                raise _bad_at(i, [key, j, "supported"], typ)
+    title = payload.get("title")
+    if isinstance(title, str) and not events.title_ok(title):
+        raise _bad_at(i, ["title"], "title")
     affected = payload.get("affected")
     if affected is not None:
         if not isinstance(affected, list):
@@ -308,6 +313,19 @@ def _unit_known(conn: Any, unit_id: Any) -> bool:
     return False
 
 
+def _dup_key(kind: str, h: dict[str, Any]) -> tuple[str, ...] | None:
+    """Bezug eines Entscheids, der in einer Anfrage nur einmal vorkommen darf (Korrektur K5)."""
+    if kind in ("d.suggestion.done", "d.suggestion.dismiss"):
+        return ("suggestion", str(h.get("suggestion_key")))
+    if kind == "d.finding.evidence.remove":
+        return ("evidence", str(h.get("finding_id")), str(h.get("evidence_id")))
+    if kind == "d.finding.delete":
+        return ("delete", str(h.get("finding_id")))
+    if kind == "d.revoke":
+        return ("revoke", str(h.get("decision_id")))
+    return None
+
+
 def _check_refs(
     conn: Any,
     journal: Any,
@@ -320,6 +338,13 @@ def _check_refs(
     Stelle jedes Eintrags in der Anfrage (für ``loc``)."""
     revoked: set[str] | None = None
     findings: _Findings | None = None
+    seen: set[tuple[str, ...]] = set()
+    for kind, h in items:  # Korrektur K5: derselbe Bezug zweimal in einer Anfrage ist ein Konflikt
+        ref = _dup_key(kind, h)
+        if ref is not None:
+            if ref in seen:
+                raise ApiError("conflict")
+            seen.add(ref)
     for n, (kind, h) in enumerate(items):
         i = positions[n] if positions is not None and n < len(positions) else n
         if kind in FINDING_KINDS:
@@ -421,6 +446,9 @@ def _match(records: list[Any], items: list[tuple[str, dict[str, Any]]]) -> list[
 
 def add_routes(router: APIRouter, api: Api) -> None:
     cache = IdempotencyCache()
+    # Korrektur K5: Prüfen und Schreiben eines Projekts nacheinander. Ohne Sperre bestanden zwei
+    # gleichzeitige Anfragen (zwei Tabs, Doppelklick) beide die Prüfung, bevor eine schrieb.
+    locks: dict[str, asyncio.Lock] = {}
 
     @router.post("/p/{pid}/decisions", name="decisions", status_code=201)
     async def post_decisions(pid: str, body: DecisionRequest) -> Response:
@@ -430,6 +458,14 @@ def add_routes(router: APIRouter, api: Api) -> None:
         validated = [
             _validate(i, d.kind, dict(d.payload), profile, alone) for i, d in enumerate(body.decisions)
         ]
+        lock = locks.setdefault(p.info.id, asyncio.Lock())
+        async with lock:
+            api.same(p)
+            return await _post_locked(p, pid, profile, body, validated)
+
+    async def _post_locked(
+        p: Any, pid: str, profile: str, body: DecisionRequest, validated: list[dict[str, Any]]
+    ) -> Response:
         results: list[dict[str, Any] | None] = [cache.get(p.info.id, d.client_ref) for d in body.decisions]
         todo = [i for i, r in enumerate(results) if r is None]
         if not todo:

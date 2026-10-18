@@ -8,11 +8,12 @@
   "evidence": [
    {
     "claim_key": "d306a41a56dd9a1c53facae210a71befdd0c277716e065d3baef4b9c2a8b9401",
-    "label": "nmap -sV -sC · 14:02 · Zeile 6",
+    "label": "nmap -sV -sC · Zeile 6",
     "lines": [
      5,
      5
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -122,11 +123,12 @@
   "evidence": [
    {
     "claim_key": "4c38ea3ce13ce94f243858f6c5c71a6f68e5181eabd23668b0269f4234c78472",
-    "label": "nmap -sV -sC · 14:02 · Zeile 20",
+    "label": "nmap -sV -sC · Zeile 20",
     "lines": [
      19,
      19
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -236,11 +238,12 @@
   "evidence": [
    {
     "claim_key": "8b93c1b7421a1658464141df9f829584e1fc2ffb2b4c2a47274de408aa2546cc",
-    "label": "nmap -sV -sC · 14:02 · Zeile 31",
+    "label": "nmap -sV -sC · Zeile 31",
     "lines": [
      30,
      30
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -350,11 +353,12 @@
   "evidence": [
    {
     "claim_key": "f038c3d26c702ea6e8a89d9bb30a00152cd2377163786461b35be4776c3774aa",
-    "label": "nmap -sV -sC · 14:02 · Zeile 34",
+    "label": "nmap -sV -sC · Zeile 34",
     "lines": [
      33,
      33
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -464,20 +468,22 @@
   "evidence": [
    {
     "claim_key": "ba81615e67da9776437db409fdc088f5d5b7614a8927a1c43176133c2b3aa529",
-    "label": "nmap -sV -sC · 14:02 · Zeilen 103 bis 109",
+    "label": "nmap -sV -sC · Zeilen 103 bis 109",
     "lines": [
      102,
      108
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    },
    {
     "claim_key": "afb2a3bc401b838d38a3c27ec4363eb64c939a534258ad401ab0a04b592ab6b4",
-    "label": "nmap -sV -sC · 14:02 · Zeile 46",
+    "label": "nmap -sV -sC · Zeile 46",
     "lines": [
      45,
      45
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -587,11 +593,12 @@
   "evidence": [
    {
     "claim_key": "1aa480475830630fa95ec5e6cb5416d522fa1f4e8051b9f0ee2ce12d1da72f59",
-    "label": "nmap -sV -sC · 14:02 · Zeile 53",
+    "label": "nmap -sV -sC · Zeile 53",
     "lines": [
      52,
      52
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -701,11 +708,12 @@
   "evidence": [
    {
     "claim_key": "e468a68c1e84708cb642c5503084fbcb5c0bcad0ecc07b9c09064e26a29a1dff",
-    "label": "nmap -sV -sC · 14:02 · Zeile 54",
+    "label": "nmap -sV -sC · Zeile 54",
     "lines": [
      53,
      53
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -815,11 +823,12 @@
   "evidence": [
    {
     "claim_key": "e89f2c0ecf57205bb3bd7a7a11fc151288a3f5562f392452416e3d6c524e2fac",
-    "label": "nmap -sV -sC · 14:02 · Zeile 88",
+    "label": "nmap -sV -sC · Zeile 88",
     "lines": [
      87,
      87
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -929,20 +938,22 @@
   "evidence": [
    {
     "claim_key": "51f73905ed00a822bad2d2031af580191ae71b83b5671ea45c90e10ca4d4ccda",
-    "label": "nmap -sV -sC · 14:02 · Zeile 45",
+    "label": "nmap -sV -sC · Zeile 45",
     "lines": [
      44,
      44
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    },
    {
     "claim_key": "7969cdde237c27b9975b0e4d606a71bfc21c253468b2f9280c7c0e8e3122a979",
-    "label": "nmap -sV -sC · 14:02 · Zeile 46",
+    "label": "nmap -sV -sC · Zeile 46",
     "lines": [
      45,
      45
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -1120,11 +1131,12 @@
   "evidence": [
    {
     "claim_key": "f5bf491ec15e07f66cc45b210205dd51ed74c03e4043a48627a21d9172fa825c",
-    "label": "nmap -sV -sC · 14:02 · Zeile 52",
+    "label": "nmap -sV -sC · Zeile 52",
     "lines": [
      51,
      51
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -1247,11 +1259,12 @@
   "evidence": [
    {
     "claim_key": "74c7da44e6bf8312cbd99f299abef60fd53c7017887db9d6bb11f3ac08c3e3ea",
-    "label": "nmap -sV -sC · 14:02 · Zeile 34",
+    "label": "nmap -sV -sC · Zeile 34",
     "lines": [
      33,
      33
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -1454,11 +1467,12 @@
   "evidence": [
    {
     "claim_key": "5c0443fb0b7d5807373a6e1ef4f2bf893749a3116d4a0591b681bf84710f3819",
-    "label": "nmap -sV -sC · 14:02 · Zeile 88",
+    "label": "nmap -sV -sC · Zeile 88",
     "lines": [
      87,
      87
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -1661,11 +1675,12 @@
   "evidence": [
    {
     "claim_key": "b05e8daeeb4978292f2f123efcff1fbcd89e0336eef556af92a3d42d61041db6",
-    "label": "nmap -sV -sC · 14:02 · Zeile 24",
+    "label": "nmap -sV -sC · Zeile 24",
     "lines": [
      23,
      23
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -1767,11 +1782,12 @@
   "evidence": [
    {
     "claim_key": "76cfccf8101de3b84607cf77b1457f64559a802cbd6f708ebda20587b48f735a",
-    "label": "nmap -sV -sC · 14:02 · Zeile 68",
+    "label": "nmap -sV -sC · Zeile 68",
     "lines": [
      67,
      67
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -1873,11 +1889,12 @@
   "evidence": [
    {
     "claim_key": "70ab8b42842dff8959ae11ccf5e863766cfb0c7d1131bd1d92d5317652b48347",
-    "label": "nmap -sV -sC · 14:02 · Zeile 88",
+    "label": "nmap -sV -sC · Zeile 88",
     "lines": [
      87,
      87
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -1979,11 +1996,12 @@
   "evidence": [
    {
     "claim_key": "4ef25f7975286c73b66fa21e9fbec660627f22c135926560b8e1516b81463156",
-    "label": "nmap -sV -sC · 14:02 · Zeile 54",
+    "label": "nmap -sV -sC · Zeile 54",
     "lines": [
      53,
      53
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -2144,11 +2162,12 @@
   "evidence": [
    {
     "claim_key": "56285221ea1350f4d3d9283c1c81a3c82c4132fd398deed5f4d24852cce27810",
-    "label": "nmap -sV -sC · 14:02 · Zeile 63",
+    "label": "nmap -sV -sC · Zeile 63",
     "lines": [
      62,
      62
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -2254,11 +2273,12 @@
   "evidence": [
    {
     "claim_key": "e73cffe5aabcf13668621151e9a0fc792211e492ef4230c368752d6d5ae4536e",
-    "label": "nmap -sV -sC · 14:02 · Zeile 25",
+    "label": "nmap -sV -sC · Zeile 25",
     "lines": [
      24,
      24
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -2415,11 +2435,12 @@
   "evidence": [
    {
     "claim_key": "ffe0cb5cf075ac05e73a0956bd40be50ca2f8942221543a28b880e97439b679e",
-    "label": "nmap -sV -sC · 14:02 · Zeile 3",
+    "label": "nmap -sV -sC · Zeile 3",
     "lines": [
      2,
      2
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -2504,11 +2525,12 @@
   "evidence": [
    {
     "claim_key": "ffe0cb5cf075ac05e73a0956bd40be50ca2f8942221543a28b880e97439b679e",
-    "label": "nmap -sV -sC · 14:02 · Zeile 3",
+    "label": "nmap -sV -sC · Zeile 3",
     "lines": [
      2,
      2
     ],
+    "ts": "2026-10-08T12:02:11.000000Z",
     "unit_id": "cmd1"
    }
   ],

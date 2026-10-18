@@ -120,7 +120,10 @@ def test_context_from_web_is_retroactive_and_marked_webui(paths, operator):
             await asyncio.sleep(0.02)
         res = await ctl_ok(paths.ctl_sock, "ctx.set", terminal_id=gone.terminal_id, host="10.10.10.3",
                            source="webui", from_off=7)
-        assert res == {"stack": None, "stored": True}
+        # decision_id (web-api.md 18.12): der geschriebene d.ctx.set, damit die Spalte «Rückgängig» bietet
+        assert res["stack"] is None and res["stored"] is True
+        assert set(res) == {"stack", "stored", "decision_id"}
+        assert isinstance(res["decision_id"], str) and len(res["decision_id"]) == 36
         # Befund F8: unbekanntes Terminal 404, Offset hinter dem Strom 422, nichts im Journal
         n_sets = len(list(d.project.journal.iter_events(kinds=["d.ctx.set"])))
         bad = await ctl(paths.ctl_sock, "ctx.set", terminal_id="0" * 36, host="10.10.10.3",

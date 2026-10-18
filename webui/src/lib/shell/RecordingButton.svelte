@@ -103,22 +103,22 @@
                 <span class="budget">{t('rec.budget', { minutes: budget })}</span>
               {/if}
             </span>
-            {#if x.state === 'paused'}
+            {#if x.state === 'paused' || x.state === 'on'}
+              <!-- Korrektur A13: ein Knopf für Pause und Fortsetzen (der Fokus bleibt beim Umschalten);
+                   gesperrt per aria-disabled, damit er den Fokus nicht an body verliert -->
+              {@const paused = x.state === 'paused'}
+              {@const blocked = !!pending || app.offline || (!paused && (refused || minutes === 0))}
               <button
                 type="button"
                 class="small"
-                disabled={!!pending || app.offline}
-                aria-label={t('rec.resumeFor', { term: termShort(x) })}
-                onclick={() => app.resume(x.terminal_id)}>{t('rec.resume')}</button
-              >
-            {:else if x.state === 'on'}
-              <button
-                type="button"
-                class="small"
-                disabled={!!pending || app.offline || refused || minutes === 0}
-                title={refused || minutes === 0 ? t('rec.budgetEmpty') : undefined}
-                aria-label={t('rec.pauseFor', { term: termShort(x), minutes: minutes || PAUSE_MIN })}
-                onclick={() => app.pause(x.terminal_id, minutes)}>{t('rec.pause', { minutes: minutes || PAUSE_MIN })}</button
+                aria-disabled={blocked}
+                title={!paused && (refused || minutes === 0) ? t('rec.budgetEmpty') : undefined}
+                aria-label={paused ? t('rec.resumeFor', { term: termShort(x) }) : t('rec.pauseFor', { term: termShort(x), minutes: minutes || PAUSE_MIN })}
+                onclick={() => {
+                  if (blocked) return;
+                  if (paused) app.resume(x.terminal_id);
+                  else app.pause(x.terminal_id, minutes);
+                }}>{paused ? t('rec.resume') : t('rec.pause', { minutes: minutes || PAUSE_MIN })}</button
               >
             {/if}
           </div>
@@ -152,9 +152,11 @@
 </span>
 
 <style>
+  /* Korrektur A12, D16: der Aufnahme-Text kürzt sich (der Knopf mit Punkt und ▾ bleibt) */
   .wrap {
     position: relative;
-    flex: none;
+    flex: 0 2 auto !important;
+    min-width: 3.2em;
   }
   .rec {
     display: flex;
@@ -167,6 +169,18 @@
     color: var(--fg);
     cursor: pointer;
     white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .long,
+  .short {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dot,
+  .caret {
+    flex: none;
   }
   .rec:hover {
     border-color: var(--line-hover);
@@ -251,10 +265,10 @@
     font-size: var(--fs-xs);
     line-height: 1;
   }
-  .small:hover:not(:disabled) {
+  .small:hover:not([aria-disabled='true']) {
     border-color: var(--line-hover);
   }
-  .small:disabled {
+  .small[aria-disabled='true'] {
     opacity: 0.45;
     cursor: not-allowed;
   }

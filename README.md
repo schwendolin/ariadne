@@ -2,7 +2,7 @@
 
 Flugschreiber und Kartograf für Pentests unter Linux. Ariadne nimmt Terminals, Dateien und Screenshots auf, liest daraus Hosts, Services und Zugänge aus und malt Schritt für Schritt eine Karte der Zielumgebung. Zu jedem Fakt zeigt es die Quelle. Ariadne beobachtet und gibt Denkanstösse, greift aber nie selbst an.
 
-Status: v0.1 im Bau (Stand 2026-10-17). Aufnahme, verschlüsseltes Journal und Auswertung mit Karte laufen über die CLI; dazu Web-Server mit API v2, Sicherung und Fernzugriff vom Mac. Die Oberfläche im Browser ist noch der erste Entwurf (das Design v0.1 folgt), Regeln, KI und Export folgen. Nicht für Kundendaten.
+Status: v0.1 im Bau (Stand 2026-10-18). Aufnahme, verschlüsseltes Journal und Auswertung mit Karte laufen über die CLI; dazu das Dashboard im Browser nach Design v0.1 (Karte, «Als Nächstes» mit Denkanstössen aus Regeln, Terminals, Zeitachse, Belege, Findings), Sicherung und Fernzugriff vom Mac. KI-Denkanstösse, Screenshots und Export folgen. Nicht für Kundendaten.
 
 ## Im Alltag
 
@@ -59,7 +59,9 @@ ariadne ui --sessions   # angemeldete Sitzungen mit Herkunft (lokal oder über s
 ariadne ui --revoke     # alle abmelden
 ```
 
-Eine Anmeldung gilt höchstens 12 Stunden und endet mit `lock`, `stop`, einem Neustart des Daemons und dem Tunnel. Einstellungen in `~/.config/ariadne/config.toml` unter `[ui]` (nur Loopback). Die Schnittstelle beschreibt [docs/web-api.md](docs/web-api.md).
+Eine Anmeldung gilt höchstens 12 Stunden und endet mit `lock`, `stop`, einem Neustart des Daemons und dem Tunnel. Einstellungen in `~/.config/ariadne/config.toml` unter `[ui]` (nur Loopback).
+
+Im Dashboard steht links die Karte (Kali, Scope-Segmente, Hosts mit Zugriff, Nebel und Sackgassen, der rote Faden der Schlüsselschritte), rechts die Spalte «Als Nächstes»: zuerst, was du klären musst (Kontext einer Reverse Shell, Zusammenführen, Widersprüche), dann Denkanstösse mit Begründung, Beleg und Befehlsvorlage zum Kopieren. Ausgeführt wird nie etwas. Dazu die Reiter Terminals, Zeitachse (mit Rückgängig pro Befehl) und Findings; jeder Wert führt zu seinem Beleg bis zur Logzeile. Tasten: `1` bis `4` Reiter, `j k` wechseln, `a x e u` annehmen, verwerfen, ändern, rückgängig, `↵` Beleg, `⌘K` bzw. `Strg K` Palette, `⇧P` Präsentationsmodus (Secrets und Eingaben ohne Echo bleiben verdeckt), `?` Hilfe. Secrets kopiert «In die Kali» über den Daemon, nie in die Zwischenablage des Browsers. Die Schnittstelle beschreibt [docs/web-api.md](docs/web-api.md), die Oberfläche [webui/README.md](webui/README.md).
 
 ## Sicherung
 

@@ -80,6 +80,8 @@ export interface EvidenceRef {
   unit_id: string | null;
   lines: [number, number] | null;
   label: string;
+  /** Zeit der Quelle (18.12, Belege von Denkanstössen); das Label selbst ist ohne Uhrzeit */
+  ts?: string | null;
 }
 
 export interface QuietCounts {
@@ -526,6 +528,8 @@ export type NextItem = NextBase &
       claim_key: string | null;
       terminal: TermRef | null;
       from_ts: string | null;
+      /** Integration v0.1: Zeit des Callbacks für «Grund … um 16:52:31» (additiv, kann fehlen) */
+      reason_ts?: string | null;
       excerpt: CtxExcerpt | null;
       ctrl?: boolean;
     }
@@ -579,7 +583,8 @@ export interface CommandTemplate {
     target: boolean;
     safe: boolean;
   }[];
-  blocked_reason: 'shell_meta' | 'control' | 'newline' | 'non_ascii' | 'invalid' | 'out_of_scope' | null;
+  /** `own_secret`: der Redaktor am Ausgang hätte ein eigenes Secret ersetzt (Korrektur SEC-RULES-1) */
+  blocked_reason: 'shell_meta' | 'control' | 'newline' | 'non_ascii' | 'invalid' | 'out_of_scope' | 'own_secret' | null;
 }
 
 export type SuggestionState = 'open' | 'done' | 'dismissed';
@@ -640,7 +645,7 @@ export interface InputView {
   text: string;
 }
 
-export type TimelineType = 'command' | 'segment' | 'file' | 'keystep' | 'context' | 'decision' | 'gap' | 'project' | 'input';
+export type TimelineType = 'command' | 'segment' | 'file' | 'keystep' | 'context' | 'decision' | 'gap' | 'project' | 'input' | 'callback';
 
 interface TimelineBase {
   id: string;
@@ -699,6 +704,18 @@ export type TimelineItem = TimelineBase &
         reason: string | null;
         ref: string | null;
         effect: { rejected: number; weakened: number } | null;
+      }
+    | {
+        /** Korrektur D15 (18.12): Callback eines Listeners, der den Kontext nicht automatisch setzte */
+        type: 'callback';
+        unit_id: string;
+        /** «192.168.56.101:49158» (Zieldaten) */
+        remote: string | null;
+        /** «nc:4445» */
+        listener: string | null;
+        scope: Verdict | null;
+        session: string | null;
+        lines: [number, number] | null;
       }
     | { type: 'gap'; reason: GapReason; until: string | null; bytes_lost: number }
     | { type: 'project'; change: 'start' | 'end' | 'preroll'; reason: string | null; detail: string | null }
@@ -765,6 +782,10 @@ export interface UnitView extends UnitBrief {
   chain_break_line: number | null;
   /** Gerät des Terminals («/dev/pts/2», 18.12) */
   tty: string | null;
+  /** Integration v0.1: offene Einheit (laufender Listener, Remote-Segment vor der Auswertung) */
+  state?: 'open' | 'provisional' | 'final';
+  /** Integration v0.1: SHA-256 einer Datei-Einheit */
+  sha256?: string | null;
 }
 
 export interface SgrSpan {

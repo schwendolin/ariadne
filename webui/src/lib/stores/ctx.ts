@@ -40,6 +40,16 @@ export interface DecideOptions {
   onError?: (text: string) => void;
 }
 
+/** Ein Entscheid dieses Tabs (Korrektur A5: «anderer Tab» nur ohne eigenen Entscheid). */
+export interface OwnDecision {
+  /** Art des Entscheids (`d.conflict.resolve`) oder `ctx` für Kontext setzen */
+  kind: string;
+  payload: Record<string, unknown>;
+  decisionId: string | null;
+  /** Date.now() beim Erfolg */
+  at: number;
+}
+
 export interface ProjectCtx {
   readonly pid: string;
   readonly slug: string;
@@ -52,6 +62,10 @@ export interface ProjectCtx {
    * wird nichts gesendet.
    */
   decide(decisions: DecisionInput[], opts?: DecideOptions): Promise<DecisionResponse | null>;
+  /** Merkt einen eigenen Schreibvorgang, der nicht über `decide` lief (Kontext setzen). */
+  noteOwn(kind: string, payload: Record<string, unknown>, decisionId: string | null): void;
+  /** Eigene Entscheide dieses Tabs aus den letzten `ms` Millisekunden (neueste zuletzt). */
+  ownSince(ms: number): readonly OwnDecision[];
 }
 
 export interface ProjectPart {

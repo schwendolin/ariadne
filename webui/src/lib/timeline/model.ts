@@ -13,7 +13,7 @@ import type { TimelineItem, TimelineType } from '../api/types';
 import { t } from '../i18n';
 import type { EvidenceTarget } from '../url/state.svelte';
 
-export const ALL_TYPES: TimelineType[] = ['command', 'segment', 'file', 'keystep', 'context', 'decision', 'gap', 'project', 'input'];
+export const ALL_TYPES: TimelineType[] = ['command', 'segment', 'file', 'keystep', 'context', 'callback', 'decision', 'gap', 'project', 'input'];
 
 export interface TimelineFilter {
   /** null = alle Typen (verdeckte Eingaben inklusive) */
@@ -53,10 +53,21 @@ export function isFiltered(f: TimelineFilter): boolean {
   return f.types !== null || f.terminal !== null || f.host !== null;
 }
 
-/** Sichtbare Zeilen: sichtbare Eingaben nur mit ausdrücklichem Typfilter. */
+/**
+ * Sichtbare Zeilen: sichtbare Eingaben nur mit ausdrücklichem Typfilter. Dateien, die ein Befehl der
+ * Liste geschrieben hat, stehen wie im Design nur in seiner Unterzeile («Datei scans/ms2.xml erkannt»),
+ * mit ausdrücklichem Typfilter «Dateien» auch als eigene Zeile.
+ */
 export function visibleRows(items: TimelineItem[], f: TimelineFilter): TimelineItem[] {
-  if (f.types?.includes('input')) return items;
-  return items.filter((it) => it.type !== 'input' || it.input.hidden || it.input.redacted);
+  const inputs = f.types?.includes('input') ?? false;
+  const files = f.types?.includes('file') && !f.types.includes('command');
+  const owned = new Set<string>();
+  if (!files) for (const it of items) if (it.type === 'command') for (const x of it.files) owned.add(x.unit_id);
+  return items.filter((it) => {
+    if (it.type === 'input') return inputs || it.input.hidden || it.input.redacted;
+    if (it.type === 'file') return !owned.has(it.unit_id);
+    return true;
+  });
 }
 
 /** Wert für `zeile` in der URL (Vertrag 1.5, Punkt 4). */
@@ -75,6 +86,7 @@ export function rowMatches(it: TimelineItem, zeile: string | null): boolean {
 /** Belegansicht zu einer Zeile (Einheit), sonst null. */
 export function evidenceOf(it: TimelineItem): EvidenceTarget | null {
   if (it.type === 'command' || it.type === 'segment' || it.type === 'file') return { kind: 'unit', unit_id: it.unit_id, lines: null };
+  if (it.type === 'callback') return { kind: 'unit', unit_id: it.unit_id, lines: it.lines };
   return null;
 }
 

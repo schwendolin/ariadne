@@ -18,7 +18,7 @@ Der SSH-Schlüssel des Macs kann genau das und nicht mehr: den Tunnel zu Port 73
 
 Alles andere, auch `scp`, `sftp` und `ssh kali-sl id`, lehnt die Kali mit «Abgelehnt» ab. Verwalten (Pakete, Konfiguration) tust du weiter über die Webkonsole.
 
-> **Stand 2026-10-18.** Server, Anmeldung, Tunnel, Sicherung und alle Befehle dieser Anleitung sind gebaut und Ende zu Ende getestet (unter Linux; macOS selbst und die echte SmartLearn-Kali sind noch nicht geprüft). Die Oberfläche im Browser ist noch der erste Entwurf und zeigt darum noch nicht alles richtig an; die Oberfläche nach dem Design v0.1 folgt. Bis dahin zeigt dir `ariadne status` und `ariadne show …` in der Kali dasselbe.
+> **Stand 2026-10-18.** Server, Anmeldung, Tunnel, Sicherung und alle Befehle dieser Anleitung sind gebaut und Ende zu Ende getestet (unter Linux; macOS selbst und die echte SmartLearn-Kali sind noch nicht geprüft). Die Oberfläche im Browser ist nach dem Design v0.1 gebaut (Karte, Als Nächstes, Terminals, Zeitachse, Belege, Findings) und im Browser Chromium getestet; Safari auf dem Mac ist noch nicht geprüft. `ariadne status` und `ariadne show …` in der Kali zeigen dasselbe weiterhin im Terminal.
 
 ## 0 Bevor du anfängst
 
@@ -202,7 +202,7 @@ ariadne-mac start
 
 Prüft den Mac, lädt den Schlüssel in den Agent, falls er dort fehlt (die Passphrase des Schlüssels fragt dann `ssh-add` im Vordergrund; der Tunnel im Hintergrund fragt nie selbst), baut **eine** SSH-Verbindung auf, die den Code holt und den Tunnel trägt, prüft, dass Port 7330 jetzt wirklich diesem `ssh` gehört, und öffnet das Dashboard in deinem Standardbrowser. Der Code ist 60 Sekunden gültig und nur einmal; er steht nur in einer Startdatei mit Rechten 0600, die nach 10 Sekunden verschwindet. Die Anmeldung ist an genau diese SSH-Verbindung gebunden und hat die Herkunft «über sshd» (`ariadne ui --sessions` in der Kali zeigt sie).
 
-Der Browser ist dein normaler Browser (E93). Erweiterungen mit Zugriff auf alle Seiten können das Dashboard lesen; Secrets zeigt es darum verdeckt, und vor einer Bildschirmfreigabe schaltest du den Präsentationsmodus ein.
+Der Browser ist dein normaler Browser (E93). Erweiterungen mit Zugriff auf alle Seiten können das Dashboard lesen; Secrets zeigt es darum verdeckt, und vor einer Bildschirmfreigabe schaltest du den Präsentationsmodus ein (`⇧P` oder Menü `⋯`). Ein Secret kopiert der Knopf «In die Kali» in die Zwischenablage der Kali, nie in die des Macs. Ist die Kali gesperrt, zeigt das Dashboard nur den Hinweis aufs Terminal; entsperrt wird nie im Browser.
 
 **Pause.** Gehst du weg: in der Kali `ariadne lock` oder vom Mac `ssh -F ~/.ssh/ariadne.conf kali-sl lock`. Das beendet auch die Anmeldung im Dashboard. Zurück: `ariadne-mac unlock`, dann `ariadne-mac start` (siehe «Neu anmelden»).
 

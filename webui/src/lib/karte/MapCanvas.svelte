@@ -17,6 +17,7 @@
   import type { GraphLayer } from '../api/types';
   import { t, type MessageKey } from '../i18n';
   import { registerKeys } from '../keys/keymap';
+  import { pageKeysActive } from '../keys/page';
   import type { AppState } from '../stores/app.svelte';
   import type { ProjectStore } from '../stores/project.svelte';
   import { styleProps } from '../ui/actions';
@@ -59,7 +60,9 @@
 
   const model = $derived(buildModel(project.map.graph, layers));
   const threadEdges = $derived(model.edges.filter((e) => e.kind === 'thread' && e.thread));
-  const zoomed = $derived(frame.viewport.zoom >= 1.25);
+  // Korrektur D3: Ports erst, wenn der Mensch über das Einpassen hinaus zoomt (E87: mehr erst bei
+  // Hover, Auswahl oder Zoom); das automatische Einpassen allein zeigt nur «23 Services».
+  const zoomed = $derived(frame.viewport.zoom >= Math.max(1.25, (frame.fitZoom ?? frame.viewport.zoom) * 1.25));
   const ui = $derived(app.ui);
   /** Host-Karten, die pulsieren (Hosts, Zugriff, Host neuer Services) */
   const pulsingHosts = $derived.by(() => {
@@ -115,6 +118,22 @@
     frame = fallbackFrame(model, width || 900, height || 700, project.map.positions);
   });
 
+  // Korrektur A3: offenes Host-Detail ist eine Interaktion (die Karte springt nicht mehr)
+  $effect(() => {
+    engine?.setHold('detail', !!selected);
+  });
+
+  function focusIn(e: FocusEvent): void {
+    engine?.setHold('focus', true);
+    // Korrektur A16: Tab auf eine Karte ausserhalb des Bildes holt sie ins Bild
+    const id = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-map-card]')?.dataset.hostId : undefined;
+    if (id) engine?.reveal(id);
+  }
+
+  function focusOut(e: FocusEvent): void {
+    if (!(e.relatedTarget instanceof Node) || !wrap?.contains(e.relatedTarget)) engine?.setHold('focus', false);
+  }
+
   onMount(() => {
     if (!useLibrary || !cyEl) return;
     const e = new MapEngine(cyEl, {
@@ -129,6 +148,7 @@
         if (e.destroyed) return;
         await e.init(lib);
         libReady = true;
+        e.setHold('detail', !!selected);
         push();
       } catch {
         libFailed = true;
@@ -161,6 +181,8 @@
     el?.focus({ preventScroll: true });
   }
 
+  const page = () => pageKeysActive('karte');
+
   function arrow(dir: Direction): boolean {
     const from = focusedCard();
     if (!from) return false;
@@ -176,13 +198,14 @@
 
   onMount(() =>
     registerKeys([
-      { keys: ['+', '='], help: 'help.k.zoom', run: () => engine?.zoomBy(1.2) },
-      { keys: ['-'], run: () => engine?.zoomBy(1 / 1.2) },
-      { keys: ['0'], run: () => engine?.fit() },
-      { keys: ['ArrowLeft'], help: 'help.k.hosts', run: () => arrow('left') },
-      { keys: ['ArrowRight'], run: () => arrow('right') },
-      { keys: ['ArrowUp'], run: () => arrow('up') },
-      { keys: ['ArrowDown'], run: () => arrow('down') },
+      { keys: ['+', '='], help: 'help.k.zoom', when: page, run: () => engine?.zoomBy(1.2) },
+      { keys: ['-'], when: page, run: () => engine?.zoomBy(1 / 1.2) },
+      { keys: ['0'], when: page, run: () => engine?.fit() },
+      // Pfeile zwischen den Host-Karten: auch mit Fokus auf der Karte (einem Knopf), Korrektur A1
+      { keys: ['ArrowLeft'], help: 'help.k.hosts', when: page, onControl: true, run: () => arrow('left') },
+      { keys: ['ArrowRight'], when: page, onControl: true, run: () => arrow('right') },
+      { keys: ['ArrowUp'], when: page, onControl: true, run: () => arrow('up') },
+      { keys: ['ArrowDown'], when: page, onControl: true, run: () => arrow('down') },
     ]),
   );
 
@@ -235,7 +258,19 @@
   }
 </script>
 
-<div class="canvas" bind:this={wrap} bind:clientWidth={width} bind:clientHeight={height} class:nolib={libFailed}>
+<!-- Maus und Fokus über der Karte halten sie still (Korrektur A3); bedient wird über die Knöpfe darin. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="canvas"
+  bind:this={wrap}
+  bind:clientWidth={width}
+  bind:clientHeight={height}
+  class:nolib={libFailed}
+  onpointerenter={() => engine?.setHold('pointer', true)}
+  onpointerleave={() => engine?.setHold('pointer', false)}
+  onfocusin={focusIn}
+  onfocusout={focusOut}
+>
   <div class="cy" bind:this={cyEl}></div>
   <div class="layer" role="group" aria-label={t('karte.hostsLabel')} use:styleProps={{ '--tx': frame.viewport.x, '--ty': frame.viewport.y, '--zoom': frame.viewport.zoom }}>
     {#each model.segments as s (s.id)}

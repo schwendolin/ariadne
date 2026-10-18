@@ -12,7 +12,8 @@
   import { t, type MessageKey } from '../i18n';
   import Txt from '../ui/Txt.svelte';
   import { pulse } from '../util/motion';
-  import { hostHint, hostSymbol, zoomPorts, type CardModel } from './model';
+  import { hostHint, hostSymbol, localOnly, zoomPorts, type CardModel } from './model';
+  import { PLUS } from './sep';
 
   let {
     card,
@@ -42,6 +43,7 @@
   const symbol = $derived(host ? hostSymbol(host) : '');
   const ports = $derived(host && zoomed && layers.has('services') && hint?.kind === 'services' ? zoomPorts(host) : []);
   const kaliAddr = $derived(card.kali?.addresses ?? []);
+  const kaliMore = $derived(kaliAddr.slice(1).filter((a) => !localOnly(a)).length);
   const access = $derived(host?.claim_state === 'candidate' ? 'fog' : (host?.access ?? 'none'));
   const aria = $derived.by(() => {
     if (card.kind === 'kali') return `${t('karte.kali')} ${kaliAddr.join(', ')}`;
@@ -55,11 +57,11 @@
   });
 </script>
 
-<div class="wrap" class:selected class:linked={!!linked} use:pulse={{ token: pulseToken, active: pulsing }}>
+<div class="wrap p-{access}" class:selected class:linked={!!linked} use:pulse={{ token: pulseToken, active: pulsing }}>
   {#if card.kind === 'kali'}
     <button type="button" class="card kali" data-host-id="kali" data-map-card aria-label={aria} aria-pressed={selected} onclick={() => onselect('kali')}>
       <span class="name">{t('karte.kali')}</span>
-      {#if kaliAddr[0]}<span class="addr"><Txt value={kaliAddr[0]} mono max={40} />{#if kaliAddr.length > 1}<span class="more"> +{kaliAddr.length - 1}</span>{/if}</span>{/if}
+      {#if kaliAddr[0]}<span class="addr"><Txt value={kaliAddr[0]} mono max={40} />{#if kaliMore > 0}<span class="more">{PLUS}{kaliMore}</span>{/if}</span>{/if}
     </button>
   {:else if host && hint}
     <button
@@ -74,7 +76,7 @@
     >
       {#if symbol}<span class="sym" aria-hidden="true">{symbol}</span>{/if}
       <span class="text">
-        <span class="ip"><Txt value={host.label} mono ctrl={host.ctrl} max={40} /></span>
+        <span class="ip"><Txt value={host.label} mono max={40} /></span>
         {#if hint.kind !== 'none'}
           <span class="hint h-{hint.kind}">{hint.text}{#if hint.value}{hint.kind === 'conflict' ? ': ' : ' · '}<Txt value={hint.value} max={40} />{/if}</span>
         {/if}
@@ -94,6 +96,13 @@
     position: relative;
     border-radius: var(--r-card);
   }
+  /* Halo des Pulses in der Zugriffsfarbe (Korrektur D9) */
+  .p-admin {
+    --pulse-color: var(--access-root);
+  }
+  .p-user {
+    --pulse-color: var(--access-user);
+  }
   .card {
     display: flex;
     align-items: center;
@@ -110,7 +119,7 @@
     font: inherit;
   }
   .card:hover {
-    border-color: var(--muted);
+    border-color: var(--fog);
   }
   .card:focus-visible {
     outline: var(--lw-focus) solid var(--focus);
@@ -145,7 +154,7 @@
     border-color: var(--access-root);
   }
   .a-admin:hover {
-    background: color-mix(in srgb, var(--access-root-bg) 82%, var(--access-root));
+    background: var(--access-root-bg-hover);
     border-color: var(--access-root);
   }
   .a-user {
@@ -153,7 +162,7 @@
     border-color: var(--access-user);
   }
   .a-user:hover {
-    background: color-mix(in srgb, var(--access-user-bg) 82%, var(--access-user));
+    background: var(--access-user-bg-hover);
     border-color: var(--access-user);
   }
   .a-fog {
@@ -234,6 +243,9 @@
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .ring {
     position: absolute;

@@ -11,19 +11,25 @@
  *   Entscheid zum Widerrufen gibt) und der Cursor springt zur nächsten Klärung, sonst zum ersten
  *   Denkanstoss (Ruhezustand).
  * - Verschwindet ein Eintrag, ohne dass dieser Tab entschieden hat, steht er als «In einem anderen
- *   Tab entschieden» da; der Cursor springt nicht.
+ *   Tab entschieden» da, aber nur, wenn ein fremder Entscheid dahinter steht (Korrektur A5: eigene
+ *   Entscheide aus Host-Detail, Zeitachse oder Kontext-Dialog zählen tabweit als eigene, eine
+ *   Auswertung ohne Entscheid ergibt still «erledigt»); der Cursor springt nicht.
+ * - Ohne `sel` bleibt der zuletzt gewählte Eintrag gewählt, solange es ihn gibt (Korrektur A4):
+ *   Eine neue Klärung reisst Auswahl und Fokus nicht weg. `sel` schreibt der Store nur auf dem
+ *   Reiter Karte in die URL (Korrektur A19).
  * - Erledigte bleiben bis zum nächsten Wechsel ins Dashboard stehen (Tab wieder sichtbar).
  * - Lernmodus (Vorlieben, E112): Stufen Frage, Richtung, Vorlage, jede erst auf Klick.
  * - Palette: Quelle «next».
  */
-import type { ChangeSet, ContextResult, DecisionInput, NextItem, NextView, StreamEvent, Suggestion, TextPart } from '../api/types';
+import type { ChangeSet, ContextResult, DecisionInput, EvidenceRef, NextItem, NextView, StreamEvent, Suggestion, TextPart, TimelineItem } from '../api/types';
 import { t, type MessageKey } from '../i18n';
 import { hostOfService } from '../karte/model';
 import { registerPaletteSource, type PaletteItem } from '../shell/palette';
 import { encodeEvidence, url, type EvidenceTarget } from '../url/state.svelte';
 import { errorText, isAbort } from '../util/errors';
 import { termShort } from '../util/format';
-import type { ProjectCtx, ProjectPart } from './ctx';
+import { hhmm } from '../util/time';
+import type { OwnDecision, ProjectCtx, ProjectPart } from './ctx';
 
 export type Group = 'clarify' | 'suggestion';
 
@@ -72,6 +78,55 @@ interface Pending {
 }
 
 const BUSY_MS = 6000;
+/** So lange zählt ein eigener Entscheid als Ursache für einen verschwundenen Eintrag (A5). */
+const OWN_MS = 60_000;
+/** Indirekte eigene Wirkung (Rückgängig pro Befehl, Widerruf, Status): kürzer (A5). */
+const OWN_INDIRECT_MS = 20_000;
+const INDIRECT = new Set(['d.unit.distrust', 'd.revoke', 'd.status.work', 'd.status.access', 'd.entity.merge', 'd.entity.split']);
+
+/** true, wenn der eigene Entscheid `o` genau diesen Eintrag entschieden hat (Korrektur A5). */
+export function ownResolves(o: OwnDecision, item: NextItem): boolean {
+  const p = o.payload;
+  switch (item.kind) {
+    case 'conflict':
+      return (
+        (o.kind === 'd.conflict.resolve' && p.conflict_key === item.conflict.conflict_key) ||
+        (o.kind.startsWith('d.claim.') && item.conflict.values.some((v) => v.claim_key === p.claim_key))
+      );
+    case 'decide_value':
+      return o.kind.startsWith('d.claim.') && p.claim_key === item.fact.claim_key;
+    case 'merge_suggestion': {
+      if (o.kind !== 'd.entity.merge' && o.kind !== 'd.entity.split') return false;
+      const ids = new Set(Array.isArray(p.identifiers) ? (p.identifiers as unknown[]) : []);
+      return item.identifiers.filter((i) => i.key !== item.shared).every((i) => ids.has(i.key));
+    }
+    case 'ctx_suggestion':
+    case 'ctx_unknown':
+      return o.kind === 'ctx' && p.terminal_id === item.terminal_id;
+    case 'orphan_decision':
+      return o.kind === 'd.revoke' && p.decision_id === item.decision_id;
+    default:
+      return false;
+  }
+}
+
+/** true, wenn ein fremder Eintrag der Zeitachse diesen Eintrag entschieden haben kann (A5). */
+function foreignResolves(f: TimelineItem, item: NextItem): boolean {
+  if (f.type === 'context') return (item.kind === 'ctx_suggestion' || item.kind === 'ctx_unknown') && f.source !== 'auto' && f.terminal_id === item.terminal_id;
+  if (f.type !== 'decision') return false;
+  switch (item.kind) {
+    case 'conflict':
+      return f.kind === 'd.conflict.resolve' || f.kind.startsWith('d.claim.');
+    case 'decide_value':
+      return f.kind.startsWith('d.claim.');
+    case 'merge_suggestion':
+      return f.kind === 'd.entity.merge' || f.kind === 'd.entity.split';
+    case 'orphan_decision':
+      return f.kind === 'd.revoke';
+    default:
+      return false;
+  }
+}
 
 /** Kurze Zeile eines Eintrags (einzeilig in der Liste, Palette, Erledigt-Zeile). */
 export function itemLine(item: NextItem, short: (s: string) => string = (s) => s): ItemLine {
@@ -152,6 +207,17 @@ export function itemEvidence(item: NextItem): EvidenceTarget | null {
   }
 }
 
+/**
+ * Beleg-Label mit Uhrzeit in der Lokalzeit des Browsers: Der Server liefert «nmap -sV · Zeile 6» und
+ * die Zeit der Quelle in `ts` (18.12); angezeigt wird «nmap -sV · 14:02 · Zeile 6» wie im Design.
+ */
+export function evidenceLabel(e: EvidenceRef): string {
+  if (!e.ts) return e.label;
+  const time = hhmm(e.ts);
+  const parts = e.label.split(' · ');
+  return parts.length > 1 ? [parts[0], time, ...parts.slice(1)].join(' · ') : `${e.label} · ${time}`;
+}
+
 export function suggestionEvidence(s: Suggestion): EvidenceTarget | null {
   const e = s.evidence[0];
   if (!e) return null;
@@ -170,6 +236,8 @@ export class NextStore implements ProjectPart {
   /** `e`: Ändern im gewählten Eintrag (Wert entscheiden) */
   editToken = $state(0);
   private pending = new Map<string, Pending>();
+  /** zuletzt gewählter Eintrag ohne `sel` in der URL (Korrektur A4) */
+  private sticky = $state<string | null>(null);
   private timer: ReturnType<typeof setTimeout> | null = null;
   private busyTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private hiddenSince = false;
@@ -223,12 +291,23 @@ export class NextStore implements ProjectPart {
     return [...this.rowsOf('clarify'), ...this.rowsOf('suggestion')];
   }
 
-  /** gewählter Eintrag: `sel` aus der URL, sonst der erste offene (Klären vor Denkanstössen) */
+  /**
+   * gewählter Eintrag: `sel` aus der URL, sonst der zuletzt gewählte (solange es ihn gibt), sonst
+   * der erste offene (Klären vor Denkanstössen).
+   */
   get selectedKey(): string | null {
     const rows = this.rows;
     const sel = url.get('sel');
     if (sel && rows.some((r) => r.key === sel)) return sel;
+    const sticky = this.sticky;
+    if (sticky && rows.some((r) => r.key === sticky)) return sticky;
     return rows.find((r) => r.type === 'clarify')?.key ?? rows.find((r) => r.type === 'suggestion')?.key ?? rows[0]?.key ?? null;
+  }
+
+  /** Auswahl festhalten: im Store immer, in der URL nur auf dem Reiter Karte (Korrektur A4, A19). */
+  private pin(key: string | null): void {
+    this.sticky = key;
+    if (url.route === 'karte' && key && url.get('sel') !== key) url.set({ sel: key });
   }
 
   get selectedRow(): Row | null {
@@ -253,6 +332,7 @@ export class NextStore implements ProjectPart {
   }
 
   select(key: string | null): void {
+    this.sticky = key;
     if (key === url.get('sel')) return;
     url.set({ sel: key });
   }
@@ -311,19 +391,43 @@ export class NextStore implements ProjectPart {
       // Plätze in der bisherigen Liste (mit Erledigten), damit Erledigte an ihrem Platz bleiben
       const rowIndex = (group: Group, key: string) => this.rowsOf(group).findIndex((r) => r.key === key);
       const added: DoneEntry[] = [];
+      const foreignCheck: { item: NextItem; key: string }[] = [];
       before.clarify.forEach((item, index) => {
         if (now.has(item.item_key)) return;
-        added.push(this.toDone(item.item_key, 'clarify', rowIndex('clarify', item.item_key), itemLine(item)));
-        if (item.item_key === selected && this.pending.has(item.item_key)) jumpFrom = { group: 'clarify', index };
+        const at = rowIndex('clarify', item.item_key);
+        const own = this.pending.get(item.item_key);
+        if (own && own.until > Date.now()) {
+          added.push(this.toDone(item.item_key, 'clarify', at, itemLine(item)));
+          if (item.item_key === selected) jumpFrom = { group: 'clarify', index };
+          return;
+        }
+        // Korrektur A5: Nicht über die Spalte entschieden. Ein eigener Entscheid dieses Tabs
+        // (Host-Detail, Zeitachse, Kontext-Dialog) zählt als eigener; sonst still «erledigt», und
+        // erst ein nachweislich fremder Entscheid macht daraus «In einem anderen Tab entschieden».
+        const direct = this.ctx.ownSince(OWN_MS).filter((o) => ownResolves(o, item)).at(-1);
+        added.push({ key: item.item_key, group: 'clarify', index: at, state: 'done', msg: null, line: itemLine(item), decisionId: direct?.decisionId ?? null, ctx: null });
+        const indirect = this.ctx.ownSince(OWN_INDIRECT_MS).some((o) => INDIRECT.has(o.kind) || o.kind.startsWith('d.claim.') || o.kind === 'd.conflict.resolve');
+        if (!direct && !indirect) foreignCheck.push({ item, key: item.item_key });
       });
+      if (foreignCheck.length) void this.classifyForeign(foreignCheck, selected);
+      const vanished: { key: string; index: number; line: ItemLine }[] = [];
       before.suggestions.forEach((s, index) => {
         if (now.has(s.suggestion_key)) return;
-        added.push(this.toDone(s.suggestion_key, 'suggestion', rowIndex('suggestion', s.suggestion_key), { kind: t('sug.rule'), parts: s.title_parts }));
-        if (s.suggestion_key === selected && this.pending.has(s.suggestion_key)) jumpFrom = { group: 'suggestion', index };
+        const line = { kind: t('sug.rule'), parts: s.title_parts };
+        const own = this.pending.get(s.suggestion_key);
+        if (!own || own.until <= Date.now()) {
+          // Nicht hier entschieden: Ein Denkanstoss verschwindet auch ohne Entscheid (Erledigt-
+          // Erkennung, Regel greift nicht mehr). Erst nachfragen, dann einordnen.
+          vanished.push({ key: s.suggestion_key, index: rowIndex('suggestion', s.suggestion_key), line });
+          return;
+        }
+        added.push(this.toDone(s.suggestion_key, 'suggestion', rowIndex('suggestion', s.suggestion_key), line));
+        if (s.suggestion_key === selected) jumpFrom = { group: 'suggestion', index };
       });
-      // Anderer Tab: der Cursor springt nicht, er bleibt auf der erledigten Zeile (auch ohne `sel`)
-      const stay = added.find((d) => d.key === selected && d.state === 'other_tab');
-      if (stay && url.get('sel') !== stay.key) url.set({ sel: stay.key });
+      if (vanished.length) void this.classifyVanished(vanished, selected);
+      // Nicht hier entschieden: der Cursor springt nicht, er bleibt auf der erledigten Zeile
+      const stay = added.find((d) => d.key === selected && !this.pending.has(d.key));
+      if (stay) this.pin(stay.key);
       for (const d of added) this.pending.delete(d.key);
       if (added.length) {
         const keys = new Set(added.map((d) => d.key));
@@ -334,8 +438,59 @@ export class NextStore implements ProjectPart {
     // Wiederkehrende Einträge (Rückgängig, neuer Anlass) sind nicht mehr erledigt.
     const reopened = new Set([...v.clarify.map((i) => i.item_key), ...v.suggestions.map((s) => s.suggestion_key)]);
     if (this.done.some((d) => reopened.has(d.key))) this.done = this.done.filter((d) => !reopened.has(d.key));
+    // Korrektur A4: ohne `sel` die bisherige Auswahl halten (eine neue Klärung übernimmt sie nicht)
+    if (before && selected && !jumpFrom && !url.get('sel')) this.sticky = selected;
     this.view = v;
     if (jumpFrom) this.jumpAfter(jumpFrom);
+  }
+
+  /**
+   * Verschwundene Klärungen ohne eigenen Entscheid: Steht in der Zeitachse ein jüngerer fremder
+   * Entscheid, der sie entschieden haben kann, gilt «In einem anderen Tab entschieden» (Korrektur
+   * A5); sonst bleiben sie still «erledigt» (Auswertung, etwa nach 10 Minuten Stille).
+   */
+  private async classifyForeign(list: { item: NextItem; key: string }[], selected: string | null): Promise<void> {
+    let items: TimelineItem[];
+    try {
+      items = (await this.ctx.backend.timeline(this.ctx.pid, { types: ['decision', 'context'], limit: 30 }, this.ctx.signal)).items;
+    } catch {
+      return;
+    }
+    const mine = new Set(this.ctx.ownSince(600_000).map((o) => o.decisionId).filter((x): x is string => !!x));
+    const server = this.ctx.app.status?.server_time ? Date.parse(this.ctx.app.status.server_time) : Date.now();
+    const cutoff = (Number.isNaN(server) ? Date.now() : server) - 120_000;
+    const foreign = items.filter((f) => Date.parse(f.ts) >= cutoff && !(f.type === 'decision' && mine.has(f.decision_id)));
+    const other = new Set(list.filter((x) => foreign.some((f) => foreignResolves(f, x.item))).map((x) => x.key));
+    if (other.size === 0) return;
+    this.done = this.done.map((d) => (other.has(d.key) && d.state === 'done' && d.decisionId === null ? { ...d, state: 'other_tab' as const } : d));
+    if (selected && other.has(selected)) this.pin(selected);
+  }
+
+  /**
+   * Verschwundene Denkanstösse, die nicht hier entschieden wurden: verworfen oder erledigt per
+   * Entscheid ergibt «In einem anderen Tab entschieden»; erledigt ohne Entscheid (Erledigt-Erkennung
+   * der Regel) ergibt eine gedämpfte Zeile «erledigt»; gar nicht mehr da (Anlass weg) verschwindet still.
+   */
+  private async classifyVanished(list: { key: string; index: number; line: ItemLine }[], selected: string | null): Promise<void> {
+    let all: Suggestion[];
+    try {
+      all = (await this.ctx.backend.suggestions(this.ctx.pid, 'all', this.ctx.signal)).suggestions;
+    } catch {
+      return;
+    }
+    const byKey = new Map(all.map((x) => [x.suggestion_key, x]));
+    const open = new Set(this.view?.suggestions.map((x) => x.suggestion_key) ?? []);
+    const added: DoneEntry[] = [];
+    for (const v of list) {
+      const s = byKey.get(v.key);
+      if (!s || open.has(v.key) || s.state === 'open' || this.done.some((d) => d.key === v.key)) continue;
+      const decided = s.state === 'dismissed' || s.decision_id !== null;
+      added.push({ key: v.key, group: 'suggestion', index: v.index, state: decided ? 'other_tab' : 'done', msg: null, line: v.line, decisionId: null, ctx: null });
+    }
+    if (added.length === 0) return;
+    this.done = [...this.done, ...added];
+    const stay = added.find((d) => d.key === selected && d.state === 'other_tab');
+    if (stay) this.pin(stay.key);
   }
 
   private toDone(key: string, group: Group, index: number, line: ItemLine): DoneEntry {
@@ -354,7 +509,7 @@ export class NextStore implements ProjectPart {
       from.group === 'clarify'
         ? (clarify[from.index]?.item_key ?? clarify[0]?.item_key ?? sugs[0]?.suggestion_key ?? null)
         : (sugs[from.index]?.suggestion_key ?? sugs[0]?.suggestion_key ?? clarify[0]?.item_key ?? null);
-    if (key) url.set({ sel: key });
+    if (key) this.pin(key);
   }
 
   private reloadSoon(): void {
@@ -434,6 +589,7 @@ export class NextStore implements ProjectPart {
       return false;
     }
     for (const w of res.warnings) this.ctx.app.ui.notify('info', t(`next.ctxWarn.${w.code}` as MessageKey));
+    this.ctx.noteOwn('ctx', { terminal_id: item.terminal_id, op: 'accept', item_key: key }, res.decision_id ?? null);
     const term = termShort(item.terminal ?? { ordinal: null, terminal_id: item.terminal_id });
     this.remember(key, 'clarify', {
       state: 'done',

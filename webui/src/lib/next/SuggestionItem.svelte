@@ -8,17 +8,20 @@
   Ariadne führt nichts davon aus (E10): es gibt keinen Ausführen-Knopf. Besitzer: ui-karte.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { Suggestion, TextPart } from '../api/types';
   import { t } from '../i18n';
   import type { AppState } from '../stores/app.svelte';
   import type { ProjectStore } from '../stores/project.svelte';
-  import { suggestionEvidence } from '../stores/next.svelte';
+  import { evidenceLabel, suggestionEvidence } from '../stores/next.svelte';
   import Badge from '../ui/Badge.svelte';
   import Button from '../ui/Button.svelte';
   import Txt from '../ui/Txt.svelte';
   import { pulse } from '../util/motion';
+  import { displaySafe } from '../safe/displaySafe';
   import Parts from './Parts.svelte';
   import TemplateBlock from './TemplateBlock.svelte';
+  import { collapsedParts, titleParts } from './title';
 
   let {
     app,
@@ -34,12 +37,38 @@
   const stage = $derived(next.stageOf(s.suggestion_key));
   const busy = $derived(next.isBusy(s.suggestion_key));
   const evidence = $derived(suggestionEvidence(s));
-  const shortParts = $derived<TextPart[]>(s.title_parts.map((p) => (p.target ? { ...p, text: short(p.text) } : p)));
+  const title = $derived(titleParts(s));
+  const shortParts = $derived<TextPart[]>(collapsedParts(title).map((p) => (p.target ? { ...p, text: short(p.text) } : p)));
   const showTemplates = $derived(!learning || stage >= 3);
   const offline = $derived(app.offline);
 
   function openEvidence(): void {
     next.openEvidence({ type: 'suggestion', key: s.suggestion_key, index: 0, s });
+  }
+
+  // Korrektur A13: Der Knopf der Zeile wird beim Aufklappen durch die Karte ersetzt; der Fokus geht
+  // auf die Karte statt auf body. Ebenso nach der letzten Lernstufe (ihr Knopf verschwindet).
+  let card: HTMLDivElement | undefined = $state();
+  let focusCard = false;
+
+  function openLine(): void {
+    focusCard = true;
+    next.select(s.suggestion_key);
+  }
+
+  $effect(() => {
+    if (selected && card && focusCard) {
+      focusCard = false;
+      card.focus({ preventScroll: true });
+    }
+  });
+
+  async function reveal(): Promise<void> {
+    const last = stage === 2;
+    next.revealStage(s.suggestion_key);
+    if (!last) return;
+    await tick();
+    card?.focus({ preventScroll: true });
   }
 </script>
 
@@ -49,23 +78,24 @@
     class="line"
     data-suggestion-key={s.suggestion_key}
     use:pulse={{ token: app.ui.pulseToken, active: app.ui.isPulsing(s.suggestion_key) }}
-    onclick={() => next.select(s.suggestion_key)}
+    onclick={openLine}
+    title={displaySafe(s.title, 400)}
   >
     <span class="src">{t('sug.rule')}</span>
     <span class="title"><Parts parts={shortParts} /></span>
   </button>
 {:else}
-  <div class="card" data-suggestion-key={s.suggestion_key} aria-current="true" aria-busy={busy}>
+  <div class="card" data-suggestion-key={s.suggestion_key} aria-current="true" aria-busy={busy} tabindex="-1" bind:this={card}>
     <div class="head">
       {t(`sug.kind.${s.kind}`)} · {t('sug.rule')} <span class="mono"><Txt value={s.rule_id} max={40} /></span>
       {#if s.flags.includes('injection_suspect')}<Badge tone="attention">{t('sug.flag.injection_suspect')}</Badge>{/if}
       {#if s.flags.includes('from_target')}<Badge>{t('sug.flag.from_target')}</Badge>{/if}
     </div>
-    <h3 class="title-l"><Parts parts={s.title_parts} max={200} /></h3>
+    <h3 class="title-l"><Parts parts={title} max={200} /></h3>
     {#if !learning}
       <p class="reason"><Txt value={s.reason} ctrl={s.ctrl_reason} max={240} /></p>
       {#if s.evidence[0]}
-        <button type="button" class="ev" disabled={!evidence} onclick={openEvidence}>{t('sug.evidence', { label: '' })}<Txt value={s.evidence[0].label} max={80} /></button>
+        <button type="button" class="ev" disabled={!evidence} onclick={openEvidence}>{t('sug.evidence', { label: '' })}<Txt value={evidenceLabel(s.evidence[0])} max={80} /></button>
       {/if}
     {:else}
       {#if stage >= 1}
@@ -77,11 +107,11 @@
       {#if stage >= 3}
         <div class="stage"><span class="st">{t('sug.stage3')}</span></div>
         {#if s.evidence[0]}
-          <button type="button" class="ev" disabled={!evidence} onclick={openEvidence}>{t('sug.evidence', { label: '' })}<Txt value={s.evidence[0].label} max={80} /></button>
+          <button type="button" class="ev" disabled={!evidence} onclick={openEvidence}>{t('sug.evidence', { label: '' })}<Txt value={evidenceLabel(s.evidence[0])} max={80} /></button>
         {/if}
       {/if}
       {#if stage < 3}
-        <button type="button" class="reveal" onclick={() => next.revealStage(s.suggestion_key)}>
+        <button type="button" class="reveal" onclick={() => void reveal()}>
           <span>{t(stage === 0 ? 'sug.show1' : stage === 1 ? 'sug.show2' : 'sug.show3')}</span><span aria-hidden="true">›</span>
         </button>
       {/if}
@@ -110,6 +140,8 @@
     color: var(--fg);
     text-align: left;
     font: inherit;
+    /* Raster 34 px wie im Design (Runde 1, 1a), Korrektur D5: feste Zeilenhöhe, auch für Mono-Teile */
+    line-height: 16px;
     cursor: pointer;
   }
   .line:hover {
@@ -123,7 +155,12 @@
     color: var(--faint);
   }
   .title {
+    flex: 1;
     min-width: 0;
+    /* eingeklappt einzeilig wie im Design (1a); der volle Titel steht in der Karte und im title */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .card {
     display: flex;
@@ -134,6 +171,7 @@
     background: var(--surface-2);
     border: var(--lw-1) solid var(--line-strong);
     box-shadow: 0 0 0 2px var(--focus);
+    outline: none;
   }
   .head {
     display: flex;

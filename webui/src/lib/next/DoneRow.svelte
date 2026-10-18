@@ -29,8 +29,11 @@
   );
   const lineText = $derived(`${entry.line.kind} ${entry.line.parts.map((p) => p.text).join('')}`);
   const fullText = $derived(entry.msg ? t(entry.msg.key, entry.msg.params) : entry.line.parts.map((p) => p.text).join(''));
-  /** auf diesen Eintrag wirkt `u` (gewählt oder der letzte widerrufbare) */
-  const uTarget = $derived(selected || next.lastUndoable?.key === entry.key);
+  /**
+   * Tastenhinweis `u` nur am gewählten Eintrag (Korrektur D7): an jeder erledigten Zeile kostete er
+   * Platz und kürzte den Text; die Fusszeile nennt `u` ohnehin.
+   */
+  const uTarget = $derived(selected);
   const showUndo = $derived(!!entry.decisionId && (entry.state !== 'dismissed' || selected));
 
   function change(): void {
@@ -44,12 +47,15 @@
 <div class="done s-{entry.state}" class:selected data-done-key={entry.key} aria-current={selected ? 'true' : undefined} onclick={() => next.select(entry.key)}>
   <span class="mark" aria-hidden="true">{entry.state === 'done' ? '✓' : entry.state === 'dismissed' ? '✕' : '·'}</span>
   {#if entry.state === 'other_tab'}
-    <span class="text" title={lineText}>{t('next.otherTab')}<span class="sr-only"> ({lineText})</span></span>
+    <span class="text" title={lineText}>{t('next.otherTab')}<span class="sr-only">{SP}({lineText})</span></span>
     <span class="right">{t('next.d.otherTabState')}</span>
   {:else}
     <span class="text" class:strike={entry.state === 'dismissed'} title={fullText}>
-      {#if entry.state === 'dismissed' || !entry.msg}
+      {#if entry.state === 'dismissed'}
         <Parts parts={entry.line.parts} />
+      {:else if !entry.msg}
+        <!-- erledigt ohne eigene Meldung (anderswo im Tab entschieden oder durch die Auswertung) -->
+        {entry.line.kind}{SP}<Parts parts={entry.line.parts} />
       {:else}
         <Msg key={entry.msg.key} {params} mono={entry.msg.mono} />
       {/if}
@@ -62,6 +68,8 @@
       <button type="button" class="right link" disabled={app.offline} onclick={(e) => { e.stopPropagation(); change(); }}>{t('next.a.change')}</button>
     {:else if entry.state === 'dismissed'}
       <span class="right">{t('next.d.sugDismissed')}</span>
+    {:else if !entry.msg}
+      <span class="right">{t('next.d.otherTabState')}</span>
     {/if}
   {/if}
 </div>
@@ -86,12 +94,11 @@
   .mark {
     flex: none;
   }
+  /* Korrektur D7: der Text hat Vorrang; lieber umbrechen als mitten im Wert kürzen */
   .text {
     flex: 1;
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
   }
   .strike {
     text-decoration: line-through;

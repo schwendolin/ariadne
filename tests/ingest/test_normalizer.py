@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from ariadne.ingest.normalizer import (
@@ -136,6 +136,7 @@ def _feed_chunks(data: bytes, cuts: list[int], cols: int, start: int = 0) -> lis
 @settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(st.lists(_INTERESTING, max_size=60), st.lists(st.integers(0, 2000), max_size=12),
        st.sampled_from([0, 7, 80]))
+@example([b"\x1b[?1049h", b"\xf0\x9f\x94\x91", b"\r", b"a"], [], 0)  # Korrektur K2
 def test_metamorphic_chunk_boundaries(parts, cuts, cols):
     data = b"".join(parts)
     whole = _dump(normalize(data, cols=cols))
@@ -362,3 +363,20 @@ def test_line_conversion_keeps_flags(flag):
 def test_hostile_amplification_is_bounded(data, cols):
     total = sum(len(ln.text) for ln in normalize(data, cols=cols))
     assert total <= 40 * len(data)
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (b"\x1b[?1049h\x1b[H\xf0\x9f\x94\x91 key\x1b[1;1Hx\x1b[?1049l", ["x  key"]),
+        ("\x1b[?1049h\u6f22\u5b57\x1b[4Dx\x1b[?1049l".encode(), ["x \u5b57"]),
+        (b"\x1b[?1049h\xf0\x9f\x94\x91\ra", ["a"]),
+        (b"\x1b[?1049h\x1b[H\xf0\x9f\x94\x91 key\x1b[?1049l", ["\U0001F511 key"]),
+    ],
+)
+def test_alt_screen_half_overwritten_wide_char(data, expected):
+    """Korrektur K2: Eine verwaiste Stub-Zelle eines breiten Zeichens ist ein Leerzeichen, kein
+    Absturz in ``pyte.Screen.display``."""
+    lines = normalize(data, cols=80)
+    assert [ln.text for ln in lines] == expected
+    assert all(ln.flags & FLAG_ALTSCREEN for ln in lines)

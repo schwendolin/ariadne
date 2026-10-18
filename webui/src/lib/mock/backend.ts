@@ -50,12 +50,32 @@ import type {
   TimelinePage,
   TimelineQuery,
   UnitView,
+  TimelineItem,
 } from '../api/types';
 import * as base from './data/base';
 import * as history from './data/history';
 import { applyHistoryDecision } from './handlers/history';
 import { applyMapDecision } from './handlers/map';
 import { createState, newDecisionId, scenarioFromLocation, type MockState, type Scenario } from './state';
+
+/**
+ * Entscheide, die der Kartenteil des Mocks verarbeitet, erscheinen wie beim Server als Zeile
+ * `decision` in der Zeitachse (feste Texte wie web-api.md 18.12, Korrektur K3); der Verlaufsteil
+ * legt seine Zeilen selbst an. Damit kann die Spalte einen fremden Entscheid erkennen (A5).
+ */
+const MAP_SUMMARY: Record<string, string> = {
+  'd.claim.confirm': 'Wert bestätigt',
+  'd.claim.reject': 'Wert verworfen',
+  'd.claim.edit': 'Wert geändert',
+  'd.conflict.resolve': 'Widerspruch gelöst',
+  'd.entity.merge': 'Kennungen zusammengeführt',
+  'd.entity.split': 'Kennungen getrennt',
+  'd.note.set': 'Notiz gesetzt',
+  'd.tag.add': 'Tag hinzugefügt',
+  'd.tag.remove': 'Tag entfernt',
+  'd.suggestion.done': 'Denkanstoss erledigt',
+  'd.suggestion.dismiss': 'Denkanstoss verworfen',
+};
 
 const BAD_CODES = new Set(['FALSCH0000', 'FALSCH00']);
 const LOCK_CODES = new Set(['SPERRE0000', 'SPERRE00']);
@@ -296,7 +316,7 @@ export class MockBackend implements Backend {
   suggestions(pid: string, state: SuggestionState | 'all' = 'open'): Promise<SuggestionsResponse> {
     return this.wait(() => {
       this.check(pid);
-      const all = this.state.next.suggestions;
+      const all = [...this.state.next.suggestions, ...this.state.suggestionsDecided];
       return { suggestions: clone(state === 'all' ? all : all.filter((x) => x.state === state)), truncated: false };
     });
   }
@@ -366,6 +386,15 @@ export class MockBackend implements Backend {
         if (!r) throw err('validation', 422);
         if (r.decision_id === null) throw err('conflict', 409);
         this.state.decisions.push({ decision_id: id, kind: d.kind, payload: d.payload });
+        const summary = MAP_SUMMARY[d.kind];
+        if (summary) {
+          const ts = new Date().toISOString().replace(/\.(\d{3})Z$/, '.$1000Z');
+          const item: TimelineItem = {
+            id, ts, ts_ns: `${Date.parse(ts)}000000`, terminal_id: null, context_label: null, host_id: null, ctrl: false, terminal: null,
+            type: 'decision', decision_id: id, kind: d.kind, summary, detail: null, reason: null, ref: null, effect: null,
+          };
+          this.state.timeline = [item, ...this.state.timeline];
+        }
         return r;
       });
       this.state.generation++;
@@ -447,7 +476,30 @@ export class MockBackend implements Backend {
     } else {
       setTimeout(() => handlers.onState?.('open'), 0);
     }
+    if (this.state.scenario === 'grow' && !this.grown) {
+      this.grown = true;
+      setTimeout(() => this.growHost(), 2500);
+    }
     return () => this.listeners.delete(handlers);
+  }
+
+  private grown = false;
+
+  /** Szenario `grow`: ein neuer Host im Scope (192.168.56.130), wie nach einem weiteren nmap. */
+  private growHost(): void {
+    const g = this.state.graph;
+    const tpl = g.nodes.find((n) => n.kind === 'host' && n.label === '192.168.56.104');
+    if (!tpl || tpl.kind !== 'host') return;
+    const id = 'ip:default/192.168.56.130';
+    const host = { ...tpl, id, label: '192.168.56.130', addresses: ['192.168.56.130'], work: 'open' as const, work_reason: null, os: null, ports: [22, 80], services_total: 2 };
+    this.state.graph = {
+      ...g,
+      nodes: [...g.nodes, host],
+      edges: [...g.edges, { kind: 'member' as const, id: `m:${id}`, source: tpl.segment ?? 'seg:192.168.56.0/24', target: id }],
+      summary: { ...g.summary, hosts: g.summary.hosts + 1 },
+    };
+    this.state.generation++;
+    this.emit({ name: 'changes', id: null, data: { project_id: base.PID, generation: this.state.generation } });
   }
 
   /** Nur für Tests: Ereignis von aussen auslösen. */

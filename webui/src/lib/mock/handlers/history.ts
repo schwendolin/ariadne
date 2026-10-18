@@ -236,7 +236,7 @@ export function applyHistoryDecision(s: MockState, d: DecisionInput, id: string)
         history: [{ decision_id: id, kind: d.kind, ts: now }],
       };
       s.findings = [...s.findings, recompute(f, s)];
-      s.timeline = [decisionItem(id, d.kind, 'Entscheid', { detail: f.title }), ...s.timeline];
+      s.timeline = [decisionItem(id, d.kind, 'Finding angelegt', { detail: `F${f.ordinal} · ${f.title}` }), ...s.timeline];
       return result;
     }
     case 'd.finding.update': {
@@ -256,7 +256,7 @@ export function applyHistoryDecision(s: MockState, d: DecisionInput, id: string)
       if (p.attack !== undefined && p.attack !== null) next.attack = refs(p.attack, ATTACK_RE);
       if (p.cves !== undefined && p.cves !== null) next.cves = refs(p.cves, CVE_RE);
       replaceFinding(s, next);
-      s.timeline = [decisionItem(id, d.kind, 'Entscheid', { detail: next.title }), ...s.timeline];
+      s.timeline = [decisionItem(id, d.kind, 'Finding geändert', { detail: `F${next.ordinal} · ${next.title}` }), ...s.timeline];
       return result;
     }
     case 'd.finding.evidence.add': {
@@ -285,7 +285,7 @@ export function applyHistoryDecision(s: MockState, d: DecisionInput, id: string)
       deleted.get(s)?.set(id, f);
       ordinals.set(s, Math.max(ordinals.get(s) ?? 0, ...s.findings.map((x) => x.ordinal)));
       s.findings = s.findings.filter((x) => x.finding_id !== f.finding_id);
-      s.timeline = [decisionItem(id, d.kind, 'Entscheid', { detail: f.title, reason: typeof p.reason === 'string' ? p.reason : null }), ...s.timeline];
+      s.timeline = [decisionItem(id, d.kind, 'Finding gelöscht', { detail: `F${f.ordinal} · ${f.title}`, reason: typeof p.reason === 'string' ? p.reason : null }), ...s.timeline];
       return result;
     }
     default:

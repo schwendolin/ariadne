@@ -237,6 +237,10 @@ def test_timeline_inputs_evidence_search(paths, operator):
         assert "22/tcp" in lines["lines"][0]["text"] and lines["from"] == a
         filesrc = next(s for s in src["sources"] if s["t"] == "file")
         assert filesrc["path"] == "scans/lame.xml" and len(filesrc["sha256"]) == 64
+        # Kopf der Datei-Einheit trägt denselben SHA-256 (Einstieg über die Zeitachse ohne Wert)
+        funit = (await c.get(f"{P}/units/{filesrc['unit_id']}")).json()
+        assert funit["kind"] == "file" and funit["sha256"] == filesrc["sha256"] and funit["state"] == "final"
+        assert stream["unit_id"] and (await c.get(f"{P}/units/{stream['unit_id']}")).json()["sha256"] is None
         assert (await c.get(f"{P}/facts/{'0' * 64}/sources")).status_code == 404
         assert (await c.get(f"{P}/facts/xyz/sources")).status_code == 404
 

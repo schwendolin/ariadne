@@ -43,6 +43,8 @@ export class FindingsStore implements ProjectPart {
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   private req = 0;
+  /** Versuche, ein gerade angelegtes Finding in der Liste zu finden */
+  private waitTries = 0;
   private offPalette: (() => void) | null;
 
   constructor(private readonly ctx: ProjectCtx) {
@@ -61,6 +63,12 @@ export class FindingsStore implements ProjectPart {
       }
     }
     if (this.currentId && this.currentId !== 'neu') await this.fetchCurrent(this.currentId);
+    // gerade angelegt, die Auswertung kennt es noch nicht: bald wieder nachsehen (höchstens 40-mal)
+    const saved = this.lastSaved;
+    if (saved && !this.list.some((f) => f.finding_id === saved.id) && this.waitTries < 40) {
+      this.waitTries += 1;
+      this.reloadSoon(500);
+    }
   }
 
   /** Finding öffnen (aus der URL). */
@@ -78,6 +86,9 @@ export class FindingsStore implements ProjectPart {
   }
 
   private async fetchCurrent(id: string): Promise<void> {
+    // Gerade angelegt und noch nicht in der Liste: nicht anfragen. Die Antwort wäre 404, und der
+    // Browser meldet jede 404 in der Konsole; load() fragt wieder, sobald die Liste es kennt.
+    if (this.lastSaved?.id === id && this.loaded && !this.list.some((f) => f.finding_id === id)) return;
     const req = ++this.req;
     try {
       const d = await this.ctx.backend.finding(this.ctx.pid, id, this.ctx.signal);
@@ -98,12 +109,12 @@ export class FindingsStore implements ProjectPart {
     return !!id && this.lastSaved?.id === id && !this.current && (this.currentError === null || errorCode(this.currentError) === 'not_found');
   }
 
-  private reloadSoon(): void {
+  private reloadSoon(ms = 200): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.load();
-    }, 200);
+    }, ms);
   }
 
   onChanges(cs: ChangeSet): void {
@@ -137,6 +148,7 @@ export class FindingsStore implements ProjectPart {
       if (!out.res) return { ok: false, id: null, error: out.error };
       const id = base ? base.finding_id : (out.res.results[0]?.decision_id ?? null);
       if (!base && id) {
+        this.waitTries = 0;
         this.lastSaved = { id, form: { ...form, evidenceAdd: [], evidenceRemove: [] } };
         this.clearDraft();
       }
@@ -179,7 +191,7 @@ export class FindingsStore implements ProjectPart {
   private paletteItems(): PaletteItem[] {
     return this.list.map((f) => ({
       id: `finding:${f.finding_id}`,
-      group: 'commands' as const,
+      group: 'findings' as const,
       label: `F${f.ordinal} · ${f.title}`,
       hint: t('fd.palette', { ordinal: `F${f.ordinal}` }),
       keywords: `f${f.ordinal} ${f.title} finding`.toLowerCase(),

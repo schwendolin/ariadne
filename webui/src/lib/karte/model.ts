@@ -82,7 +82,10 @@ export function buildModel(g: GraphView | null, layers: Set<GraphLayer>): MapMod
     .map((s) => ({ id: s.id, label: s.label, origin: s.origin }));
   const segIds = new Set(segments.map((s) => s.id));
   const cards: CardModel[] = [];
-  if (kali) cards.push({ id: 'kali', kind: 'kali', segment: null, host: null, kali });
+  if (kali) {
+    const scopes = (g.nodes.filter((n) => n.kind === 'segment') as SegmentNode[]).filter((s) => s.origin === 'scope').map((s) => s.label);
+    cards.push({ id: 'kali', kind: 'kali', segment: null, host: null, kali: { ...kali, addresses: kaliAddresses(kali.addresses, scopes) } });
+  }
   for (const h of hosts) cards.push({ id: h.id, kind: 'host', segment: h.segment && segIds.has(h.segment) ? h.segment : null, host: h, kali: null });
 
   const edges: EdgeModel[] = [];
@@ -113,6 +116,40 @@ export function buildModel(g: GraphView | null, layers: Set<GraphLayer>): MapMod
     edges.push({ id: `thread:${e.id}`, kind: 'thread', source: e.source, target: e.target, thread: e });
   }
   return { cards, edges, segments };
+}
+
+/**
+ * Adressen von Kali in der Reihenfolge der Anzeige: zuerst Adressen in einem Scope-Segment
+ * (192.168.56.102 bei 192.168.56.0/24), dann übrige, Loopback und Link-local zuletzt. Die Karte zeigt
+ * die erste; die Kali hat im Lab fast immer auch 127.0.0.1, das als Hauptadresse nichts sagt.
+ */
+export function kaliAddresses(addresses: string[], scopes: string[]): string[] {
+  const rank = (a: string): number => {
+    if (scopes.some((c) => inCidr4(a, c))) return 0;
+    if (localOnly(a)) return 2;
+    return 1;
+  };
+  return addresses
+    .map((a, i) => ({ a, i, r: rank(a) }))
+    .sort((x, y) => x.r - y.r || x.i - y.i)
+    .map((x) => x.a);
+}
+
+/** Loopback und Link-local: nur auf der Kali selbst sinnvoll, zählt auf der Karte nicht als «+N» */
+export function localOnly(a: string): boolean {
+  return /^127\./.test(a) || a === '::1' || /^fe80:/i.test(a) || /^169\.254\./.test(a);
+}
+
+/** IPv4-Adresse in einem IPv4-Netz («192.168.56.0/24»); alles andere ist «nein». */
+export function inCidr4(addr: string, cidr: string): boolean {
+  const m = /^(.+)\/(\d{1,2})$/.exec(cidr);
+  const net = ipv4Num(m ? (m[1] ?? '') : cidr);
+  const ip = ipv4Num(addr);
+  if (net === null || ip === null) return false;
+  const bits = m ? Number(m[2]) : 32;
+  if (bits > 32) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return ((ip & mask) >>> 0) === ((net & mask) >>> 0);
 }
 
 // ---------------------------------------------------------------- Hinweise auf der Host-Karte

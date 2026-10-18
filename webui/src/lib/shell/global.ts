@@ -41,7 +41,14 @@ export function registerGlobalKeys(app: AppState): () => void {
       keys: [String(i + 1)],
       help: 'help.k.tabs',
       when: () => app.phase === 'project',
-      run: () => url.go(r),
+      run: () => {
+        // Korrektur A6: ein ungespeichertes Formular nie still über ein Kürzel verwerfen
+        if (app.ui.hasDirtyForm && url.route !== r) {
+          app.ui.notify('info', t('app.unsavedForm'));
+          return;
+        }
+        url.go(r);
+      },
     })),
   ]);
 }

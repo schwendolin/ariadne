@@ -1,5 +1,7 @@
 # Ariadne-Dashboard: Funktionen und Inhalte
 
+> **Stand 2026-10-18: gebaut nach [docs/ui/design-v01](design-v01/README.md); Abweichungen siehe [webui/README.md](../../webui/README.md), Abschnitt «Abweichungen und Grenzen».**
+
 Stand 2026-10-15. Dieses Dokument ist die Grundlage für die eigene Design-Session des Nutzers. Es beschreibt, was das Dashboard kann und enthält, nicht wie es aussieht.
 
 **An Claude Design.** Der Nutzer ist Sven, HF-Student im Modul Cybersecurity. Er entwirft mit dir die Oberfläche von Ariadne, einem Flugschreiber für Pentests in Kali. Danach baut Claude Code das Dashboard in Svelte. Im Text heisst Sven «der Nutzer». Was du liefern sollst, steht in Abschnitt 12, die offenen Fragen in Abschnitt 13. Anhang A enthält Beispieldaten für die Mockups. Anhang B ist für den Bau, zum Entwerfen brauchst du ihn nicht.

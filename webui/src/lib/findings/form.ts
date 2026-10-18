@@ -106,10 +106,15 @@ export function validate(f: FindingForm): FormErrors {
   return e;
 }
 
-/** Titel ohne Zeilenumbrüche (das Feld ist einzeilig; eingefügter Text wird geglättet). */
+/**
+ * Titel ohne Zeilenumbrüche (das Feld ist einzeilig; eingefügter Text wird geglättet) und ohne
+ * Steuer-, Format- und nicht zugewiesene Zeichen, die der Server ablehnt (Korrektur SEC-FIND-1).
+ */
 export function cleanTitle(s: string): string {
-  return s.replace(/[\r\n\u2028\u2029]+/g, ' ');
+  return s.replace(/[\r\n\u0085\u2028\u2029]+/g, ' ').replace(/[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/gu, '');
 }
+
+export { hasVisibleMarkers } from '../safe/displaySafe';
 
 function sameRefs(a: RefEntry[], b: RefEntry[]): boolean {
   return a.length === b.length && a.every((x, i) => x.id === b[i]?.id && x.supported === b[i]?.supported);

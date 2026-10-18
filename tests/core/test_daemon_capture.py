@@ -18,6 +18,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from ariadne import events
 from ariadne.daemon.config import RecordingConfig
@@ -320,6 +322,63 @@ def test_web_pause_budget_30_minutes_per_hour_terminal_resets(paths, operator):
         await a.close()
 
     run(paths, operator, scenario, wall_clock=clock.wall, mono_clock=clock.mono)
+
+
+def test_web_pause_left_partial_budget_matches_server_check(paths, operator):
+    """Korrektur K6: Nach 20 Minuten Web-Pause meldet ``web_pause_left_s`` etwa 600 s; das Popover
+    bietet dann höchstens ``floor(left / 60)`` Minuten an, und genau das nimmt der Server an."""
+    clock = Clock()
+
+    async def scenario(d: Daemon) -> None:
+        await ctl_ok(paths.ctl_sock, "start", slug="lame", targets=["10.10.10.3"])
+        a = await FakeShim(paths.term_sock).connect(proto=2)
+        await a.wait_state(rec="on")
+        tid = a.terminal_id
+        t = d.terminals[tid]
+
+        async def web(minutes: int) -> dict[str, Any]:
+            return await ctl(paths.ctl_sock, "term.pause", terminal_id=tid, minutes=minutes, source="webui")
+
+        assert d.web_pause_left_s(t) == 1800
+        assert (await web(20))["ok"]
+        clock.shift += 20 * MIN
+        await ctl_ok(paths.ctl_sock, "term.resume", terminal_id=tid, source="webui")
+        left = d.web_pause_left_s(t)
+        assert left is not None and 590 <= left <= 600, left
+        assert (await web(left // 60 + 1))["error"]["code"] == "policy"
+        assert (await web(left // 60))["ok"]
+        await a.close()
+
+    run(paths, operator, scenario, wall_clock=clock.wall, mono_clock=clock.mono)
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    st.integers(0, 120 * 60),
+    st.lists(st.tuples(st.integers(0, 20 * 60), st.integers(1, 30 * 60)), max_size=6),
+)
+def test_web_pause_left_equals_budget_check(back, pauses):
+    """Korrektur K6 (Eigenschaft): Für jede Vorgeschichte gilt ``_web_pause_ok(m)`` genau dann,
+    wenn ``60 * m <= web_pause_left_s`` (für m >= 1). Die Web-Pausen überlappen nie (eine neue
+    beendet die laufende, ``_note_web_pause``); die letzte darf noch laufen."""
+    sec = 1_000_000_000
+    now = 10_000 * sec
+    cursor = now - back * sec
+    intervals: list[list[int]] = []
+    for gap, dur in pauses:
+        a = cursor + gap * sec
+        if a >= now:
+            break
+        intervals.append([a, a + dur * sec])
+        cursor = a + dur * sec
+        if cursor >= now:
+            break
+    t = SimpleNamespace(web_pauses=intervals)
+    fake = SimpleNamespace(_mono=lambda: now, project=object(), state_of=lambda _t: "on")
+    left = Daemon.web_pause_left_s(fake, t)  # type: ignore[arg-type]
+    assert left is not None and 0 <= left <= 1800
+    for m in range(1, 32):
+        assert Daemon._web_pause_ok(fake, t, m) == (60 * m <= left), (m, left)  # type: ignore[arg-type]
 
 
 def test_pause_survives_daemon_restart_via_hello(paths, operator):

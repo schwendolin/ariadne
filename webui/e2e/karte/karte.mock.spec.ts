@@ -34,8 +34,8 @@ test.describe('Karte', () => {
     await expect(card(page, H103)).toContainText('im Nebel');
     await expect(card(page, H104)).toContainText('Sackgasse · nur RDP');
     await expect(page.getByRole('button', { name: 'Out of Scope · 4' })).toBeVisible();
-    // verknüpfter Host der gewählten Klärung K1 (Kontextvorschlag → .101)
-    await expect(card(page, H101).locator('xpath=..').locator('.ring-label')).toHaveText('K1');
+    // verknüpfter Host der gewählten Klärung K2 (Kontextvorschlag → .101, stabile Nummer vom Server)
+    await expect(card(page, H101).locator('xpath=..').locator('.ring-label')).toHaveText('K2');
     // Karten liegen im sichtbaren Bereich der Karte, nicht übereinander
     const boxes = await Promise.all([H101, H103, H104, 'kali'].map((id) => card(page, id).boundingBox()));
     const map = await page.locator('section.map').boundingBox();

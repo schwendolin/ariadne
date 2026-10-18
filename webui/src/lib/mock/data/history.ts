@@ -57,6 +57,8 @@ export function inputs(): InputView[] {
 export function timeline(): TimelineItem[] {
   const input = inputs()[0] as InputView;
   const items: TimelineItem[] = [
+    // Korrektur D15: Callback von .101 in T3 (mehrdeutig, Kontext unklar · K2), wie Runde 2 #6
+    { ...base(`cb:${T3}@64:0001`, T3, '16:52:31.447', { host_id: hostId(IP101) }), type: 'callback', unit_id: `${T3}@64`, remote: `${IP101}:49158`, listener: 'nc:4445', scope: 'in', session: null, lines: [1, 1] },
     { ...base(`${T3}@64`, T3, '16:52:31.447'), type: 'command', cmd: cmd(T3, 64, 'nc -lvnp 4445', '16:51:52.004', null, null), unit_id: `${T3}@64`, adopted: 0, distrusted: null, scope_warning: null, flags: ['partial'], files: [], lines: 4, result: NO_RESULT },
     { ...base('g:48001', T1, '16:50:05.218'), type: 'gap', reason: 'pause', until: at('17:00:05.218'), bytes_lost: 0 },
     { ...base('k:31877', T2, '16:48:31.902', { host_id: hostId(IP101) }), type: 'keystep', step: 'loot', host_label: IP101, note: '/etc/shadow', ordinal: 2, decision_id: '0199a3c2-9a02-7000-8000-00000000d002' },

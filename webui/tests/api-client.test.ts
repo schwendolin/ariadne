@@ -34,6 +34,15 @@ describe('ApiClient', () => {
     expect(init.cache).toBe('no-store');
   });
 
+  it('Abmelden: DELETE /session mit same-origin (Clear-Site-Data greift), Token weg', async () => {
+    const { api, calls, tokens } = setup(TOKEN, async () => new Response(null, { status: 204 }));
+    await api.logout();
+    expect(calls[0]!.init.method).toBe('DELETE');
+    expect(calls[0]!.url).toBe('/api/v1/session');
+    expect(calls[0]!.init.credentials).toBe('same-origin');
+    expect(tokens.get()).toBeNull();
+  });
+
   it('kodiert Kennungen als einzelne Pfadsegmente', () => {
     expect(apiPath('p', 'pid', 'hosts', 'ip:default/10.10.10.3')).toBe('/p/pid/hosts/ip%3Adefault%2F10.10.10.3');
   });

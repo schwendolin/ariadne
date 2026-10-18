@@ -72,6 +72,22 @@ describe('Kopfzeile', () => {
     expect(held?.querySelector('code')?.textContent).toBe('lame');
   });
 
+  it('held mehrfach: ein Kennzeichen mit «+1 weitere», alle Terminals im title', async () => {
+    const { app, backend } = await makeApp('held', { start: false });
+    const second = { ...backend.state.terminals[backend.state.terminals.length - 1], terminal_id: '0199a3c2-0000-7000-8000-0000000000f5', short_id: '000000f5', tty: '/dev/pts/5' };
+    backend.state.terminals = [...backend.state.terminals, second as (typeof backend.state.terminals)[number]];
+    await app.start(null);
+    await settle();
+    const { container } = render(Header, { props: { app } });
+    const held = header(container).querySelectorAll('[data-badge="held"]');
+    expect(held).toHaveLength(1);
+    expect(held[0]?.querySelector('.long')?.textContent?.replace(/\s+/g, ' ')).toBe('pts/4: Remote-Sitzung bei lame, nicht gespeichert');
+    // Kurzform unter 1280 px (Korrektur D2): nie nur «!»
+    expect(held[0]?.querySelector('.short')?.textContent).toBe('pts/4 nicht gespeichert');
+    expect(held[0]?.querySelector('.more')?.textContent).toBe('+1 weitere');
+    expect(held[0]?.getAttribute('title')).toContain('pts/5: Remote-Sitzung bei lame, nicht gespeichert');
+  });
+
   it('locked: Slug, «Gesperrt · im Terminal ariadne start», kein Aufnahme-Knopf', async () => {
     const { app } = await makeApp('locked');
     const { container } = render(Header, { props: { app } });

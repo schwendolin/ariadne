@@ -4,6 +4,10 @@
   stiehlt. Inhalt: Terminal, Befehl (Zieldaten, über Txt), Ziel mit Urteil, Zeit. Quittieren
   (PUT /ui/scope-ack, danach nur noch der Vermerk in der Zeitachse) oder «In der Zeitachse» (Zeile
   des Befehls). Schliessen ohne Quittieren lässt das Kennzeichen in der Kopfzeile stehen.
+  Korrektur A14: Die Karte ist eine Live-Region (`role="alert"`), damit Bildschirmleser sie beim
+  Eintreffen ansagen, obwohl sie den Fokus nicht nimmt. Sie steht unten rechts über der Karte bzw.
+  dem Inhalt, auf dem Reiter Karte links neben der Spalte, damit Spaltenkopf und gewählter Eintrag
+  frei bleiben.
   Besitzer: ui-fundament.
 -->
 <script lang="ts">
@@ -55,7 +59,7 @@
 </script>
 
 {#if w}
-  <div class="card" role="alertdialog" aria-modal="false" aria-labelledby="scope-title" aria-describedby="scope-body" tabindex="-1" bind:this={node} use:fadeIn>
+  <div class="card" class:beside={url.route === 'karte'} role="alert" aria-labelledby="scope-title" aria-describedby="scope-body" tabindex="-1" bind:this={node} use:fadeIn>
     <div class="top">
       <h2 id="scope-title"><span aria-hidden="true">!</span> {t('scope.title')}</h2>
       <button type="button" class="x" aria-label={t('scope.close')} onclick={onclose}>×</button>
@@ -83,7 +87,7 @@
 <style>
   .card {
     position: fixed;
-    top: calc(var(--header-h) + 12px);
+    bottom: var(--sp-4);
     right: var(--sp-4);
     z-index: 45;
     width: 440px;
@@ -97,6 +101,10 @@
     border: 1.5px solid var(--attention);
     box-shadow: var(--shadow);
     color: var(--fg);
+  }
+  /* Reiter Karte: links neben der Spalte und dem Out-of-Scope-Streifen (38 px) */
+  .beside {
+    right: calc(clamp(var(--column-min), var(--column-w), var(--column-max)) + 38px + var(--sp-4));
   }
   .top {
     display: flex;

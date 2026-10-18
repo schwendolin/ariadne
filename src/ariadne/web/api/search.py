@@ -131,7 +131,7 @@ def add_routes(router: APIRouter, api: Api) -> None:
         for f, size in zip(raw, sizes, strict=True):
             b = bag.new()
             item = {
-                "path": b(f.get("path")) or "",
+                "path": b(_short_path(f.get("path"), workspace, api.daemon.paths.home)) or "",
                 "reason": pending_reason(f.get("reason")),
                 "cmd_id": f.get("cmd_id"),
                 "terminal_id": f.get("terminal_id"),
@@ -154,6 +154,21 @@ PENDING_REASONS = (
     "too_large",
 )
 _REASON_MAP = {"symlink_or_not_dir": "symlink"}
+
+
+def _short_path(path: Any, workspace: Any, home: Any) -> Any:
+    """Pfad wie im Terminal (18.12): im Arbeitsordner relativ («scans/udp.xml»), unter HOME mit
+    «~/» («~/privat/notizen.txt»), sonst unverändert. ``ariadne import`` versteht alle drei."""
+    if not isinstance(path, str) or not os.path.isabs(path):
+        return path
+    norm = os.path.normpath(path)
+    for base, prefix in ((workspace, ""), (home, "~/")):
+        if base is None:
+            continue
+        root = os.path.normpath(str(base))
+        if norm.startswith(root + os.sep):
+            return prefix + norm[len(root) + 1 :]
+    return path
 
 
 def pending_reason(raw: Any) -> str:

@@ -81,16 +81,17 @@
     return `${shortCommand(c.cmd.text, hhmm(c.ts, { utc }))}${term ? ` · ${term}` : ''}`;
   });
 
-  const sha = $derived(source?.t === 'file' ? source.sha256 : null);
+  const sha = $derived(source?.t === 'file' ? source.sha256 : unit?.kind === 'file' ? (unit.sha256 ?? null) : null);
   const runText = $derived.by(() => {
     if (!unit) return '';
     const parts: string[] = [];
-    if (unit.ended_at === null && unit.kind !== 'segment') parts.push(t('ev.running'));
+    const running = unit.kind === 'segment' ? unit.state !== undefined && unit.state !== 'final' : unit.ended_at === null;
+    if (running && unit.kind !== 'file') parts.push(t('ev.running'));
     else if (unit.exit !== null) parts.push(t('ev.exit', { code: unit.exit }));
-    if (unit.duration_ms !== null && unit.duration_ms > 0) parts.push(t('ev.duration', { d: duration(unit.duration_ms) }));
+    if (unit.duration_ms !== null && unit.duration_ms >= 1000) parts.push(t('ev.duration', { d: duration(unit.duration_ms) }));
     return parts.join(SEP);
   });
-  const flags = $derived([...new Set([...(unit?.flags ?? []), ...(source?.t === 'stream' ? source.flags : []), ...(source?.t === 'stream' && source.distrusted ? ['distrusted'] : [])])]);
+  const flags = $derived([...new Set([...(unit?.flags ?? []), ...(unit?.kind === 'segment' ? ['remote_reconstructed'] : []), ...(source?.t === 'stream' ? source.flags : []), ...(source?.t === 'stream' && source.distrusted ? ['distrusted'] : [])])]);
 
   function flagText(f: string): string {
     const key = `ev.flag.${f}`;
@@ -269,8 +270,8 @@
           {#if !isFile}
             <dt>{t('ev.k.source')}</dt>
             <dd>
-              {#if unit.tty}<span class="mono">{unit.tty.replace(/^\/dev\//, '')}</span>{SEP}{:else if unit.terminal}<Txt value={termName(unit.terminal)} max={40} />{SEP}{/if}{#if unit.src_ip}{t('ev.srcIp')}
-                <Txt value={unit.src_ip} mono max={45} />{SEP}{/if}{runText}
+              {#if unit.tty}<span class="mono">{unit.tty.replace(/^\/dev\//, '')}</span>{:else if unit.terminal}<Txt value={termName(unit.terminal)} max={40} />{/if}{#if unit.src_ip}{#if unit.tty || unit.terminal}{SEP}{/if}{t('ev.srcIp')}
+                <Txt value={unit.src_ip} mono max={45} />{/if}{#if runText}{#if unit.tty || unit.terminal || unit.src_ip}{SEP}{/if}{runText}{/if}
             </dd>
           {/if}
           {#if source && source.t !== 'user'}

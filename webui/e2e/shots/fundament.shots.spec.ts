@@ -103,7 +103,7 @@ const SHOTS: Shot[] = [
     path: '/karte',
     design: 'Ariadne_Runde_2__10.png',
     prep: async (page) => {
-      await expect(page.getByRole('alertdialog', { name: /Ziel ausserhalb des Scopes/ })).toBeVisible();
+      await expect(page.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ })).toBeVisible();
     },
   },
   {
@@ -138,7 +138,7 @@ async function presentationOn(page: Page): Promise<void> {
 }
 
 async function closeScopeCard(page: Page): Promise<void> {
-  const card = page.getByRole('alertdialog', { name: /Ziel ausserhalb des Scopes/ });
+  const card = page.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ });
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: 'Scope-Warnung schliessen' }).click();
 }

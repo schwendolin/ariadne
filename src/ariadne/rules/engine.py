@@ -31,7 +31,7 @@ from ariadne.rules.encoders import Scope
 from ariadne.rules.facts import ClaimRef, Facts, load
 from ariadne.rules.state import load_marks, state_of
 from ariadne.rules.templates import TEMPLATES, render
-from ariadne.rules.text import Parts, iso, local_hm, mask_known, vis
+from ariadne.rules.text import Parts, iso, mask_known, vis
 
 __all__ = ["Built", "evaluate", "to_json", "suggestion_key", "basis_of", "clear_cache", "SUSPECT_REASONS"]
 
@@ -268,6 +268,7 @@ def _evidence(
                     "unit_id": None,
                     "lines": None,
                     "label": vis(mask_known(ref.value, f.known_secrets))[0],
+                    "ts": None,
                 }
             )
             continue
@@ -277,7 +278,9 @@ def _evidence(
             continue
         seen.add((unit_id, lines))
         u = f.units.get(unit_id)
-        bits = [b for b in (_unit_label(f, unit_id), local_hm(u.ts if u else ts)) if b]
+        # ohne Uhrzeit: die steht in ``ts``, die Oberfläche zeigt sie in der Lokalzeit des Browsers
+        # (wie die Belege von Findings, web-api.md 18.12)
+        bits = [b for b in (_unit_label(f, unit_id),) if b]
         if lines is not None:
             bits.append(
                 f"Zeile {lines[0] + 1}"
@@ -291,6 +294,7 @@ def _evidence(
                 "unit_id": unit_id,
                 "lines": list(lines) if lines else None,
                 "label": label,
+                "ts": iso(u.ts if u else ts),
             }
         )
     return out

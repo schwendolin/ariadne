@@ -15,7 +15,8 @@
   import type { ProjectStore } from '../stores/project.svelte';
   import SecretValue from '../ui/SecretValue.svelte';
   import Txt from '../ui/Txt.svelte';
-  import { url } from '../url/state.svelte';
+  import { displaySafe } from '../safe/displaySafe';
+  import { encodeEvidence, url } from '../url/state.svelte';
   import { termShort } from '../util/format';
   import { hhmm, utcTooltip } from '../util/time';
   import { canUndo, resultText, shortCommand } from './model';
@@ -53,18 +54,42 @@
 
   const time = $derived(hhmm(item.ts, { seconds: true, utc }));
   const term = $derived(item.terminal ? termShort(item.terminal) : item.terminal_id ? termShort({ ordinal: null, terminal_id: item.terminal_id }) : '');
-  const hasEvidence = $derived(item.type === 'command' || item.type === 'segment' || item.type === 'file');
+  const hasEvidence = $derived(item.type === 'command' || item.type === 'segment' || item.type === 'file' || item.type === 'callback');
   const distrusted = $derived(item.type === 'command' && item.distrusted !== null);
   const undoable = $derived(canUndo(item));
 
   /** offene Kontextklärung zum Terminal eines laufenden Befehls («Kontext unklar · K2») */
   const unclear = $derived.by(() => {
     if (item.type !== 'command' || item.cmd.ended_at !== null || !item.terminal_id) return null;
+    // steht der Callback als eigene Zeile da (D15), trägt sie den Hinweis, nicht der Listener
+    if (project.timeline.rows.some((r) => r.type === 'callback' && r.unit_id === item.unit_id)) return null;
+    const it = project.next.clarifyItems.find((x) => (x.kind === 'ctx_suggestion' || x.kind === 'ctx_unknown') && x.terminal_id === item.terminal_id);
+    return it ? { key: it.item_key, ordinal: project.next.ordinal(it.item_key) } : null;
+  });
+
+  /** offene Kontextklärung zum Terminal eines Callbacks («Kontext unklar · K2», Korrektur D15) */
+  const cbUnclear = $derived.by(() => {
+    if (item.type !== 'callback' || !item.terminal_id) return null;
     const it = project.next.clarifyItems.find((x) => (x.kind === 'ctx_suggestion' || x.kind === 'ctx_unknown') && x.terminal_id === item.terminal_id);
     return it ? { key: it.item_key, ordinal: project.next.ordinal(it.item_key) } : null;
   });
 
   const scope = $derived(app.status?.scope_warning ?? null);
+
+  /** Unterzeile (Exit, Dateien, Hinweise) wie im Design nur, wenn sie etwas sagt: gewählt, läuft, Hinweise, Exit ungleich 0 */
+  const subLine = $derived(
+    item.type === 'command' &&
+      (selected || item.cmd.ended_at === null || item.flags.length > 0 || (item.cmd.exit !== null && item.cmd.exit !== 0)),
+  );
+
+  /** Dateien des Befehls: die XML-Ausgabe zuerst (wie im Design «Datei scans/ms2.xml erkannt»), weitere als «+2» */
+  const files = $derived(
+    item.type === 'command' ? [...item.files].sort((a, b) => Number(!a.path.endsWith('.xml')) - Number(!b.path.endsWith('.xml'))) : [],
+  );
+
+  function openFile(unitId: string): void {
+    url.set({ beleg: encodeEvidence({ kind: 'unit', unit_id: unitId, lines: null }) }, { push: true });
+  }
 
   function fileOwner(cmdId: string | null): string | null {
     const c = project.timeline.findByCmd(cmdId);
@@ -80,7 +105,8 @@
 
   function decisionLabel(it: Extract<TimelineItem, { type: 'decision' }>): string {
     if (it.kind === 'd.status.access' && it.detail) return it.detail;
-    if (it.summary === 'Entscheid' || !it.summary) return it.detail ?? it.kind;
+    // Korrektur K3: nie die Kennung des Entscheids («d.finding.update») zeigen
+    if (it.summary === 'Entscheid' || !it.summary) return it.detail ?? t('tl.decisionOther');
     return it.detail ? `${it.summary} · ${it.detail}` : it.summary;
   }
 
@@ -132,10 +158,14 @@
         <span class="stack">
           <span class="cmdtext" class:strike={distrusted}><Txt value={item.cmd.text ?? ''} mono max={160} ctrl={item.ctrl} /></span>
           {#if !distrusted}
-            <span class="sub">
-              {#if item.cmd.ended_at === null}{t('tl.running')}{:else if item.cmd.exit !== null}{t('tl.exit', { code: item.cmd.exit })}{/if}{#each item.files as f (f.unit_id)}{SEP}{t('tl.file')} <Txt value={f.path} mono max={60} /> {t('tl.fileSeen')}{/each}{#each item.flags as fl (fl)}{SEP}<span class="flag">{t(`tl.flag.${fl}` as MessageKey)}</span>{/each}
-              {#if selected}<button type="button" class="mini" onclick={onopen}>{t('tl.openEvidence')} <kbd>↵</kbd></button>{/if}
-            </span>
+            {#if subLine}
+              <span class="sub">
+                {#if item.cmd.ended_at === null}{t('tl.running')}{:else if item.cmd.exit !== null}{t('tl.exit', { code: item.cmd.exit })}{/if}{#if files[0]}{@const first = files[0]}{SEP}{t('tl.file')}
+                  <button type="button" class="file" title={t('tl.fileEvidence')} onclick={() => openFile(first.unit_id)}><Txt value={first.path} mono max={60} /></button>
+                  {t('tl.fileSeen')}{#if files.length > 1}<span class="muted" title={files.slice(1).map((f) => displaySafe(f.path, 120)).join('\n')}>{SP}{t('tl.filesMore', { n: files.length - 1 })}</span>{/if}{/if}{#each item.flags as fl (fl)}{SEP}<span class="flag">{t(`tl.flag.${fl}` as MessageKey)}</span>{/each}
+                {#if selected}<button type="button" class="mini" onclick={onopen}>{t('tl.openEvidence')} <kbd>↵</kbd></button>{/if}
+              </span>
+            {/if}
           {/if}
           {#if item.scope_warning}
             <span class="scope">
@@ -152,20 +182,25 @@
       {:else if item.type === 'keystep'}
         <span class="with-icon">
           <span class="step" aria-hidden="true">{item.ordinal}</span>
-          <span>{KEYSTEPS.has(item.step) ? t(`tl.keystep.${item.step}` as MessageKey) : item.step}</span>
-          {#if item.note}
-            {#if noteMono(item.note)}<Txt value={item.note} mono max={80} />{:else}<span>· <Txt value={item.note} max={80} /></span>{/if}
-          {/if}
+          <span
+            >{KEYSTEPS.has(item.step) ? t(`tl.keystep.${item.step}` as MessageKey) : item.step}{#if item.note}{#if noteMono(item.note)}{SP}<Txt
+                  value={item.note}
+                  mono
+                  max={80}
+                />{:else}{SEP}<Txt value={item.note} max={80} />{/if}{/if}</span
+          >
         </span>
       {:else if item.type === 'context'}
         <span>
           {#if item.change === 'auto'}{t('tl.ctx.auto')}{:else if item.change === 'push'}{t('tl.ctx.push')}{:else if item.change === 'pop'}{t('tl.ctx.pop')}{:else}{t('tl.ctx.set')}{/if}
           {#if item.change !== 'pop' && item.host_label}
-            <Txt value={item.host_label} mono max={100} ctrl={item.ctrl} />{#if item.user}<span class="muted"> (<Txt value={item.user} max={40} />)</span>{/if}{#if item.source === 'auto'}<span class="faint"> {t('tl.ctx.autoMark')}</span>{/if}
+            <Txt value={item.host_label} mono max={100} ctrl={item.ctrl} />{#if item.user}<span class="muted">{SP}(<Txt value={item.user} max={40} />)</span>{/if}{#if item.source === 'auto'}<span class="faint">{SP}{t('tl.ctx.autoMark')}</span>{/if}
           {:else}
             <Txt value={item.stack_label} mono max={100} ctrl={item.ctrl} />
           {/if}
         </span>
+      {:else if item.type === 'callback'}
+        <span>{t('tl.callback')}{SP}<Txt value={item.remote ?? '?'} mono max={80} ctrl={item.ctrl} /></span>
       {:else if item.type === 'decision'}
         {#if item.kind === 'd.unit.distrust'}
           <span>
@@ -212,6 +247,14 @@
           </button>
         {:else}
           {resultText(item)}
+        {/if}
+      {:else if item.type === 'callback'}
+        {#if cbUnclear}
+          <button type="button" class="unclear" onclick={() => url.go('karte', { sel: cbUnclear.key, host: null })}>
+            <span class="dot" aria-hidden="true"></span>{t('tl.res.ctxUnclear')}{#if cbUnclear.ordinal}{SEP}{cbUnclear.ordinal}{/if}
+          </button>
+        {:else}
+          <span class="muted">{#if item.listener}<Txt value={item.listener} mono max={40} />{/if}{#if item.session}{SEP}{t('tl.ctx.session', { n: item.session })}{/if}</span>
         {/if}
       {:else if item.type === 'segment'}
         <span class="muted"
@@ -460,6 +503,20 @@
   }
   .mini.attention {
     color: var(--attention);
+  }
+  .file {
+    border: none;
+    background: none;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .file:hover,
+  .file:focus-visible {
+    color: var(--fg);
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
   }
   code {
     font-family: var(--font-mono);

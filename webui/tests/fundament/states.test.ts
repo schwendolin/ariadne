@@ -56,6 +56,30 @@ describe('Zustände', () => {
     expect(app.project?.pid).toBe(base.PID);
   });
 
+  it('A19: Projektwechsel räumt Auswahl, Zeile, Finding und Beleg des alten Projekts aus der URL', async () => {
+    const { url } = await import('../../src/lib/url/state.svelte');
+    const { app, backend } = await makeApp('normal');
+    url.go('zeitachse', { zeile: 'alt@1', beleg: 'u:alt@1' });
+    // dasselbe Projekt neu geöffnet (Sperren und Entsperren): nichts geht verloren
+    backend.inject({ name: 'project', id: null, data: { project_id: base.PID, change: 'opened', locked: false } });
+    await settle(8);
+    expect(url.get('zeile')).toBe('alt@1');
+    // ein anderes Projekt: die Parameter des alten gelten nicht mehr
+    const other = '0199aaaa-0000-7000-8000-0000000000ff';
+    const orig = backend.status.bind(backend);
+    vi.spyOn(backend, 'status').mockImplementation(async () => {
+      const st = await orig();
+      return st.project ? { ...st, project: { ...st.project, id: other, slug: 'lab2' } } : st;
+    });
+    backend.inject({ name: 'project', id: null, data: { project_id: other, change: 'opened', locked: false } });
+    await settle(8);
+    expect(app.project?.pid).toBe(other);
+    expect(url.get('zeile')).toBeNull();
+    expect(url.get('beleg')).toBeNull();
+    expect(url.route).toBe('zeitachse');
+    url.go('karte', {}, { replace: true, keep: false });
+  });
+
   it('keine Verbindung: offline nach 5 s, Aktionen gesperrt (Entscheide, Pause, Präsentation)', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     const { app, backend } = await makeApp('offline');

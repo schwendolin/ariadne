@@ -9,7 +9,8 @@
   import type { ProjectStore } from '../stores/project.svelte';
   import { hhmm } from '../util/time';
 
-  let { project }: { project: ProjectStore } = $props();
+  /** `offline`: ohne Verbindung keine Marke «+N seit» (Korrektur D12, Screen 9) */
+  let { project, offline = false }: { project: ProjectStore; offline?: boolean } = $props();
   const g = $derived(project.map.graph);
   const seen = $derived(project.seen.view);
   /** «Stand»: Zeit der Generation (18.8), sonst Zeit des letzten Ladens */
@@ -27,7 +28,7 @@
 
 <div class="lage">
   {#if g}<span class="sum">{summary}</span>{/if}
-  {#if seen?.new && seen.new.count > 0}
+  {#if !offline && seen?.new && seen.new.count > 0}
     <button
       type="button"
       class="new"

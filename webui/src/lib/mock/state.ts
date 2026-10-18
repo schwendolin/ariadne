@@ -28,6 +28,7 @@ import type {
   SeenView,
   ServiceView,
   StreamEvent,
+  Suggestion,
   Terminal,
   TimelineItem,
 } from '../api/types';
@@ -38,6 +39,8 @@ import * as map from './data/map';
 export const SCENARIOS = [
   'normal', 'calm', 'empty', 'noproject', 'locked', 'held', 'offline', 'many', 'hostile', 'login', 'chain', 'noclip',
   'allon', 'present', 'scope', 'noconfirm', 'budget', 'local',
+  // Korrektur A3: nach 2,5 s kommt ein neuer Host dazu (Karte springt nicht unter der Maus)
+  'grow',
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
@@ -50,6 +53,8 @@ export interface MockState {
   prefs: PrefsView;
   graph: GraphView;
   next: NextView;
+  /** entschiedene Denkanstösse (erledigt oder verworfen) wie bei `/suggestions?state=all` */
+  suggestionsDecided: Suggestion[];
   seen: SeenView;
   services: ServiceView[];
   hosts: Record<string, HostDetail>;
@@ -98,6 +103,7 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     prefs: base.prefs(),
     graph,
     next: map.next(),
+    suggestionsDecided: [],
     seen: map.seen(),
     services: map.services(),
     hosts,

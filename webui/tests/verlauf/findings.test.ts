@@ -4,6 +4,7 @@
 // über SafeMarkdown, feindliche Titel als Text. Besitzer: ui-verlauf.
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../src/lib/api/client';
 import type { DecisionInput } from '../../src/lib/api/types';
 import FindingsView from '../../src/lib/findings/FindingsView.svelte';
 import { installKeymap, resetKeymapForTests } from '../../src/lib/keys/keymap';
@@ -238,6 +239,36 @@ describe('Findings: neu', () => {
     expect(project.findings.current?.created_from?.label).toContain('Zeilen 44 bis 47');
   });
 
+  it('gerade angelegt, Auswertung hinkt nach: kein Abruf des Details, bis die Liste es kennt (keine 404)', async () => {
+    const { project, backend } = await mount('normal');
+    const orig = backend.findings.bind(backend);
+    let lag = 3;
+    const old = await orig(project.pid);
+    vi.spyOn(backend, 'findings').mockImplementation(async (pid: string) => (lag-- > 0 ? old : orig(pid)));
+    // wie der Daemon: solange die Liste es nicht kennt, kennt auch das Detail es nicht (404)
+    const origDetail = backend.finding.bind(backend);
+    let rejected = 0;
+    const detail = vi.spyOn(backend, 'finding').mockImplementation(async (pid: string, fid: string) => {
+      if (lag >= 0 && !old.some((f) => f.finding_id === fid)) {
+        rejected += 1;
+        throw new ApiError('not_found', 404, 'Nicht gefunden.');
+      }
+      return origDetail(pid, fid);
+    });
+    project.findings.startFromEvidence({ unit_id: `${T2}@1024`, lines: [43, 46] }, 'T2 msf · Zeilen 44 bis 47');
+    await until(() => !!screen.queryByRole('form', { name: 'Neues Finding' }));
+    await fireEvent.input(title(), { target: { value: 'Neu und noch nicht ausgewertet' } });
+    await fireEvent.click(saveBtn());
+    await until(() => !!url.get('finding') && url.get('finding') !== 'neu');
+    const id = url.get('finding');
+    expect(project.findings.waiting).toBe(true);
+    await until(() => project.findings.current?.finding_id === id, 8000);
+    // das Detail wurde erst geholt, als die Liste das neue Finding kannte: keine Anfrage mit 404
+    expect(rejected).toBe(0);
+    expect(detail.mock.calls.filter((c) => c[1] === id).length).toBe(1);
+    expect(lag).toBeLessThan(0);
+  });
+
   it('«Neues Finding» ohne Beleg: leeres Formular, entfernter Entwurfsbeleg bleibt weg', async () => {
     const { project, view } = await mount('normal', { finding: F1 });
     await until(() => !!screen.queryByLabelText('Titel'));
@@ -277,5 +308,77 @@ describe('Findings: feindliche Werte', () => {
     expect(view.container.querySelector('img, script, a[href^="http"]')).toBeNull();
     expect(view.container.textContent).toContain('ohne Schwere');
     expect(view.container.textContent).toContain('0 Belege');
+  });
+});
+
+describe('Findings: Korrekturen nach der Prüfung', () => {
+  it('A6: neues Finding beginnt im Titelfeld; ein ungespeicherter Entwurf sperrt die Reiterkürzel', async () => {
+    const { app } = await mount('normal', { finding: 'neu' });
+    const { registerGlobalKeys } = await import('../../src/lib/shell/global');
+    const off = registerGlobalKeys(app);
+    await until(() => !!screen.queryByLabelText('Titel'));
+    await settle();
+    expect(document.activeElement).toBe(title());
+    // Ziffern im Titelfeld sind Text, keine Reiterkürzel
+    press('2', {}, title());
+    expect(url.route).toBe('findings');
+    await fireEvent.input(title(), { target: { value: 'Backdoor 2' } });
+    await settle();
+    // auch mit Fokus ausserhalb: kein stilles Verwerfen des Entwurfs
+    title().blur();
+    press('2');
+    expect(url.route).toBe('findings');
+    expect(url.get('finding')).toBe('neu');
+    expect(app.ui.notices.some((n) => n.text.includes('Ungespeicherte Änderungen'))).toBe(true);
+    off();
+  });
+
+  it('A6: nach dem Speichern eines neuen Findings zieht das Formular den Fokus nicht ins Titelfeld; Ziffern wechseln den Reiter', async () => {
+    const { app, project, backend } = await mount('normal');
+    // Auswertung hinkt nach: das gespeicherte Finding lädt noch, das Formular hängt ohne `base` neu ein
+    const orig = backend.findings.bind(backend);
+    let lag = 3;
+    const old = await orig(project.pid);
+    vi.spyOn(backend, 'findings').mockImplementation(async (pid: string) => (lag-- > 0 ? old : orig(pid)));
+    const { registerGlobalKeys } = await import('../../src/lib/shell/global');
+    const off = registerGlobalKeys(app);
+    project.findings.startFromEvidence({ unit_id: `${T2}@1024`, lines: [43, 46] }, 'T2 msf · Zeilen 44 bis 47');
+    await until(() => !!screen.queryByRole('form', { name: 'Neues Finding' }));
+    await settle();
+    expect(document.activeElement).toBe(title());
+    await fireEvent.input(title(), { target: { value: 'Backdoor ohne Anmeldung' } });
+    await fireEvent.click(saveBtn());
+    await until(() => !!url.get('finding') && url.get('finding') !== 'neu');
+    const id = url.get('finding');
+    await settle();
+    expect(document.activeElement).not.toBe(screen.queryByLabelText('Titel'));
+    await until(() => project.findings.current?.finding_id === id, 8000);
+    await until(() => (document.activeElement as HTMLElement | null)?.matches('a.card.sel') === true);
+    expect(document.activeElement?.textContent).toContain('Backdoor ohne Anmeldung');
+    press('3', {}, document.activeElement as HTMLElement);
+    expect(url.route).toBe('zeitachse');
+    expect(app.ui.notices.some((n) => n.text.includes('Ungespeicherte Änderungen'))).toBe(false);
+    off();
+  });
+
+  it('D10: Tastenhinweis «Speichern» nach Plattform (Strg+↵ ausserhalb des Mac)', async () => {
+    await mount();
+    await until(() => !!screen.queryByLabelText('Titel'));
+    expect(saveBtn().textContent).toMatch(/Strg\+↵|⌘↵/);
+    expect(saveBtn().textContent).not.toMatch(/Strg ↵/);
+  });
+
+  it('SEC-UI-1: mehrzeiliger Text kommt echt an; sichtbar gemachte Steuerzeichen werden genannt', async () => {
+    const { project } = await mount('normal', {}, (h) => {
+      h.backend.state.findings = h.backend.state.findings.map((f, i) =>
+        i === 0 ? { ...f, description: 'Erste Zeile\n\n- Punkt eins\n- Punkt zwei', remediation: 'a<ESC>[31m b' } : f,
+      );
+    });
+    await until(() => !!project.findings.current);
+    const desc = screen.getByLabelText('Beschreibung') as HTMLTextAreaElement;
+    expect(desc.value).toBe('Erste Zeile\n\n- Punkt eins\n- Punkt zwei');
+    const notes = screen.getAllByRole('note').map((n) => n.textContent ?? '');
+    expect(notes.some((x) => x.includes('sichtbar gemachte Steuerzeichen'))).toBe(true);
+    expect(notes.filter((x) => x.includes('sichtbar gemachte Steuerzeichen'))).toHaveLength(1);
   });
 });

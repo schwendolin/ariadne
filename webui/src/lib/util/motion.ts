@@ -36,7 +36,15 @@ export function slideInRight(node: HTMLElement) {
   return {};
 }
 
-/** Lässt ein Element einmal pulsieren (900 ms) bzw. zeigt 2 s einen statischen Ring. */
+/**
+ * Weicher Halo in der Farbe des Elements (`--pulse-color`, etwa die Zugriffsfarbe eines Hosts; sonst
+ * die Schriftfarbe), zweistufig mit geringer Deckkraft wie im Design (AriadneKarte pulse101). Nie
+ * ein harter Ring in --focus: Der wäre vom Auswahl- und Fokusring nicht zu unterscheiden (D9).
+ */
+const HALO_COLOR = 'var(--pulse-color, var(--fg))';
+export const HALO = `0 0 0 6px color-mix(in srgb, ${HALO_COLOR} 14%, transparent), 0 0 0 14px color-mix(in srgb, ${HALO_COLOR} 6%, transparent)`;
+
+/** Lässt ein Element einmal pulsieren (900 ms) bzw. zeigt 2 s einen statischen Halo. */
 export function pulseOnce(node: HTMLElement): void {
   if (reducedMotion() || typeof node.animate !== 'function') {
     node.classList.add('pulse-static');
@@ -45,8 +53,9 @@ export function pulseOnce(node: HTMLElement): void {
   }
   node.animate(
     [
-      { boxShadow: '0 0 0 0 var(--focus)' },
-      { boxShadow: '0 0 0 10px transparent' },
+      { boxShadow: '0 0 0 0 transparent, 0 0 0 0 transparent' },
+      { boxShadow: HALO, offset: 0.35 },
+      { boxShadow: '0 0 0 10px transparent, 0 0 0 22px transparent' },
     ],
     { duration: 900, easing: 'ease-out' },
   );

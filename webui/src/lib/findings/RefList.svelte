@@ -57,17 +57,19 @@
         <span class="mono id">{e.id}</span>
         <span class="spacer"></span>
         {#if hypothesis(e)}<span class="hyp">{t('fd.f.hypothesis')}</span>{/if}
-        <label class="sup" title={t('fd.f.supportedHint')}>
-          <input
-            type="checkbox"
-            checked={e.supported}
-            {disabled}
-            aria-label={`${e.id}: ${t('fd.f.markSupported')}`}
-            onchange={() => onchange(entries.map((x) => (x.id === e.id ? { ...x, supported: !x.supported } : x)))}
-          />
-          {t('fd.f.supported')}
-        </label>
-        <button type="button" class="x" {disabled} aria-label={t('fd.f.removeId', { id: e.id })} onclick={() => onchange(entries.filter((x) => x.id !== e.id))}>×</button>
+        <span class="acts">
+          <label class="sup" title={t('fd.f.supportedHint')}>
+            <input
+              type="checkbox"
+              checked={e.supported}
+              {disabled}
+              aria-label={`${e.id}: ${t('fd.f.markSupported')}`}
+              onchange={() => onchange(entries.map((x) => (x.id === e.id ? { ...x, supported: !x.supported } : x)))}
+            />
+            {t('fd.f.supported')}
+          </label>
+          <button type="button" class="x" {disabled} aria-label={t('fd.f.removeId', { id: e.id })} onclick={() => onchange(entries.filter((x) => x.id !== e.id))}>×</button>
+        </span>
       </div>
     {/each}
     <div class="add">
@@ -106,16 +108,21 @@
     background: var(--surface);
     display: flex;
     flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
   }
   .box.invalid {
     border-color: var(--error);
   }
+  /* Korrektur D11: schmal (1000 px) bricht der Hinweis als ganze Zeile um, «×» bleibt im Rahmen */
   .entry {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-3);
+    gap: 4px var(--sp-3);
     padding: 8px 12px;
     border-bottom: var(--lw-1) solid var(--line);
+    min-width: 0;
   }
   .mono {
     font-family: var(--font-mono);
@@ -125,22 +132,33 @@
     white-space: nowrap;
   }
   .spacer {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
   }
   .hyp {
     color: var(--attention);
     font-size: var(--fs-xs);
     text-align: right;
+    white-space: nowrap;
   }
   .sup {
     flex: none;
+    white-space: nowrap;
     display: inline-flex;
     gap: 4px;
     align-items: center;
     font-size: var(--fs-xs);
     color: var(--muted);
   }
+  .acts {
+    flex: none;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
   .x {
+    flex: none;
     border: none;
     background: none;
     color: var(--muted);

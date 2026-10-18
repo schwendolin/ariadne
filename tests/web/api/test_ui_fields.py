@@ -173,3 +173,17 @@ def test_segment_evaluate_after_from_last_output():
     assert open_seg["evaluate_after"] == iso(10**18 + SILENCE_NS)
     assert open_seg["terminal"] == {"terminal_id": "t1", "ordinal": 2, "label": "msf"}
     assert _shape({**base, "state": "final"}, ctx, Bag())["evaluate_after"] is None
+
+
+def test_pending_paths_are_shown_like_in_the_terminal(tmp_path):
+    """Warteliste (18.12): im Arbeitsordner relativ, unter HOME mit «~/», sonst unverändert."""
+    from ariadne.web.api.search import _short_path
+
+    home = tmp_path / "h"
+    ws = home / "ariadne" / "ms2"
+    assert _short_path(str(ws / "scans" / "udp.xml"), ws, home) == "scans/udp.xml"
+    assert _short_path(str(home / "privat" / "notizen.txt"), ws, home) == "~/privat/notizen.txt"
+    assert _short_path("/etc/passwd", ws, home) == "/etc/passwd"
+    assert _short_path(str(home) + "x/datei", ws, home) == str(home) + "x/datei"  # kein Präfix-Treffer
+    assert _short_path("relativ.txt", ws, home) == "relativ.txt"
+    assert _short_path(None, ws, home) is None

@@ -18,7 +18,7 @@ import hashlib
 import json
 import re
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from ariadne.ingest.claims import confidence_level, value_identifier
@@ -501,11 +501,14 @@ def _distrusted(conn: Any) -> set[str]:
         return set()
 
 
-def timeline(conn: Any, limit: int = 200) -> list[dict[str, Any]]:
+def timeline(conn: Any, limit: int = 200,
+             keep_segment: Callable[[str], bool] | None = None) -> list[dict[str, Any]]:
     """Einheiten (Befehle, Segmente, Dateien) und Schlüsselschritte nach Shim-Zeit, die neuesten ``limit``.
 
     Befehle tragen ``cmd_id``, ``cmd_ref`` (für ``ariadne undo``), ``adopted`` (Werte in
-    der Spur ``auto`` aus dieser Evidenzgruppe) und ``distrusted``.
+    der Spur ``auto`` aus dieser Evidenzgruppe) und ``distrusted``. Segmente ohne gespeicherte
+    Zeilen fallen weg, ausser ``keep_segment(unit_id)`` behält ein offenes (vorläufige Zeilen,
+    :mod:`ariadne.ingest.pending`).
     """
     auto = _auto_map(conn)
     adopted = _adopted(conn)
@@ -518,7 +521,8 @@ def timeline(conn: Any, limit: int = 200) -> list[dict[str, Any]]:
             "LEFT JOIN activity a ON a.cmd_id = u.cmd_id AND u.kind = 'command' "
             "ORDER BY u.event_seq DESC, u.unit_id DESC LIMIT ?", (int(limit) * 4 + 50,)):
         ctx = _with_auto(_json(r[6], {}) or {}, auto)
-        if r[1] == "segment" and not r[11]:
+        if r[1] == "segment" and not r[11] and not (
+                keep_segment is not None and r[9] != "final" and keep_segment(str(r[0]))):
             continue  # leere Segmente (nur Prompt) zeigen nichts
         title = r[4] if r[1] == "command" else (r[5] if r[1] == "file" else "Segment")
         e: dict[str, Any] = {

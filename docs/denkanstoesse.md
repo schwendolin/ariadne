@@ -215,9 +215,12 @@ fertige Vorlage.» (D2-Variante im Design).
 
 Bis 5 Belege je Denkanstoss (`EvidenceRef`): Claim, Einheit (Befehle vor Dateien, älteste zuerst, ohne
 misstraute Quellen) und Zeilen. Zeilen zählen wie die Belegansicht (`unit_line.pos`, 0-basiert); das Label
-nennt sie 1-basiert wie die Anzeige (`LogLine` zeigt `n + 1`): «nmap -sV · 14:02 · Zeile 6». Im Label
+nennt sie 1-basiert wie die Anzeige (`LogLine` zeigt `n + 1`): «nmap -sV · Zeile 6». Im Label
 stehen das Werkzeug und höchstens zwei kurze Optionen ohne Ausgabe-Optionen (`-oA`, `-v`), bekannte Secrets
-maskiert; die Uhrzeit ist die Lokalzeit des Daemons. Zwei Werte aus derselben Zeile ergeben einen Beleg.
+maskiert. Die Uhrzeit steht nicht im Label, sondern in `ts` (UTC, Zeit der Quelle); die Oberfläche setzt
+sie in der Lokalzeit des Browsers ein («nmap -sV · 14:02 · Zeile 6»), so stimmt sie auch über den Tunnel
+vom Mac (Integration v0.1-Oberfläche; vorher Lokalzeit des Daemons). Zwei Werte aus derselben Zeile
+ergeben einen Beleg.
 
 ## 8 Leistung
 

@@ -25,7 +25,10 @@ from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import Bag, iso
 from ariadne.web.api.views import commands_for, loads, term_ref, with_secrets
 
-__all__ = ["add_routes", "findings_list", "finding_detail", "FINDINGS_MAX"]
+__all__ = ["add_routes", "findings_list", "finding_detail", "FINDINGS_MAX", "MULTILINE"]
+
+# Mehrzeiliger Markdown des Menschen im Detail: LF und Tabulator bleiben (SEC-UI-1/K1).
+MULTILINE = ("description", "remediation")
 
 FINDINGS_MAX = 500
 _LABEL_TITLE_MAX = 80
@@ -171,7 +174,8 @@ def _ref_view(
     parts: list[str] = []
     if tref is not None and tref.get("ordinal") is not None:
         parts.append(f"T{tref['ordinal']}" + (f" {tref['label']}" if tref.get("label") else ""))
-    if unit is not None:
+    if unit is not None and not (unit.get("kind") == "segment" and parts):
+        # wie im Design «T2 msf 16:45:12 · Zeilen 44 bis 47»: ein Segment nennt nur sein Terminal
         raw = unit.get("cmd_text") or unit.get("path") or ("Segment" if unit.get("kind") == "segment" else "")
         title = _short(b.cmd(raw))
         if title:
@@ -241,8 +245,8 @@ def finding_detail(conn: Any, finding_id: str, bag: Bag) -> dict[str, Any] | Non
 
     out.update(
         {
-            "description": b(f.get("description")) or "",
-            "remediation": b(f.get("remediation")) or "",
+            "description": b.text(f.get("description")) or "",  # mehrzeilig (SEC-UI-1/K1)
+            "remediation": b.text(f.get("remediation")) or "",
             "attack": refs_of("attack_json"),
             "cves": refs_of("cves_json"),
             "evidence": ev_out,
@@ -274,4 +278,4 @@ def add_routes(router: APIRouter, api: Api) -> None:
         res = await api.query(p, lambda c: finding_detail(c, finding_id, bag))
         if res is None:
             raise ApiError("not_found")
-        return await api.respond(res)
+        return await api.respond(res, multiline=MULTILINE)

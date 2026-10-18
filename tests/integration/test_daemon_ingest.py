@@ -91,6 +91,10 @@ def test_nmap_flow_companions_routes_views_and_decisions(paths, operator, fake_i
         # Datei ausserhalb des Arbeitsbereichs: nur Warteliste
         (outside / "o.xml").write_bytes(ms2("xml"))
         await term.command(f"nmap -oX {outside}/o.xml {TARGET}", b"done\r\n", cwd=cwd)
+        # «~/…» hat die Shell ersetzt, argv aus dem Marker zeigt es noch: Pfad im eigenen Home
+        (paths.home / "privat").mkdir(exist_ok=True)
+        (paths.home / "privat" / "t.xml").write_bytes(ms2("xml"))
+        await term.command(f"nmap -oX ~/privat/t.xml {TARGET}", b"done\r\n", cwd=cwd)
         # Symlink im Arbeitsbereich: wird nie gelesen
         os.symlink("/etc/hostname", ws / "scans" / "link.xml")
         await term.command(f"nmap -oX scans/link.xml {TARGET}", b"done\r\n", cwd=cwd)
@@ -121,7 +125,8 @@ def test_nmap_flow_companions_routes_views_and_decisions(paths, operator, fake_i
 
         pend = (await ctl_ok(paths.ctl_sock, "show", what="pending"))["items"]
         reasons = {Path(p["path"]).name: p["reason"] for p in pend}
-        assert reasons == {"o.xml": "outside_workspace", "link.xml": "symlink"}
+        assert reasons == {"o.xml": "outside_workspace", "t.xml": "outside_workspace", "link.xml": "symlink"}
+        assert str(paths.home / "privat" / "t.xml") in {p["path"] for p in pend}
 
         tl = (await ctl_ok(paths.ctl_sock, "show", what="timeline"))["items"]
         nmap_rows = [e for e in tl if e["type"] == "command" and (e["title"] or "").startswith("nmap -sV")]

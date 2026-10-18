@@ -2,7 +2,10 @@
   App-Gerüst (SCREENS «Grundlayout», 9, 10, 11). Besitzer: ui-fundament.
 
   - Zustände: Laden, Anmeldung, kein Projekt, gesperrt, Projekt; keine Verbindung als
-    gedämpfte Ansicht mit gesperrten Aktionen (Klasse `offline-dim`, AppState.offline).
+    gedämpfte Ansicht mit gesperrten Aktionen (Klasse `offline-dim`, AppState.offline). Nicht mehr
+    `inert` (Korrektur A11): Ein Eingabefeld behält Fokus und Getipptes, der Stand bleibt für
+    Bildschirmleser lesbar; Klicks auf Knöpfe und Links und das Absenden von Formularen sperrt
+    `blockOffline` an einer Stelle (Speichern bleibt gesperrt).
   - Kopfzeile immer (ausser bei der Anmeldung); Reiter Karte, Terminals, Zeitachse, Findings.
   - Höchstens ein Dialog (UiStore.dialog), höchstens eine Tafel (URL `beleg` oder `tafel`); die
     Scope-Warnung ist eine nicht modale Meldung (UiStore.scopeCard); solange eine Tafel offen ist,
@@ -53,6 +56,18 @@
   });
 
   onMount(() => installGlobal(app));
+
+  const ACTION = 'button, a[href], [role="button"], [role="link"], summary, input[type="checkbox"], input[type="radio"], input[type="submit"], select';
+
+  /** Ohne Verbindung: Aktionen in der Ansicht sperren (Fokus und Eingaben bleiben), Korrektur A11. */
+  function blockOffline(e: Event): void {
+    if (!app.offline) return;
+    const el = e.target instanceof Element ? e.target.closest(ACTION) : null;
+    if (e.type === 'submit' || (el && !el.closest('[data-offline-ok]'))) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
 </script>
 
 {#if phase === 'boot'}
@@ -63,7 +78,15 @@
   <div class="shell">
     <a class="skip" href="#main">{t('app.skip')}</a>
     <Header {app} />
-    <main id="main" tabindex="-1" class:offline-dim={app.offline} inert={app.offline ? true : undefined}>
+    <main
+      id="main"
+      tabindex="-1"
+      class:offline-dim={app.offline}
+      aria-busy={app.offline ? 'true' : undefined}
+      onclickcapture={blockOffline}
+      onsubmitcapture={blockOffline}
+      onchangecapture={blockOffline}
+    >
       {#if phase === 'project' && project}
         {#key project.pid}
           {#if route === 'karte'}

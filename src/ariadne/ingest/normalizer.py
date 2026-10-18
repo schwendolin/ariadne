@@ -36,6 +36,7 @@ import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from ariadne.parsers.api import Line, SgrSpan
 
@@ -980,7 +981,10 @@ class Normalizer:
 
     def _alt_close(self, end_off: int) -> None:
         self._alt = False
-        rows = _render_screen(bytes(self._alt_buf), self._height, self._width or 80)
+        try:
+            rows = _render_screen(bytes(self._alt_buf), self._height, self._width or 80)
+        except Exception:  # noqa: BLE001 - ein Fehler im Bild darf die Auswertung nie anhalten (K2)
+            rows = []
         flags = FLAG_ALTSCREEN | (FLAG_PROMPT if self._prompt else 0)
         for text in rows:
             self._done.append(NormLine(text, self._alt_start, end_off, (), flags, ()))
@@ -1101,6 +1105,35 @@ _ESC_SPLIT = re.compile(rb"(?=\x1b)")
 _CLEAR = re.compile(rb"\x1b\[[02]?J")
 
 
+def _screen_lines(screen: Any) -> list[str]:
+    """Zeilen des pyte-Bilds, ohne ``screen.display`` (Korrektur K2).
+
+    ``display`` wirft ``IndexError``, wenn ein breites Zeichen (Emoji, CJK) halb überschrieben wurde:
+    Seine Stub-Zelle bleibt mit ``data == ''`` stehen. Hier gilt wie im Terminal: Die Zelle hinter
+    einem breiten Zeichen wird übersprungen, eine verwaiste Stub-Zelle ist ein Leerzeichen.
+    """
+    from wcwidth import wcwidth  # Abhängigkeit von pyte
+
+    buf = screen.buffer
+    out: list[str] = []
+    for y in range(int(screen.lines)):
+        row = buf[y]
+        chars: list[str] = []
+        wide = False
+        for x in range(int(screen.columns)):
+            if wide:
+                wide = False
+                continue
+            data = row[x].data
+            if not data:
+                chars.append(" ")
+                continue
+            chars.append(data)
+            wide = wcwidth(data[0]) == 2
+        out.append("".join(chars))
+    return out
+
+
 def _render_screen(data: bytes, rows: int, cols: int) -> list[str]:
     """Schlussbild des Alternate Screens über pyte (ohne Leerzeilen am Rand).
 
@@ -1130,7 +1163,7 @@ def _render_screen(data: bytes, rows: int, cols: int) -> list[str]:
             stream.feed(part)
         except Exception:  # noqa: BLE001 - feindliche Bytes dürfen pyte nicht durchschlagen
             stream = pyte.ByteStream(screen)
-    lines = [ln.rstrip() for ln in screen.display]
+    lines = [ln.rstrip() for ln in _screen_lines(screen)]
     while lines and not lines[-1]:
         lines.pop()
     while lines and not lines[0]:

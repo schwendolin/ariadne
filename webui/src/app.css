@@ -78,9 +78,12 @@ pre,
   filter: saturate(0.6);
 }
 
-/* Puls ohne Bewegung (prefers-reduced-motion, BEHAVIOR «Bewegung»): statischer Ring für 2 s. */
+/* Puls ohne Bewegung (prefers-reduced-motion, BEHAVIOR «Bewegung»): statischer Halo für 2 s, weich
+   und zweistufig in der Farbe des Elements, nie ein Ring wie Auswahl oder Fokus (Korrektur D9). */
 .pulse-static {
-  box-shadow: 0 0 0 3px var(--focus);
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--pulse-color, var(--fg)) 14%, transparent),
+    0 0 0 14px color-mix(in srgb, var(--pulse-color, var(--fg)) 6%, transparent);
 }
 
 ::selection {

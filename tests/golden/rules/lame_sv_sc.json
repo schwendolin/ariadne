@@ -8,11 +8,12 @@
   "evidence": [
    {
     "claim_key": "6d3025a68cd1a6a5170c06f12b4184728f2a2df196b63c5f141eafd3bdb67f56",
-    "label": "nmap -sV -sC · 19:02 · Zeile 6",
+    "label": "nmap -sV -sC · Zeile 6",
     "lines": [
      5,
      5
     ],
+    "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -122,11 +123,12 @@
   "evidence": [
    {
     "claim_key": "3d64f949172648556429c23dbac9c4bf30bcf77127e6f0d3a1ca7f68341be2b1",
-    "label": "nmap -sV -sC · 19:02 · Zeile 20",
+    "label": "nmap -sV -sC · Zeile 20",
     "lines": [
      19,
      19
     ],
+    "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -236,11 +238,12 @@
   "evidence": [
    {
     "claim_key": "84c62bb0ea5f90e70085282eee1c90f7b554e83862f1b9e6c7cb6e4ed5d562fd",
-    "label": "nmap -sV -sC · 19:02 · Zeile 25",
+    "label": "nmap -sV -sC · Zeile 25",
     "lines": [
      24,
      24
     ],
+    "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -350,20 +353,22 @@
   "evidence": [
    {
     "claim_key": "9a25a419cc3496f31757c16c730b87bfcb7faa12b2f29e7ce4526d271d433dea",
-    "label": "nmap -sV -sC · 19:02 · Zeile 24",
+    "label": "nmap -sV -sC · Zeile 24",
     "lines": [
      23,
      23
     ],
+    "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
    },
    {
     "claim_key": "aaced6225222fba58a7917a906ecc8d462cb59fead1d3f268f9c560070e526a3",
-    "label": "nmap -sV -sC · 19:02 · Zeile 25",
+    "label": "nmap -sV -sC · Zeile 25",
     "lines": [
      24,
      24
     ],
+    "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -541,11 +546,12 @@
   "evidence": [
    {
     "claim_key": "50c9eec59babbf22278924953bf806e4b172b320053e3d490fa944788d5c420f",
-    "label": "nmap -sV -sC · 19:02 · Zeile 3",
+    "label": "nmap -sV -sC · Zeile 3",
     "lines": [
      2,
      2
     ],
+    "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
    }
   ],
@@ -630,11 +636,12 @@
   "evidence": [
    {
     "claim_key": "50c9eec59babbf22278924953bf806e4b172b320053e3d490fa944788d5c420f",
-    "label": "nmap -sV -sC · 19:02 · Zeile 3",
+    "label": "nmap -sV -sC · Zeile 3",
     "lines": [
      2,
      2
     ],
+    "ts": "2026-10-15T17:02:00.000000Z",
     "unit_id": "cmd1"
    }
   ],

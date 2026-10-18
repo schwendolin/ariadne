@@ -355,3 +355,19 @@ def test_redaction_reparse_need_survives_new_pipeline(tmp_path):
     assert not _pipe(j, new).needs_reparse  # nach dem Tausch: kein Endlos-Neuaufbau
     for c in (conn, new):
         c.close()
+
+
+def test_wide_char_in_alt_screen_does_not_stop_pipeline(env):
+    """Korrektur K2: Ein halb überschriebenes breites Zeichen im Vollbild (vim, htop, fzf) liess
+    ``pyte.Screen.display`` abstürzen; die Auswertung blieb dann dauerhaft stehen."""
+    t = env.term
+    t.open()
+    t.command("tui", "\x1b[?1049h\x1b[H\U0001F511 key\x1b[1;1Hx\x1b[?1049l".encode())
+    t.command("id", b"uid=0(root)\r\n")
+    p = env.pipeline()
+    p.process_new()
+    assert p.watermark > 0
+    texts = [r[0] for r in env.rows("SELECT cmd_text FROM unit WHERE state = 'final' ORDER BY start_off")]
+    assert texts == ["tui", "id"]
+    lines = [r[0] for r in env.rows("SELECT text FROM unit_line ORDER BY unit_id, pos")]
+    assert "uid=0(root)" in lines

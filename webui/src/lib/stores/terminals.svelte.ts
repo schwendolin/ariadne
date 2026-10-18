@@ -100,8 +100,21 @@ export class TerminalsStore implements ProjectPart {
     const v = label.trim();
     if (!v || [...v].length > LABEL_MAX) return null;
     const out = await decideWithError(this.ctx, [{ kind: 'd.terminal.label', payload: { terminal_id: tid, label: v } }], 'term.renameFailed');
-    if (out.res) this.reloadSoon(0);
+    if (out.res) void this.awaitLabel(tid, v);
     return out.error;
+  }
+
+  /**
+   * Der Name kommt aus dem Entscheid, sobald die Auswertung ihn verarbeitet hat. Ein Name ist keine
+   * Entität der Projektion, darum meldet `changes` ihn nicht: kurz nachfragen, bis er da ist.
+   */
+  private async awaitLabel(tid: string, label: string): Promise<void> {
+    for (const wait of [0, 250, 500, 1000, 2000]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      if (this.ctx.signal.aborted) return;
+      await this.load();
+      if (this.byId(tid)?.label === label) return;
+    }
   }
 
   dispose(): void {

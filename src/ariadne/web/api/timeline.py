@@ -8,6 +8,7 @@ Sortiert wird nach Shim-Zeit (E96) wie in der CLI, neueste zuerst, mit undurchsi
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
@@ -15,10 +16,11 @@ from fastapi import APIRouter, Query
 from starlette.responses import Response
 
 from ariadne.daemon.terminal import STAGE_KINDS
-from ariadne.ingest import inputs, queries
+from ariadne.ingest import inputs, pending, queries
 from ariadne.ingest.pipeline import SILENCE_NS
 from ariadne.ingest.proj_build import display
 from ariadne.ingest.seg_stream import record_time
+from ariadne.rules import api as rules_api
 from ariadne.web.api.common import Api, valid_tid
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import MASK, Bag, decode_cursor, encode_cursor, iso, ns_str
@@ -34,7 +36,18 @@ __all__ = [
     "UNITS_MAX",
 ]
 
-TYPES = ("command", "segment", "file", "keystep", "context", "decision", "gap", "project", "input")
+TYPES = (
+    "command",
+    "segment",
+    "file",
+    "keystep",
+    "context",
+    "decision",
+    "gap",
+    "project",
+    "input",
+    "callback",
+)
 _STAGE_KINDS = STAGE_KINDS
 DEFAULT_TYPES = frozenset(TYPES) - {"input"}
 UNITS_MAX = 5000  # so viele jüngste Einträge aus Einheiten und Schritten trägt die Zeitachse
@@ -57,6 +70,14 @@ _SUMMARY = {
     "d.unit.distrust": "Rückgängig pro Befehl",
     "d.lab.not_customer": "Bestätigt: kein Kundenauftrag",
     "d.automode.set": "Automodus geändert",
+    # Korrektur K3: Findings und Denkanstösse (web-api.md 18.5, 18.6) mit festen Texten
+    "d.finding.create": "Finding angelegt",
+    "d.finding.update": "Finding geändert",
+    "d.finding.evidence.add": "Beleg zum Finding hinzugefügt",
+    "d.finding.evidence.remove": "Beleg aus dem Finding entfernt",
+    "d.finding.delete": "Finding gelöscht",
+    "d.suggestion.done": "Denkanstoss erledigt",
+    "d.suggestion.dismiss": "Denkanstoss verworfen",
 }
 _WORK = {
     "open": "offen",
@@ -141,6 +162,58 @@ def _entry(
     }
 
 
+def _callbacks(conn: Any) -> list[dict[str, Any]]:
+    """Callbacks eines Listeners als eigene Zeile «Callback von 192.168.56.101:49158» (Korrektur D15,
+    SCREENS 6): jede Beobachtung ``access.callback``, die den Kontext nicht automatisch gesetzt hat
+    (die erscheint als Zeile ``context`` «Callback, Kontext automatisch: …»)."""
+    from ariadne.web.api.evidence import _lines_of
+
+    rows = conn.execute("SELECT terminal_id, opened_at, claim_key FROM ctx_auto LIMIT 10000").fetchall()
+    auto = {(str(tid), int(opened), str(ck)) for tid, opened, ck in rows if ck is not None}
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for ck, entity, scope, unit_id, ts, span_json, attrs_json, value, tid, opened, mono, boot in conn.execute(
+        "SELECT c.claim_key, c.entity_id, c.scope, cs.unit_id, cs.ts_utc_ns, cs.span_json, o.attrs_json, "
+        "c.value_text, u.terminal_id, u.ctx_opened_at, un.mono_ns, un.boot_id FROM claim c "
+        "JOIN claim_source cs ON cs.claim_key = c.claim_key "
+        "JOIN observation o ON o.obs_id = cs.obs_id "
+        "JOIN obs_unit u ON u.unit_id = cs.unit_id "
+        "LEFT JOIN unit un ON un.unit_id = cs.unit_id "
+        "WHERE c.predicate = 'access.callback' AND c.state != 'rejected' AND cs.distrusted = 0 "
+        "ORDER BY cs.ts_utc_ns LIMIT 2000"
+    ):
+        if tid is not None and opened is not None and (str(tid), int(opened), str(ck)) in auto:
+            continue
+        if (str(unit_id), str(ck)) in seen:
+            continue
+        seen.add((str(unit_id), str(ck)))
+        attrs = loads(attrs_json, {}) or {}
+        attrs = attrs if isinstance(attrs, Mapping) else {}
+        lines = _lines_of(conn, str(unit_id), loads(span_json, None))
+        session = attrs.get("session")
+        session = session if isinstance(session, str) and session.isdigit() and len(session) <= 9 else None
+        out.append(
+            _entry(
+                f"cb:{unit_id}:{str(ck)[:16]}",
+                "callback",
+                ts,
+                mono,
+                boot,
+                tid,
+                None,
+                0,
+                host_id=entity,
+                unit_id=str(unit_id),
+                remote=attrs.get("remote") if isinstance(attrs.get("remote"), str) else None,
+                listener=value,
+                scope=scope if scope in ("in", "out", "excluded", "outside_window") else None,
+                session=session,
+                lines=lines,
+            )
+        )
+    return out
+
+
 def _collect(conn: Any, journal: Any, types: frozenset[str], terminal: str | None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if types & {"command", "segment", "file", "keystep"}:
@@ -148,7 +221,12 @@ def _collect(conn: Any, journal: Any, types: frozenset[str], terminal: str | Non
             int(r[0]): (r[1], r[2]) for r in conn.execute("SELECT seq, entity_id, decision_id FROM keystep")
         }
         k_ord = {int(k["seq"]): k["ordinal"] for k in queries.keysteps(conn) if isinstance(k.get("seq"), int)}
-        for e in queries.timeline(conn, UNITS_MAX):
+
+        # offene Segmente, deren Zeilen erst vorläufig vorliegen (laufendes msf, Listener), mit zeigen
+        def keep(uid: str) -> bool:
+            return pending.visible_extra(conn, uid) > 0
+
+        for e in queries.timeline(conn, UNITS_MAX, keep_segment=keep):
             t = e.get("type")
             if t == "keystep":
                 ent, did = k_ent.get(int(e.get("seq") or 0), (None, None))
@@ -268,6 +346,8 @@ def _collect(conn: Any, journal: Any, types: frozenset[str], terminal: str | Non
                     session=session,
                 )
             )
+    if "callback" in types:
+        out.extend(_callbacks(conn))
     if "gap" in types:
         pauses: dict[str, Any] = {}
         for rec in journal.iter_events(kinds=["term.pause", "term.gap"]):
@@ -461,10 +541,11 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
             }
         )
     elif t == "segment":
+        extra = int((ctx.get("pending") or {}).get(str(e.get("unit_id")), 0))
         item.update(
             {
                 "unit_id": e.get("unit_id"),
-                "lines": int(e.get("lines") or 0),
+                "lines": int(e.get("lines") or 0) + extra,
                 "state": e.get("state") if e.get("state") in ("open", "provisional", "final") else "open",
                 "evaluate_after": (
                     iso(ctx["last_out"].get(str(e.get("terminal_id"))) + SILENCE_NS)
@@ -506,6 +587,17 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
     elif t == "decision":
         item.update({"decision_id": e.get("id"), "kind": e.get("kind"), "summary": e.get("summary")})
         item.update(_decision_extra(e, ctx, b))
+    elif t == "callback":
+        item.update(
+            {
+                "unit_id": e.get("unit_id"),
+                "remote": b(e.get("remote")),
+                "listener": b(e.get("listener")),
+                "scope": e.get("scope"),
+                "session": e.get("session"),
+                "lines": e.get("lines"),
+            }
+        )
     elif t == "gap":
         item.update(
             {
@@ -523,7 +615,9 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
     return item
 
 
-def _page_context(conn: Any, page: list[dict[str, Any]], all_entries: list[dict[str, Any]]) -> dict[str, Any]:
+def _page_context(
+    conn: Any, page: list[dict[str, Any]], all_entries: list[dict[str, Any]], profile: str = "lab"
+) -> dict[str, Any]:
     cmd_ids = sorted({str(e["cmd_id"]) for e in page if e["type"] == "command" and e.get("cmd_id")})
     unit_ids = sorted({str(e["unit_id"]) for e in page if e["type"] == "command" and e.get("unit_id")})
     ends: dict[str, Any] = {}
@@ -571,7 +665,13 @@ def _page_context(conn: Any, page: list[dict[str, Any]], all_entries: list[dict[
         "refs": queries.term_refs(conn),
         "results": _results(conn, cmd_ids),
         "last_out": last_out,
-        "decisions": _decision_refs(conn, page),
+        "decisions": _decision_refs(conn, page, profile),
+        # offene Segmente: Zeilen, die erst vorläufig gelesen sind (ingest.pending)
+        "pending": {
+            str(e["unit_id"]): pending.visible_extra(conn, str(e["unit_id"]))
+            for e in page
+            if e["type"] == "segment" and e.get("unit_id") and e.get("state") != "final"
+        },
     }
 
 
@@ -628,7 +728,52 @@ def _results(conn: Any, cmd_ids: list[str]) -> dict[str, dict[str, int]]:
     return out
 
 
-def _decision_refs(conn: Any, page: list[dict[str, Any]]) -> dict[str, Any]:
+def _finding_refs(conn: Any, page: list[dict[str, Any]]) -> dict[str, tuple[int, str]]:
+    """Nummer und Titel der Findings, auf die Entscheide der Seite zeigen (Korrektur K3)."""
+    ids: set[str] = set()
+    for e in page:
+        kind = str(e.get("kind") or "")
+        if e["type"] != "decision" or not kind.startswith("d.finding."):
+            continue
+        fid = (e.get("payload") or {}).get("finding_id") if kind != "d.finding.create" else e.get("id")
+        if isinstance(fid, str):
+            ids.add(fid)
+    out: dict[str, tuple[int, str]] = {}
+    for part in chunks(sorted(ids)):
+        marks = ",".join("?" * len(part))
+        try:
+            rows = conn.execute(
+                f"SELECT finding_id, ordinal, title FROM finding WHERE finding_id IN ({marks})",  # noqa: S608
+                tuple(part),
+            ).fetchall()
+        except sqlite3.Error:
+            return {}
+        for fid, ordinal, title in rows:
+            out[str(fid)] = (int(ordinal), str(title))
+    return out
+
+
+def _suggestion_refs(conn: Any, page: list[dict[str, Any]], profile: str) -> dict[str, tuple[str, str]]:
+    """Regel und Titel der Denkanstösse, auf die Entscheide der Seite zeigen (Korrektur K3)."""
+    keys = {
+        str((e.get("payload") or {}).get("suggestion_key"))
+        for e in page
+        if e["type"] == "decision" and str(e.get("kind") or "").startswith("d.suggestion.")
+    }
+    if not keys:
+        return {}
+    try:
+        items, _more = rules_api.suggestions(conn, profile=profile, state="all", limit=2000)
+    except Exception:  # noqa: BLE001 - die Zeitachse zeigt den Entscheid auch ohne Titel
+        return {}
+    return {
+        str(s["suggestion_key"]): (str(s.get("rule_id") or ""), str(s.get("title") or ""))
+        for s in items
+        if isinstance(s, dict) and s.get("suggestion_key") in keys
+    }
+
+
+def _decision_refs(conn: Any, page: list[dict[str, Any]], profile: str = "lab") -> dict[str, Any]:
     """Wirkung von ``d.unit.distrust`` und Befehle der Entscheide auf der Seite."""
     ids = [str(e["id"]) for e in page if e["type"] == "decision"]
     effects: dict[str, tuple[int, int, str]] = {}
@@ -653,7 +798,12 @@ def _decision_refs(conn: Any, page: list[dict[str, Any]]) -> dict[str, Any]:
             tuple(part),
         ):
             claims[str(ck)] = (str(subj), str(pred))
-    return {"effects": effects, "claims": claims}
+    return {
+        "effects": effects,
+        "claims": claims,
+        "findings": _finding_refs(conn, page),
+        "suggestions": _suggestion_refs(conn, page, profile),
+    }
 
 
 _ACCESS_DETAIL = {"none": "kein Zugriff", "user": "Benutzer", "admin": "root"}
@@ -679,8 +829,18 @@ def _decision_extra(e: Mapping[str, Any], ctx: Mapping[str, Any], b: Bag) -> dic
     elif kind in ("d.entity.merge", "d.entity.split"):
         idents = [display(str(x)) for x in data.get("identifiers") or [] if isinstance(x, str)]
         detail = " + ".join(idents[:4]) or None
-    elif kind.startswith("d.finding.") and isinstance(data.get("title"), str):
-        detail = data["title"]
+    elif kind.startswith("d.finding."):
+        fid = e.get("id") if kind == "d.finding.create" else data.get("finding_id")
+        f = refs.get("findings", {}).get(fid) if isinstance(fid, str) else None
+        title = data.get("title") if isinstance(data.get("title"), str) else (f[1] if f else None)
+        if f is not None:
+            detail = f"F{f[0]} · {title}" if title else f"F{f[0]}"
+        elif title:
+            detail = title
+    elif kind.startswith("d.suggestion."):
+        sg = refs.get("suggestions", {}).get(data.get("suggestion_key"))
+        if sg is not None:
+            detail = sg[1] or sg[0] or None
     effect = refs["effects"].get(str(e.get("id")))
     ref = None
     if kind == "d.unit.distrust":
@@ -705,6 +865,7 @@ def timeline_page(
     cursor: dict[str, Any] | None,
     limit: int,
     bag: Bag,
+    profile: str = "lab",
 ) -> dict[str, Any]:
     bag = with_secrets(bag, conn)  # Befehlstexte maskiert (SEC-W1)
     entries = _collect(conn, journal, types, terminal)
@@ -735,7 +896,7 @@ def timeline_page(
             start = next((i for i, e in enumerate(picked) if int(e.get("ts") or 0) < cts), len(picked))
     page = picked[start : start + limit]
     more = start + limit < len(picked)
-    ctx = _page_context(conn, page, entries)
+    ctx = _page_context(conn, page, entries, profile)
     items = [_shape(e, ctx, bag) for e in page]
     nxt = encode_cursor({"id": page[-1]["id"], "ts": int(page[-1].get("ts") or 0)}) if more and page else None
     return {"items": items, "next_cursor": nxt}
@@ -769,10 +930,19 @@ def add_routes(router: APIRouter, api: Api) -> None:
         except ValueError:
             raise ApiError("validation", [{"loc": ["query", "cursor"], "type": "value_error"}]) from None
         bag = api.bag()
+        profile = p.info.profile
         res = await api.query_journal(
             p,
             lambda c, j: timeline_page(
-                c, j, types=wanted, terminal=terminal, host=host, cursor=cur, limit=limit, bag=bag
+                c,
+                j,
+                types=wanted,
+                terminal=terminal,
+                host=host,
+                cursor=cur,
+                limit=limit,
+                bag=bag,
+                profile=profile,
             ),
         )
         return await api.respond(res)

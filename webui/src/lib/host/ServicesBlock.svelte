@@ -1,7 +1,9 @@
 <!--
   Services im Host-Detail (SCREENS 3, Briefing 5.3): Port, Dienst, Produkt und Version, Zustand
-  ausser «open»; vom Ziel angebotene Titel mit «! Injection-Verdacht · vom Ziel angeboten».
-  Zuerst 8 Zeilen (verdächtige immer dabei), «N weitere» klappt auf. Verlauf, wenn ein genauerer
+  ausser «open»; vom Ziel angebotene Titel mit «! Injection-Verdacht · vom Ziel angeboten». Die
+  Zusatzinfo (Banner) steht in der gekürzten Liste nur bei Verdacht, aufgeklappt (oder wenn alle
+  Services in die kurze Liste passen) bei allen.
+  Zuerst 8 Zeilen (verdächtige und solche mit Verlauf immer dabei), «N weitere» klappt auf. Verlauf, wenn ein genauerer
   oder neuerer Wert einen alten abgelöst hat («445 Samba 3.X - 4.X → 3.0.20-Debian», E45).
   Besitzer: ui-karte.
 -->
@@ -19,16 +21,20 @@
   const shown = $derived.by(() => {
     if (all || sorted.length <= FIRST) return sorted;
     const head = sorted.slice(0, FIRST);
+    const keep = (x: ServiceView): boolean => x.suspect || x.history.length > 0;
     for (const s of sorted.slice(FIRST)) {
-      if (!s.suspect) continue;
-      // verdächtige Titel nie verstecken: ersetzt die letzte unauffällige Zeile
-      const i = head.map((h) => h.suspect).lastIndexOf(false);
+      if (!keep(s)) continue;
+      // verdächtige Titel und Dienste mit Verlauf nie verstecken: ersetzen die letzte unauffällige Zeile
+      const i = head.map(keep).lastIndexOf(false);
       if (i >= 0) head.splice(i, 1);
+      else if (!s.suspect) continue; // Verdacht immer zeigen, Verlauf nur auf freiem Platz
       head.push(s);
     }
     return head.sort((a, b) => a.port - b.port);
   });
   const hidden = $derived(sorted.length - shown.length);
+  /** Zusatzinfo (Banner) aller Services: aufgeklappt oder wenn ohnehin alle in die kurze Liste passen */
+  const banners = $derived(all || sorted.length <= FIRST);
   const history = $derived(
     sorted.flatMap((s) =>
       s.history.map((h) => ({ port: s.port, old: h.value, now: currentOf(s, h.predicate), key: `${s.service_id}:${h.claim_key}` })),
@@ -54,8 +60,8 @@
       <span class="name" role="cell"><Txt value={s.name ?? ''} mono max={20} /></span>
       <span class="prod" role="cell">
         <span class:muted={s.state !== null && s.state !== 'open'}><Txt value={product(s)} mono ctrl={s.ctrl} max={60} />{#if s.state && s.state !== 'open'}{product(s) ? ' · ' : ''}{t(`host.state.${s.state}`)}{/if}</span>
-        {#if s.banner}<span class="banner"><Txt value={s.banner} mono max={70} /></span>{/if}
-        {#if s.suspect}<span class="flag">{t('host.injection')}</span>{:else if s.from_target && s.banner}<span class="from">{t('host.fromTarget')}</span>{/if}
+        {#if s.banner && (s.suspect || banners)}<span class="banner"><Txt value={s.banner} mono max={70} /></span>{/if}
+        {#if s.suspect}<span class="flag">{t('host.injection')}</span>{:else if s.from_target && s.banner && banners}<span class="from">{t('host.fromTarget')}</span>{/if}
       </span>
     </div>
   {/each}

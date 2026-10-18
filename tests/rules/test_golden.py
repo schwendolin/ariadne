@@ -2,7 +2,7 @@
 
 * MS2 mit ``nmap -sV -sC`` (Text und XML, wie ``tests/projection/test_ausw_golden.py::_ms2``),
 * MS2 nur mit ``nmap -sV`` (der Fall aus dem Design, Ariadne_Runde_1 1a: D1 R-ANON-ZUGRIFF auf .101:21
-  mit «Beleg: nmap -sV · 14:02 · Zeile 6» und ``nmap -p 21 --script ftp-anon 192.168.56.101``),
+  mit «Beleg: nmap -sV · Zeile 6» (Uhrzeit in ``ts``) und ``nmap -p 21 --script ftp-anon 192.168.56.101``),
 * Lame mit ``nmap -sV -sC``,
 * ein Host mit feindlichen Bannern: keine fertige Vorlage, nur Einzelwerte.
 
@@ -248,7 +248,9 @@ def test_ms2_without_scripts_matches_design(results):
         {"text": " prüfen", "target": False},
     ]
     assert first["reason"] == "FTP-Dienst ohne geprüfte anonyme Anmeldung"
-    assert [e["label"] for e in first["evidence"]] == ["nmap -sV · 14:02 · Zeile 6"]
+    assert [e["label"] for e in first["evidence"]] == ["nmap -sV · Zeile 6"]
+    # die Uhrzeit steht in ts (UTC); die Oberfläche zeigt «nmap -sV · 14:02 · Zeile 6» in Lokalzeit
+    assert [e["ts"] for e in first["evidence"]] == ["2026-10-08T12:02:11.000000Z"]
     assert first["evidence"][0]["lines"] == [5, 5] and first["evidence"][0]["unit_id"] == "cmd1"
     assert first["stages"] == {
         "question": "Welche Daten gibt dieser Dienst ohne Anmeldung preis?",
@@ -329,7 +331,7 @@ def test_shape_matches_web_api_18_6(name, results):
         assert set(s["flags"]) <= {"from_target", "injection_suspect"} and s["flags"] == sorted(s["flags"])
         assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", s["ts"])
         for e in s["evidence"]:
-            assert set(e) == {"claim_key", "unit_id", "lines", "label"} and re.fullmatch(
+            assert set(e) == {"claim_key", "unit_id", "lines", "label", "ts"} and re.fullmatch(
                 r"[0-9a-f]{64}", e["claim_key"]
             )
         for t in s["templates"]:

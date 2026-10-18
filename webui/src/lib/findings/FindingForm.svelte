@@ -8,10 +8,10 @@
   erscheint ein Hinweis; sonst übernimmt das Formular den neuen Stand. Besitzer: ui-verlauf.
 -->
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import type { FindingDetail, FindingEvidence, Severity } from '../api/types';
   import { t, type MessageKey } from '../i18n';
-  import { registerKeys } from '../keys/keymap';
+  import { modLabel, registerKeys } from '../keys/keymap';
   import SafeMarkdown from '../safe/SafeMarkdown.svelte';
   import type { AppState } from '../stores/app.svelte';
   import type { ProjectStore } from '../stores/project.svelte';
@@ -21,7 +21,7 @@
   import { encodeEvidence, url } from '../url/state.svelte';
   import { hhmm } from '../util/time';
   import AffectedPicker from './AffectedPicker.svelte';
-  import { cleanTitle, formFrom, isDirty, SEVERITIES, TEXT_MAX, TITLE_MAX, validate, type FindingForm, type NewEvidence, type RefEntry } from './form';
+  import { cleanTitle, formFrom, hasVisibleMarkers, isDirty, SEVERITIES, TEXT_MAX, TITLE_MAX, validate, type FindingForm, type NewEvidence, type RefEntry } from './form';
   import RefList from './RefList.svelte';
 
   let {
@@ -147,9 +147,22 @@
     return t('fd.hist.other');
   }
 
-  onMount(() =>
-    registerKeys([{ keys: ['Mod+Enter'], allowInInput: true, when: () => url.route === 'findings' && !url.get('beleg'), run: () => void save() }]),
-  );
+  // Ungespeicherte Änderungen melden (Reiterkürzel sperren, Korrektur A6)
+  const dirtyId = `finding:${untrack(() => base?.finding_id ?? 'neu')}`;
+  $effect(() => {
+    app.ui.setDirty(dirtyId, dirty && !saving);
+  });
+  onDestroy(() => app.ui.setDirty(dirtyId, false));
+
+  let titleEl: HTMLInputElement | undefined = $state();
+  onMount(() => {
+    // Korrektur A6: Ein neues Finding («Als Finding», «Neues Finding») beginnt im Titelfeld, sonst
+    // läge der Fokus auf body und Ziffern im Titel wechselten den Reiter.
+    // Nur für ?finding=neu: nach dem Speichern hängt das Formular kurz ohne `base` neu ein (das
+    // gespeicherte Finding lädt noch), dort darf es den Fokus nicht ins Titelfeld ziehen.
+    if (url.get('finding') === 'neu') void tick().then(() => titleEl?.focus({ preventScroll: true }));
+    return registerKeys([{ keys: ['Mod+Enter'], allowInInput: true, when: () => url.route === 'findings' && !url.get('beleg'), run: () => void save() }]);
+  });
 </script>
 
 <form
@@ -174,6 +187,7 @@
     <label for="fd-title">{t('fd.f.title')}</label>
     <input
       id="fd-title"
+      bind:this={titleEl}
       class="title"
       class:invalid={!!errors.title}
       bind:value={form.title}
@@ -221,6 +235,7 @@
         {:else}
           <textarea id="fd-{k}" class:invalid={!!errors[k]} bind:value={form[k]} rows="5" maxlength={TEXT_MAX} placeholder={t('fd.f.empty')}></textarea>
         {/if}
+        {#if hasVisibleMarkers(form[k])}<p class="hint" role="note">{t('fd.f.markers')}</p>{/if}
         {#if errors[k]}<p class="err" role="alert">{t(errors[k] as MessageKey)}</p>{/if}
       </div>
     {/each}
@@ -269,7 +284,7 @@
   </div>
 
   <div class="save">
-    <Button variant="primary" type="submit" kbd="⌘↵" disabled={saving || app.offline} reason={saving ? t('fd.f.saving') : t('term.offline')}
+    <Button variant="primary" type="submit" kbd={modLabel('↵')} disabled={saving || app.offline} reason={saving ? t('fd.f.saving') : t('term.offline')}
       >{saving ? t('fd.f.saving') : t('fd.f.save')}</Button
     >
     <span class="origin">
@@ -464,6 +479,11 @@
   .err {
     margin: 0;
     color: var(--error);
+    font-size: var(--fs-s);
+  }
+  .hint {
+    margin: 0;
+    color: var(--attention);
     font-size: var(--fs-s);
   }
   .error-box {

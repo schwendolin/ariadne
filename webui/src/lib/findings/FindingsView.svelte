@@ -6,7 +6,7 @@
   Offenes Finding in der URL (`finding`). Besitzer: ui-verlauf.
 -->
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { FindingSummary } from '../api/types';
   import { t, type MessageKey } from '../i18n';
   import type { AppState } from '../stores/app.svelte';
@@ -54,9 +54,30 @@
     url.set({ finding: 'neu' }, { push: true });
   }
 
+  // Nach dem Speichern eines neuen Findings ersetzt das Formular sich selbst (anderer Schlüssel);
+  // der Fokus geht an die neue Karte in der Liste statt auf body (wie Korrektur A13).
+  let listEl: HTMLUListElement | undefined = $state();
+  let focusSaved = $state<string | null>(null);
+
   function saved(id: string | null): void {
-    if (id && fid === 'neu') url.set({ finding: id });
+    if (id && fid === 'neu') {
+      url.set({ finding: id });
+      focusSaved = id;
+    }
   }
+
+  $effect(() => {
+    const id = focusSaved;
+    if (!id || !list.some((f) => f.finding_id === id)) return;
+    untrack(() => {
+      focusSaved = null;
+      void tick().then(() => {
+        const active = document.activeElement;
+        if (active && active !== document.body) return;
+        listEl?.querySelector<HTMLElement>('a.card.sel')?.focus({ preventScroll: true });
+      });
+    });
+  });
 </script>
 
 <section class="findings" aria-label={t('fd.title')}>
@@ -74,7 +95,7 @@
         <span>{t('fd.emptyHint')}</span>
       </div>
     {/if}
-    <ul class="cards" aria-label={t('fd.listLabel')}>
+    <ul class="cards" aria-label={t('fd.listLabel')} bind:this={listEl}>
       {#if fid === 'neu'}
         <li><div class="card sel"><span class="meta"><span class="mono">F?</span><span>{t('fd.status.draft')}</span></span><strong>{t('fd.newTitle')}</strong></div></li>
       {/if}
@@ -107,7 +128,7 @@
   <div class="detail">
     {#if formKey}
       {#key formKey}
-        <FindingForm {app} {project} base={current} {initial} {draft} onsaved={saved} />
+        <FindingForm {app} {project} base={fid === 'neu' ? null : current} {initial} {draft} onsaved={saved} />
       {/key}
       {#if store.waiting}<p class="muted">{t('fd.waiting')}</p>{/if}
     {:else if notFound}

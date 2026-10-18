@@ -28,6 +28,7 @@ import type { AppApi } from './ctx';
 import { PrefsStore } from './prefs.svelte';
 import { ProjectStore } from './project.svelte';
 import { UiStore } from './ui.svelte';
+import { url } from '../url/state.svelte';
 
 export type AuthState = 'init' | 'login' | 'ready';
 export type Phase = 'boot' | 'login' | 'no_project' | 'locked' | 'project';
@@ -55,7 +56,10 @@ export class AppState implements AppApi {
   private unsubscribe: (() => void) | null = null;
   private offUnauthorized: (() => void) | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private statusSoon: ReturnType<typeof setTimeout> | null = null;
   private offlineTimer: ReturnType<typeof setTimeout> | null = null;
+  /** zuletzt geöffnetes Projekt (Korrektur A19) */
+  private lastPid: string | null = null;
   private pauseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private stopped = false;
   /** cmd_id der zuletzt gemeldeten Scope-Warnung (nur im Speicher dieses Tabs) */
@@ -249,6 +253,12 @@ export class AppState implements AppApi {
     const pid = s?.project?.id ?? null;
     if (this.project && this.project.pid !== pid) this.closeProject();
     if (pid && s?.project && !this.project) {
+      // Korrektur A19: Nach einem Projektwechsel gelten Auswahl, Zeile, Finding und Beleg des alten
+      // Projekts nicht mehr (Sperren und Entsperren desselben Projekts behält sie).
+      if (this.lastPid !== null && this.lastPid !== pid) {
+        url.set({ host: null, sel: null, zeile: null, finding: null, beleg: null, hostf: null, terminal: null });
+      }
+      this.lastPid = pid;
       const store = new ProjectStore(pid, s.project.slug, this, s.generation);
       this.project = store;
       void store.loadAll();
@@ -281,6 +291,11 @@ export class AppState implements AppApi {
       case 'terminal':
         void this.refreshStatus();
         break;
+      case 'changes':
+        // Nach einer Auswertung: die Scope-Warnung (Briefing 4.5) entsteht erst in der Projektion
+        // und soll beim Eintreffen erscheinen, nicht erst beim nächsten Abruf in einer Minute.
+        this.refreshStatusSoon();
+        break;
       case 'presentation':
         if (this.status && this.status.presentation !== ev.data.on) {
           this.status = { ...this.status, presentation: ev.data.on };
@@ -296,6 +311,15 @@ export class AppState implements AppApi {
         break;
     }
     this.project?.dispatch(ev);
+  }
+
+  /** Status gebündelt nachladen (mehrere Auswertungen kurz hintereinander ergeben einen Abruf). */
+  private refreshStatusSoon(): void {
+    if (this.statusSoon || this.stopped) return;
+    this.statusSoon = setTimeout(() => {
+      this.statusSoon = null;
+      if (this.auth === 'ready') void this.refreshStatus();
+    }, 400);
   }
 
   private announcePresentation(on: boolean): void {
@@ -400,6 +424,8 @@ export class AppState implements AppApi {
     this.stopped = true;
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibility);
     if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.statusSoon) clearTimeout(this.statusSoon);
+    this.statusSoon = null;
     if (this.offlineTimer) clearTimeout(this.offlineTimer);
     for (const tm of this.pauseTimers.values()) clearTimeout(tm);
     this.unsubscribe?.();

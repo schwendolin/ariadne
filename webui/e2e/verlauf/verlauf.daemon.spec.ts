@@ -198,7 +198,7 @@ test('Beleg öffnen mit ↵ und mit Esc schliessen, Fokus zurück auf die Zeile'
   const r = page.locator(`li.item[data-row="${nmap.id}"]`);
   await r.click();
   await page.keyboard.press('Enter');
-  const p = page.getByRole('region', { name: 'Beleg' });
+  const p = page.getByRole('dialog', { name: 'Beleg' });
   await expect(p).toBeVisible();
   await expect(p.locator('h2')).toHaveText(/^Beleg · T1 scan · \d\d:\d\d:\d\d$/);
   await expect(p.locator('dl.meta')).toContainText('nmap -sV -sC -oA scans/ms2 192.168.56.101');
@@ -216,7 +216,7 @@ test('Finding aus dem Beleg anlegen, über die API geprüft', async ({ page }) =
   const nmap = await nmapItem(page);
   const before = (await api<{ findings: FindingSummary[] }>(page, `/p/${st.project_id}/findings`)).findings;
   await page.locator(`li.item[data-row="${nmap.id}"]`).dblclick();
-  const p = page.getByRole('region', { name: 'Beleg' });
+  const p = page.getByRole('dialog', { name: 'Beleg' });
   await expect(p.locator('.line').first()).toBeVisible();
   await p.getByRole('button', { name: 'Als Finding' }).click();
   await expect(page).toHaveURL(/\/findings\?.*finding=neu/);
@@ -235,6 +235,74 @@ test('Finding aus dem Beleg anlegen, über die API geprüft', async ({ page }) =
   const detail = await api<{ created_from: { unit_id: string | null } | null }>(page, `/p/${st.project_id}/findings/${f?.finding_id}`);
   expect(detail.created_from?.unit_id).toBe(nmap.unit_id);
   await expect(page.locator('a.card.sel')).toContainText(`F${f?.ordinal}`);
+});
+
+/** POST auf die API mit dem Token des Tabs (nur für Schritte ohne Knopf, etwa Wiederherstellen per d.revoke). */
+async function post<T>(page: Page, path: string, body: unknown): Promise<{ status: number; json: T }> {
+  const tok = await token(page);
+  return page.evaluate(
+    async ({ path, tok, body }) => {
+      const res = await fetch(`/api/v1${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return { status: res.status, json: (await res.json()) as T };
+    },
+    { path, tok, body },
+  );
+}
+
+test('Finding F1 bearbeiten: mehrzeilig hin und zurück, Schwere, Beleg entfernen, Löschen und Wiederherstellen (K1, K4)', async ({ page }) => {
+  await login(page, '/findings');
+  const list = (await api<{ findings: FindingSummary[] }>(page, `/p/${st.project_id}/findings`)).findings;
+  const f1 = list.find((x) => x.title === 'vsftpd 2.3.4 Backdoor');
+  expect(f1).toBeTruthy();
+  const id = String(f1?.finding_id);
+  await page.goto(`${st.base}/findings?finding=${id}`);
+  const form = page.getByRole('form', { name: 'Findings', exact: true });
+  await expect(form.getByLabel('Titel')).toHaveValue('vsftpd 2.3.4 Backdoor');
+  const desc = 'Erste Zeile\n\n- Punkt eins\n- Punkt zwei';
+  await form.getByLabel('Beschreibung').fill(desc);
+  await form.getByLabel('Massnahme').fill('A\nB');
+  await form.getByRole('radio', { name: 'Hoch' }).click();
+  // Beleg entfernen (wirkt mit dem Speichern)
+  const evBefore = (await api<{ evidence: { evidence_id: string }[] }>(page, `/p/${st.project_id}/findings/${id}`)).evidence.length;
+  if (evBefore > 0) await form.getByRole('button', { name: /^Beleg .* entfernen$/ }).first().click();
+  await form.getByRole('button', { name: /^Speichern/ }).click();
+  await expect.poll(async () => (await api<{ description: string }>(page, `/p/${st.project_id}/findings/${id}`)).description).toBe(desc);
+  const d = await api<{ description: string; remediation: string; severity: string; evidence: unknown[]; ctrl: boolean }>(page, `/p/${st.project_id}/findings/${id}`);
+  expect(d).toMatchObject({ description: desc, remediation: 'A\nB', severity: 'high', ctrl: false });
+  expect(d.evidence.length).toBe(Math.max(0, evBefore - 1));
+  // neu laden: das Textfeld hat echte Zeilenumbrüche, die Vorschau eine Liste
+  await page.reload();
+  await expect(form.getByLabel('Beschreibung')).toHaveValue(desc);
+  await expect(form).not.toContainText('<LF>');
+  await form.getByRole('button', { name: 'Vorschau' }).first().click();
+  await expect(form.locator('.md li')).toHaveCount(2);
+  // nochmals speichern ändert nichts am Text (kein «<LF>» im Journal)
+  await form.getByRole('button', { name: 'Bearbeiten' }).first().click();
+  await form.getByLabel('Massnahme').fill('A\nB\nC');
+  await form.getByRole('button', { name: /^Speichern/ }).click();
+  await expect.poll(async () => (await api<{ remediation: string }>(page, `/p/${st.project_id}/findings/${id}`)).remediation).toBe('A\nB\nC');
+  expect((await api<{ description: string }>(page, `/p/${st.project_id}/findings/${id}`)).description).toBe(desc);
+  // Löschen mit Grund: danach 404, die Nummer bleibt beim Wiederherstellen
+  await form.getByRole('button', { name: 'Finding löschen' }).click();
+  await form.getByLabel('Grund (optional)').fill('doppelt erfasst');
+  await form.getByRole('button', { name: 'Löschen', exact: true }).click();
+  await expect.poll(async () => (await api<{ findings: FindingSummary[] }>(page, `/p/${st.project_id}/findings`)).findings.some((x) => x.finding_id === id)).toBe(false);
+  const tl = await api<{ items: { type: string; kind?: string; decision_id?: string; summary?: string; detail?: string | null }[] }>(page, `/p/${st.project_id}/timeline?types=decision&limit=50`);
+  const del = tl.items.find((x) => x.kind === 'd.finding.delete');
+  expect(del?.summary).toBe('Finding gelöscht');
+  const r = await post<{ results: unknown[] }>(page, `/p/${st.project_id}/decisions`, { decisions: [{ kind: 'd.revoke', payload: { decision_id: del?.decision_id } }] });
+  expect(r.status).toBe(201);
+  await expect.poll(async () => (await api<{ findings: FindingSummary[] }>(page, `/p/${st.project_id}/findings`)).findings.find((x) => x.finding_id === id)?.ordinal).toBe(f1?.ordinal);
+  // K3: die Zeitachse nennt Findings mit festen Texten, nie mit der Kennung des Entscheids
+  await page.goto(`${st.base}/zeitachse?typ=decision`);
+  const rows = page.locator('li.item');
+  await expect(rows.first()).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Zeitachse' })).toContainText('Finding geändert');
+  for (const text of await rows.allInnerTexts()) expect(text).not.toMatch(/\bd\.[a-z]+\./);
 });
 
 test('verdeckte Eingabe in T3 einzeln aufdecken und wieder verdecken', async ({ page }) => {

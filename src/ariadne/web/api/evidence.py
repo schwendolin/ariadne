@@ -20,7 +20,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 from starlette.responses import Response
 
-from ariadne.ingest.queries import term_refs
+from ariadne.ingest import pending
+from ariadne.ingest.queries import auto_contexts, term_refs
 from ariadne.store import chain
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError
@@ -71,12 +72,17 @@ def _pos_map(conn: Any, unit_id: str, idxs: set[int]) -> dict[int, int]:
     if not idxs:
         return {}
     lo, hi = min(idxs), max(idxs)
-    return {
+    out = {
         int(i): int(p)
         for i, p in conn.execute(
             "SELECT idx, pos FROM unit_line WHERE unit_id = ? AND idx BETWEEN ? AND ?", (unit_id, lo, hi)
         )
     }
+    if not idxs <= set(out):  # offene Einheit: Fundstelle in den vorläufigen Zeilen (18.12)
+        out.update(
+            {r[1]: r[0] for r in pending.pending_rows(conn, unit_id) if r[1] is not None and lo <= r[1] <= hi}
+        )
+    return out
 
 
 def _lines_of(conn: Any, unit_id: str, span: Any) -> list[int] | None:
@@ -93,12 +99,35 @@ def _lines_of(conn: Any, unit_id: str, span: Any) -> list[int] | None:
 
 def _stack(conn: Any, u: Mapping[str, Any], bag: Bag) -> list[dict[str, Any]]:
     span_id = u.get("span_id")
+    stack: Any = None
     if isinstance(span_id, str):
         row = conn.execute("SELECT stack FROM ctx_span WHERE span_id = ?", (span_id,)).fetchone()
         if row is not None:
-            return stack_views(loads(row[0], []), bag)
-    ctx = loads(u.get("context"), {}) if isinstance(u.get("context"), str) else u.get("context")
-    return stack_views([ctx] if isinstance(ctx, dict) else [], bag)
+            stack = loads(row[0], [])
+    if stack is None:
+        ctx = loads(u.get("context"), {}) if isinstance(u.get("context"), str) else u.get("context")
+        stack = [ctx] if isinstance(ctx, dict) else []
+    return stack_views(_with_auto_hosts(conn, u.get("terminal_id"), stack), bag)
+
+
+def _with_auto_hosts(conn: Any, tid: Any, stack: Any) -> Any:
+    """Stufen ohne Host um den später erkannten Auto-Host ergänzen («Kali › 192.168.56.101 [msf]
+    (auto)»), wie in der Zeitachse (``queries._with_auto``)."""
+    if not isinstance(stack, list) or not isinstance(tid, str):
+        return stack
+    try:
+        auto = {(t, o): h for t, o, h in auto_contexts(conn) if t == tid}
+    except Exception:  # noqa: BLE001 - ohne Projektion (Tests ohne ctx_auto)
+        return stack
+    if not auto:
+        return stack
+    out = []
+    for st in stack:
+        host = (
+            auto.get((tid, st.get("opened_at"))) if isinstance(st, Mapping) and not st.get("host") else None
+        )
+        out.append({**st, "host": host, "host_source": "auto"} if host else st)
+    return out
 
 
 def _src_ip(conn: Any, cmd_id: Any) -> Any:
@@ -259,13 +288,20 @@ def unit_detail(
         return None
     bag = with_secrets(bag, conn)
     u = rows[0]
+    if u.get("kind") == "segment" and not u.get("cmd_text") and u.get("cmd_id"):
+        # Befehl, der die Stufe geöffnet hat (msfconsole, nc -lvnp, ssh): Titel wie im Design
+        opener = conn.execute(
+            "SELECT cmd_text FROM unit WHERE cmd_id = ? AND kind = 'command' LIMIT 1", (u.get("cmd_id"),)
+        ).fetchone()
+        if opener is not None and opener[0]:
+            u = {**u, "cmd_text": opener[0]}
     parser = conn.execute(
         "SELECT parser_id FROM observation WHERE unit_id = ? ORDER BY obs_id LIMIT 1", (unit_id,)
     ).fetchone()
     out = unit_brief(u, bag, parser=parser[0] if parser else None) or {}
     b = bag.new()
     start, end = u.get("ts_utc_ns"), u.get("ts_end_ns")
-    lines = conn.execute("SELECT COUNT(*) FROM unit_line WHERE unit_id = ?", (unit_id,)).fetchone()[0]
+    lines = pending.line_count(conn, unit_id)
     out.update(
         {
             "exit": u.get("exit_code") if isinstance(u.get("exit_code"), int) else None,
@@ -282,6 +318,12 @@ def unit_detail(
             "terminal": term_ref(u.get("terminal_id"), term_refs(conn), b),
             "chain_break_line": chain_break_line(conn, journal, u) if journal is not None else None,
             "tty": _tty(journal, u.get("terminal_id")),
+            # Integration v0.1: offene Einheit (laufender Listener, Remote-Segment) zeigt «läuft»
+            "state": u.get("state") if u.get("state") in ("open", "provisional", "final") else "final",
+            # Integration v0.1: SHA-256 einer Datei auch ohne Wert als Einstieg (Zeitachse)
+            "sha256": u.get("sha256")
+            if u.get("kind") == "file" and isinstance(u.get("sha256"), str)
+            else None,
         }
     )
     out["ctrl"] = bool(out.get("ctrl")) or b.ctrl
@@ -373,12 +415,8 @@ def unit_lines(
 ) -> dict[str, Any] | None:
     if conn.execute("SELECT 1 FROM unit WHERE unit_id = ?", (unit_id,)).fetchone() is None:
         return None
-    total = int(conn.execute("SELECT COUNT(*) FROM unit_line WHERE unit_id = ?", (unit_id,)).fetchone()[0])
-    rows = conn.execute(
-        "SELECT pos, idx, text, flags, sgr FROM unit_line WHERE unit_id = ? AND pos >= ? "
-        "ORDER BY pos LIMIT ?",
-        (unit_id, start, count),
-    ).fetchall()
+    total = pending.line_count(conn, unit_id)
+    rows = pending.line_rows(conn, unit_id, start, count)
     spans = secret_spans(conn, unit_id) if presentation else {}
     lines = render_rows(rows, secret_values(conn), spans, reveal=reveal, redactor=redactor)
     return {"unit_id": unit_id, "total": total, "from": start, "lines": lines}
@@ -388,10 +426,7 @@ def unit_log(conn: Any, unit_id: str, *, presentation: bool, redactor: Any) -> s
     """«Ganzes Log»: bereinigte Zeilen mit sichtbaren Escapes, Secrets wie bei ``/lines`` ersetzt."""
     if conn.execute("SELECT 1 FROM unit WHERE unit_id = ?", (unit_id,)).fetchone() is None:
         return None
-    rows = conn.execute(
-        "SELECT pos, idx, text, flags, sgr FROM unit_line WHERE unit_id = ? ORDER BY pos LIMIT ?",
-        (unit_id, LOG_MAX_LINES + 1),
-    ).fetchall()
+    rows = pending.line_rows(conn, unit_id, 0, LOG_MAX_LINES + 1)
     spans = secret_spans(conn, unit_id) if presentation else {}
     lines = render_rows(rows[:LOG_MAX_LINES], secret_values(conn), spans, reveal=False, redactor=redactor)
     text = "\n".join(ln["text"] for ln in lines)

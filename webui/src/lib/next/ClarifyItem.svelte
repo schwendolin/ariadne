@@ -12,7 +12,7 @@
   Zieldaten nur über Txt. Besitzer: ui-karte.
 -->
 <script lang="ts">
-  import { DOT } from '../karte/sep';
+  import { DOT, SP } from '../karte/sep';
   import { untrack } from 'svelte';
   import type { CtxExcerpt, NextItem, StageKind } from '../api/types';
   import { t, type MessageKey } from '../i18n';
@@ -123,6 +123,23 @@
   function massGo(): void {
     if (item.kind === 'mass_find') url.go('zeitachse', { zeile: item.unit.cmd_id ?? item.unit.unit_id });
   }
+
+  // Korrektur A13: Beim Aufklappen ersetzt die Karte den Knopf der Zeile; der Fokus geht auf die
+  // Karte statt auf body.
+  let card: HTMLDivElement | undefined = $state();
+  let focusCard = false;
+
+  function openLine(): void {
+    focusCard = true;
+    next.select(item.item_key);
+  }
+
+  $effect(() => {
+    if (selected && card && focusCard) {
+      focusCard = false;
+      card.focus({ preventScroll: true });
+    }
+  });
 </script>
 
 {#if !selected}
@@ -131,21 +148,21 @@
     class="line"
     data-item-key={item.item_key}
     use:pulse={{ token: app.ui.pulseToken, active: app.ui.isPulsing(item.item_key) }}
-    onclick={() => next.select(item.item_key)}
+    onclick={openLine}
   >
     <span class="dot" aria-hidden="true"></span>
     <span class="kind">{line.kind}</span>
     {#if line.parts.length}<span class="parts"><Parts parts={line.parts} max={60} /></span>{/if}
   </button>
 {:else}
-  <div class="card" data-item-key={item.item_key} aria-current="true" aria-busy={busy}>
+  <div class="card" data-item-key={item.item_key} aria-current="true" aria-busy={busy} tabindex="-1" bind:this={card}>
     <div class="head"><span class="dot" aria-hidden="true"></span>{t(`next.kind.${item.kind}` as MessageKey)}</div>
 
     {#if item.kind === 'ctx_suggestion'}
       <h3 class="title">{termTitle(item.terminal, item.terminal_id)}{#if item.stage_kind}{DOT}{stageName(item.stage_kind)}{/if}</h3>
       <div class="grid">
         <span class="k">{t('next.f.suggestion')}</span><span class="mono"><Txt value={item.suggested_label} mono max={80} /></span>
-        <span class="k">{t('next.f.reason')}</span><span><Txt value={item.reason} ctrl={item.ctrl ?? false} max={240} /></span>
+        <span class="k">{t('next.f.reason')}</span><span><Txt value={item.reason} ctrl={item.ctrl ?? false} max={240} />{#if item.reason_ts}{SP}{t('next.reasonAt', { time: hhmm(item.reason_ts, { seconds: true }) })}{/if}</span>
         {#if item.from_ts}<span class="k">{t('next.f.effect')}</span><span>{t('next.retroFrom', { time: hhmm(item.from_ts, { seconds: true }) })}</span>{/if}
       </div>
       {#if item.excerpt}
@@ -271,13 +288,15 @@
     gap: 10px;
     width: 100%;
     min-width: 0;
-    padding: 10px 8px;
+    padding: 9px 8px;
     border: none;
     border-radius: 8px;
     background: transparent;
     color: var(--fg);
     text-align: left;
     font: inherit;
+    /* Raster 34 px wie im Design (Runde 1, 1a), Korrektur D5: feste Zeilenhöhe, auch für Mono-Teile */
+    line-height: 16px;
     cursor: pointer;
   }
   .line:hover {
@@ -310,6 +329,7 @@
     background: var(--surface-2);
     border: var(--lw-1) solid var(--line-strong);
     box-shadow: 0 0 0 2px var(--focus);
+    outline: none;
   }
   .head {
     display: flex;

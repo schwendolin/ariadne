@@ -35,18 +35,38 @@
   let error = $state<string | null>(null);
   const canReveal = $derived(!presentation && profile === 'lab');
 
+  /**
+   * Zähler gegen verspätete Antworten (Korrektur SEC-UI-2): Wechselt der Präsentationsmodus oder
+   * verdeckt der Mensch, während «Aufdecken» unterwegs ist, wird die Antwort verworfen.
+   */
+  let request = 0;
+  let epoch = 0;
+
   $effect(() => {
+    void presentation;
+    epoch++;
+    request++;
     if (presentation) value = null;
   });
 
   async function reveal(): Promise<void> {
     if (!canReveal) return;
     error = null;
+    const mine = ++request;
+    const ep = epoch;
     try {
-      value = (await backend.reveal(pid, secret)).value;
+      const res = await backend.reveal(pid, secret);
+      // Nach dem Warten neu prüfen: Präsentationsmodus jetzt an, umgeschaltet oder verdeckt?
+      if (mine !== request || ep !== epoch || presentation || !canReveal) return;
+      value = res.value;
     } catch (e) {
-      error = errorText(e);
+      if (mine === request) error = errorText(e);
     }
+  }
+
+  function hide(): void {
+    request++;
+    value = null;
   }
 </script>
 
@@ -56,7 +76,7 @@
     <button type="button" class="link" disabled={!canReveal} title={canReveal ? undefined : t('secret.revealBlocked')} onclick={reveal}>{t('secret.reveal')}</button>
   {:else}
     <span class="value"><Txt {value} mono max={0} /></span>
-    <button type="button" class="link" onclick={() => (value = null)}>{t('secret.hide')}</button>
+    <button type="button" class="link" onclick={hide}>{t('secret.hide')}</button>
   {/if}
   {#if copy}
     <CopyButton target="kali" {secret} {pid} {backend} {presentation} {profile} />

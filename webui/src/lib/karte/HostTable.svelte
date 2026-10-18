@@ -12,6 +12,7 @@
   import type { HostSummary, ServiceClass, ServiceView } from '../api/types';
   import { t, type MessageKey } from '../i18n';
   import { registerKeys } from '../keys/keymap';
+  import { focusInZone, pageKeysActive } from '../keys/page';
   import type { ProjectStore } from '../stores/project.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import Txt from '../ui/Txt.svelte';
@@ -93,15 +94,14 @@
     if (id) onopen(id);
   }
 
+  // Korrektur A2, A8: ohne offene Tafel; die Tabelle besitzt j k ↵, ausser der Fokus liegt in der
+  // Spalte «Als Nächstes» (unabhängig davon, wer zuletzt eingehängt wurde).
+  const tableKeys = () => pageKeysActive('karte') && !focusInZone('next');
   onMount(() =>
     registerKeys([
-      { keys: ['j'], help: 'help.k.lists', run: () => moveCursor(1) },
-      { keys: ['k'], run: () => moveCursor(-1) },
-      {
-        keys: ['Enter'],
-        when: () => !(document.activeElement instanceof HTMLButtonElement || document.activeElement instanceof HTMLAnchorElement),
-        run: () => openAt(cursor),
-      },
+      { keys: ['j'], help: 'help.k.lists', when: tableKeys, run: () => moveCursor(1) },
+      { keys: ['k'], when: tableKeys, run: () => moveCursor(-1) },
+      { keys: ['Enter'], when: tableKeys, run: () => openAt(cursor) },
     ]),
   );
 
@@ -190,7 +190,7 @@
                 <span class="mono"><Txt value={s.host_label} mono max={40} /></span>
                 <span class="mono"><Txt value={s.name ?? ''} mono max={24} /></span>
                 <span class="mono"><Txt value={[s.product, s.version].filter(Boolean).join(' ')} mono ctrl={s.ctrl} max={60} /></span>
-                <span class="muted">{s.state ?? ''}{#if s.conflicts > 0}<span class="warn"> · !</span>{/if}</span>
+                <span class="muted">{s.state ?? ''}{#if s.conflicts > 0}<span class="warn">{DOT}!</span>{/if}</span>
               </button></div>
             {/if}
           {/if}

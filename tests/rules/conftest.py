@@ -13,8 +13,9 @@ from tests.projection import helpers
 
 @pytest.fixture(autouse=True)
 def _fixed_tz(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Beleg-Labels zeigen die Lokalzeit des Daemons; die Tests rechnen in Mitteleuropa (wie das Design,
-    «nmap -sV · 14:02»). POSIX-Schreibweise, damit keine Zeitzonen-Datenbank nötig ist."""
+    """Die Tests rechnen in Mitteleuropa (wie das Design, «nmap -sV · 14:02»): Beleg-Labels sind ohne
+    Uhrzeit (sie steht in ``ts``), die Zeitzone darf das Ergebnis also nicht ändern. POSIX-Schreibweise,
+    damit keine Zeitzonen-Datenbank nötig ist."""
     monkeypatch.setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3")
     time.tzset()
     yield

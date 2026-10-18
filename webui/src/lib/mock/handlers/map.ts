@@ -77,11 +77,15 @@ export function applyMapDecision(s: MockState, d: DecisionInput, id: string): De
       if (d.kind === 'd.suggestion.done' && typeof p.basis !== 'string') return null;
       const at = s.next.suggestions.indexOf(sug);
       s.next = { ...s.next, suggestions: s.next.suggestions.filter((x) => x.suggestion_key !== key) };
+      // wie der Server: der Denkanstoss bleibt mit Zustand und Entscheid in `/suggestions?state=all`
+      const decided = { ...sug, state: d.kind === 'd.suggestion.done' ? ('done' as const) : ('dismissed' as const), decision_id: id };
+      s.suggestionsDecided = [...s.suggestionsDecided.filter((x) => x.suggestion_key !== key), decided];
       emitSuggestion(s);
       undo.set(id, (st) => {
         const list = [...st.next.suggestions];
         list.splice(Math.min(at, list.length), 0, sug);
         st.next = { ...st.next, suggestions: list };
+        st.suggestionsDecided = st.suggestionsDecided.filter((x) => x.suggestion_key !== key);
         emitSuggestion(st);
       });
       return ok(id, d);

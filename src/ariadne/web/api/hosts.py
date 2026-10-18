@@ -316,7 +316,7 @@ def _detail(conn: Any, settings: Any, host_id: str, bag: Bag) -> dict[str, Any] 
             "conflicts": [conflict_view(conn, k, bag) for k in conflicts],
             "open_items": _open_items(conn, hid, idents | nodes),
             "thread": thread,
-            "note": nb(ex.get("note")),
+            "note": nb.text(ex.get("note")),  # Markdown, mehrzeilig (SEC-UI-1/K1)
             "commands": _commands(conn, hid, idents, bag),
             "candidate_claims": _candidate_claims(conn, hid) if h.get("claim_state") == "candidate" else [],
             "access_by": _access_by(conn, hid, h.get("access")),
@@ -353,7 +353,7 @@ def add_routes(router: APIRouter, api: Api) -> None:
         res = await api.query(p, lambda c: _detail(c, settings, host_id, bag))
         if res is None:
             raise ApiError("not_found")
-        return await api.respond(res)
+        return await api.respond(res, multiline=("note",))  # Notiz mehrzeilig (SEC-UI-1/K1)
 
     @router.get("/p/{pid}/services", name="services")
     async def get_services(

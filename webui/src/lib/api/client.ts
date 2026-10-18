@@ -2,7 +2,8 @@
  * Typisierter HTTP-Client für /api/v1 (Architektur 7.2, 7.3).
  *
  * - Jeder Aufruf trägt `Authorization: Bearer <token>`, keine Cookies
- *   (`credentials: 'omit'`), keine Weiterleitungen (`redirect: 'error'`).
+ *   (`credentials: 'omit'`, beim Abmelden `same-origin` für `Clear-Site-Data`), keine
+ *   Weiterleitungen (`redirect: 'error'`).
  * - Fehler kommen immer als ApiError mit stabilem `code`. Die UI übersetzt
  *   über den Code, nie über den Servertext.
  * - Abbruch über AbortSignal; zusätzlich ein Zeitlimit pro Aufruf.
@@ -78,6 +79,12 @@ export interface RequestOptions {
   /** ohne Token senden (nur /session) */
   anonymous?: boolean;
   timeoutMs?: number;
+  /**
+   * Nur beim Abmelden: `credentials: 'same-origin'`, damit der Browser `Clear-Site-Data` des
+   * Daemons anwendet (mit `omit` verwirft Chrome den Header mit einer Fehlermeldung in der
+   * Konsole). Der Daemon setzt nie Cookies; mitgeschickt wird darum nichts.
+   */
+  clearSiteData?: boolean;
 }
 
 /** Baut einen Pfad aus Segmenten; jedes Segment wird kodiert. */
@@ -168,7 +175,7 @@ export class ApiClient {
         headers,
         body,
         signal: link.signal,
-        credentials: 'omit',
+        credentials: opts.clearSiteData ? 'same-origin' : 'omit',
         cache: 'no-store',
         redirect: 'error',
         referrerPolicy: 'no-referrer',
@@ -250,7 +257,7 @@ export class ApiClient {
 
   async logout(): Promise<void> {
     try {
-      await this.request<void>('DELETE', '/session', { expect: 'none' });
+      await this.request<void>('DELETE', '/session', { expect: 'none', clearSiteData: true });
     } finally {
       this.tokens.clear();
     }

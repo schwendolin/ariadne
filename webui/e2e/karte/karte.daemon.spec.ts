@@ -264,7 +264,16 @@ test('Pfeiltasten springen zum nächstgelegenen Host in der Richtung', async ({ 
   expect(id).not.toBe('kali');
   const h = await center(focused);
   expect(h.x).toBeGreaterThan(k.x);
-  await page.keyboard.press('ArrowLeft');
+  // nach links: jeder Schritt landet weiter links, bis Kali (der Eingang ganz links) erreicht ist;
+  // dazwischen kann ein näherer Host liegen (Kali steht links in der Mitte, SCREENS 1a)
+  for (let i = 0; i < 6; i++) {
+    const before = await center(page.locator('[data-map-card]:focus'));
+    await page.keyboard.press('ArrowLeft');
+    const now = page.locator('[data-map-card]:focus');
+    await expect(now).toHaveCount(1);
+    expect((await center(now)).x).toBeLessThan(before.x);
+    if ((await now.getAttribute('data-host-id')) === 'kali') break;
+  }
   await expect(card(page, 'kali')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/host=kali/);

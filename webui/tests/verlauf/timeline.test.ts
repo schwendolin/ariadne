@@ -47,7 +47,8 @@ describe('Zeitachse: Store', () => {
     await project.timeline.load();
     const q = spy.mock.calls.at(-1)?.[1] as TimelineQuery;
     expect(q.types).toContain('input');
-    expect(q.types).toHaveLength(9);
+    expect(q.types).toContain('callback');
+    expect(q.types).toHaveLength(10);
     expect(project.timeline.rows.filter((r) => r.type === 'input').every((r) => r.type === 'input' && r.input.hidden)).toBe(true);
   });
 
@@ -101,7 +102,12 @@ describe('Zeitachse: Ansicht', () => {
     const nmap = row(c, NMAP) as HTMLElement;
     expect(nmap.querySelector('.term')?.textContent).toBe('T1');
     expect(nmap.querySelector('.event')?.textContent).toContain('nmap -sV -sC -oA scans/ms2 192.168.56.101');
-    expect(nmap.querySelector('.event')?.textContent).toContain('Exit 0 · Datei scans/ms2.xml erkannt');
+    // Unterzeile wie im Design nur an der gewählten Zeile (oder bei «läuft», Hinweisen, Exit ungleich 0)
+    expect(nmap.querySelector('.event')?.textContent).not.toContain('Exit 0');
+    await fireEvent.click(nmap.querySelector('.time') as HTMLElement);
+    expect((row(c, NMAP) as HTMLElement).querySelector('.event')?.textContent).toContain('Exit 0 · Datei scans/ms2.xml erkannt');
+    expect((row(c, NMAP) as HTMLElement).querySelector('button.file')?.getAttribute('title')).toBe('Beleg der Datei öffnen');
+    expect((row(c, NMAP) as HTMLElement).querySelector('button.file')?.textContent).toBe('scans/ms2.xml');
     expect(nmap.querySelector('.result')?.textContent?.trim()).toBe('1 Host, 23 Services · 141 Werte übernommen');
     expect(row(c, 'g:48001')?.textContent).toContain('Lücke · Pause');
     expect(row(c, 'g:48001')?.querySelector('.result')?.textContent).toContain('läuft noch, F12 r');
@@ -116,7 +122,9 @@ describe('Zeitachse: Ansicht', () => {
     expect(dist.querySelector('.action')?.textContent).toContain('Wieder vertrauen');
     expect(row(c, '0199a3c2-9a00-7000-8000-00000000d000')?.textContent).toContain('«Banner manipuliert, vermutlich Honeypot»');
     expect(row(c, '0199a3c2-9a00-7000-8000-00000000d000')?.querySelector('.result')?.textContent).toContain('18 verworfen, 0 geschwächt');
-    expect(row(c, `${T3}@64`)?.querySelector('.result')?.textContent).toContain('Kontext unklar');
+    // der Hinweis steht an der Zeile des Callbacks (D15), nicht doppelt am Listener
+    expect(row(c, `cb:${T3}@64:0001`)?.querySelector('.result')?.textContent).toContain('Kontext unklar');
+    expect(row(c, `${T3}@64`)?.querySelector('.result')?.textContent).not.toContain('Kontext unklar');
     // verdeckte Eingabe: nur Maske, Aufdecken, In die Kali
     const inp = row(c, 'i:47001') as HTMLElement;
     expect(inp.textContent).toContain('Eingabe ohne Echo');
@@ -224,7 +232,7 @@ describe('Zeitachse: Ansicht', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Alle Typen/ }));
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Lücken' }));
     expect(url.get('typ')?.split(',')).not.toContain('gap');
-    expect(url.get('typ')?.split(',')).toHaveLength(8);
+    expect(url.get('typ')?.split(',')).toHaveLength(9);
   });
 
   it('UTC zeigen schaltet die Zeiten', async () => {
@@ -267,5 +275,51 @@ describe('Warteliste', () => {
   it('leer: «Keine Dateien in der Warteliste»', async () => {
     const { view } = await mount('empty');
     expect(view.container.querySelector('.pending')?.textContent).toContain('Keine Dateien in der Warteliste');
+  });
+});
+
+describe('Zeitachse: Korrekturen nach der Prüfung', () => {
+  it('D15: Callback als eigene Zeile «Callback von …» mit «Kontext unklar · K2», ↵ öffnet die Logzeile', async () => {
+    const { view } = await mount();
+    const cb = view.container.querySelector<HTMLElement>(`li.item[data-row="cb:${T3}@64:0001"]`) as HTMLElement;
+    expect(cb.querySelector('.event')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Callback von 192.168.56.101:49158');
+    expect(cb.querySelector('.result')?.textContent).toMatch(/Kontext unklar · K2/);
+    await fireEvent.click(cb);
+    press('Enter');
+    await settle();
+    expect(url.get('beleg')).toBe(`u:${T3}@64:1-1`);
+  });
+
+  it('D4: Leerzeichen vor «(auto)» und vor dem Benutzer bleiben stehen', async () => {
+    const { view } = await mount();
+    const auto = Array.from(view.container.querySelectorAll('li.item')).find((x) => x.textContent?.includes('Kontext automatisch'));
+    expect(auto?.textContent).toMatch(/192\.168\.56\.101 \(auto\)/);
+  });
+
+  it('K3: ein Entscheid ohne festen Text zeigt nie seine Kennung', async () => {
+    const { view, backend, project } = await mount();
+    backend.state.timeline = [
+      {
+        ...(backend.state.timeline.find((x) => x.type === 'decision') as Extract<(typeof backend.state.timeline)[number], { type: 'decision' }>),
+        id: 'd-raw', decision_id: 'd-raw', kind: 'd.unbekannt.neu', summary: 'Entscheid', detail: null,
+      },
+      ...backend.state.timeline,
+    ];
+    await project.timeline.load();
+    await settle();
+    const raw = view.container.querySelector<HTMLElement>('li.item[data-row="d-raw"]');
+    expect(raw?.textContent).not.toContain('d.unbekannt.neu');
+    expect(raw?.textContent).toContain('Entscheid');
+  });
+
+  it('A1: Enter auf «UTC zeigen» schaltet UTC um und öffnet keinen Beleg der gewählten Zeile', async () => {
+    const { view } = await mount();
+    press('j');
+    await settle();
+    const utc = view.container.querySelector<HTMLButtonElement>('button.utc') as HTMLButtonElement;
+    utc.focus();
+    const ev = press('Enter', {}, utc);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(url.get('beleg')).toBeNull();
   });
 });

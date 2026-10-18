@@ -36,6 +36,8 @@ Alle Tests laufen ohne Netz, nur in `tmp_path` und mit isolierten `HOME`/`XDG_*`
 | `tests/e2e/test_dashboard.py` | Dashboard als Nutzer: Weg E (setup, init, start, nmap, `read -s` und `getpass` im aufgezeichneten Terminal, `ariadne ui --no-open`, Navigation von der Startdatei, Anmeldung, Status, Karte, Zeitachse mit verdeckten Eingaben, Aufdecken, SSE nach einem Entscheid, `lock` beendet Sitzung und Strom, `unlock` öffnet das Projekt wieder, `stop` mit Hinweis, `backup --to-file`) und Weg B (sshd mit dem Drop-in aus `kali-setup.sh`, `ariadne-mac start` und `stop` unter zsh mit echtem `ssh`, `ssh-agent` und `lsof`, Anmeldung «über sshd», Sicherung auf den «Mac», `remote serve unlock` im PTY) | `e2e`, `web`, `pty`, `remote` |
 | `tests/web/server/` | Server-Kern (T1 bis T7, T8 serverseitig): Konfiguration, `/proc`-Parser, Codes und Sitzungen mit austauschbarer Uhr, Middleware und Header gegen einen echten Server, Statik, SSE-Bus, `ariadne ui`. `helpers.py`: `run_web` (Daemon im Testprozess mit echtem Server auf Port 0), `Web.req`/`Web.raw`, `Stream` (SSE), `ClientProc` (Anfragen aus einem fremden Prozess), `FakeSshd` (`sh` als `sshd`), Test-API statt der echten (`use_test_api`) | `web` |
 | `tests/web/api/` | API v2 (T8 Canary, T9 bis T11): jede Route mit MS2-Fixture und echtem Daemon, feindliche Werte, Präsentationsmodus über zwei Ströme, Entscheide, Ereignisquellen. `helpers.py`: `FakeBus`, `make_app` (Test-App mit Sitzungs-Middleware), `run_api`, `build_fixture`; `test_fullstack.py` gegen den echten Server | `web` |
+| `tests/rules/` | Regeln für Denkanstösse (B2): Goldene Fälle MS2 und Lame (`tests/golden/rules/`), Kontext-Encoder und Vorlagen (feindliche Werte ergeben keine Vorlage), Zustände (`d.suggestion.done`/`dismiss` über Reparse), Leistung mit 500 Hosts | |
+| `tests/e2e/ui_fixture.py`, `tests/e2e/user_lab.py`, `webui/e2e/karte/karte_fixture.py` | Helfer der Browsertests (siehe «Browsertests»): Fixture-Daemon mit Projekt MS2, Durchlauf als Nutzer mit echten Terminals, Fixture-Daemon der Karte | |
 | `tests/backup/` | Sicherung und Wiederherstellung (T16): Rundweg in ein leeres HOME, beschädigte Ströme, Pfade, Version, Rechte, WAL nach SIGKILL, Registry, Hinweis nach `stop`, CLI mit Kettenprüfung | |
 | `tests/remote/` | Fernzugriff: `test_serve.py` (T12), `test_check.py` (T14, Fixture-Wurzel und Runner mit festen Antworten), `test_kali_setup.py` (Wegwerf-Wurzel `ARIADNE_SETUP_ROOT`, zweimal ohne Unterschied, echtes `sshd -t` und `nft -c`), `test_mac_helper.py` (T15, zsh mit Attrappen über `ARIADNE_MAC_SHIM_DIR`), `test_tunnel_e2e.py` (T13, echter sshd im Ordner `/tmp/ariadne-t13-*`) | `remote`, `web` |
 | `tests/unit/test_contract_v01_server.py`, `tests/unit/test_anleitung_fernzugriff.py` | Namen und Signaturen der Teile; jeder Befehl und jede zitierte Meldung der Anleitung gegen den Code | |
@@ -53,6 +55,26 @@ python -m pytest tests/golden --update-golden      # Golden-Erwartungen neu schr
 ARIADNE_TEST_EXTRA_SHELLS=/pfad/zu/bash-5.3 python -m pytest tests/shim   # weitere Shells
 ruff check src tests                               # Lint (Zeilenlänge 110, E F W I B UP S)
 ```
+
+### Browsertests (Web-UI)
+
+Die Oberfläche in `webui/` hat eigene Tests (Bedienung in [webui/README.md](../webui/README.md)); Node 22 (`/opt/node22/bin` in diesem Container), Abhängigkeiten mit `npm ci --ignore-scripts`. Playwright 1.56.1 nimmt das vorhandene Chromium `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` (überschreibbar mit `ARIADNE_CHROMIUM`), headless; nie `playwright install`. Ports wählt `webui/playwright.config.ts` frei. Jeder Browsertest bricht bei einer CSP-Verletzung, einem Seitenfehler, einem `<style>`-Element mit Inhalt und (im Nutzer-Durchlauf) jeder unerwarteten Konsolenmeldung ab (`webui/e2e/fixtures.ts`).
+
+```sh
+cd webui
+npm run check && npm run lint && npm test          # svelte-check, ESLint, Vitest (jsdom)
+npm run test:e2e                                   # Projekt mock: Mock-Build unter der Daemon-CSP
+npm run test:e2e:daemon                            # Projekt daemon: echter Daemon mit Fixture MS2
+npm run test:e2e:nutzer                            # Projekt nutzer: Durchlauf als Nutzer, Screenshots
+npm run test:e2e:all                               # alle drei
+npm run shots                                      # Screenshots gegen den Mock (Augenprüfung)
+```
+
+Helfer für die Fixtures (alle mit eigenem Wegwerf-Ordner für `HOME` und `XDG_*`, nie Benutzerdateien):
+
+- `tests/e2e/ui_fixture.py`: echter Daemon mit Web-Server und Projekt `ms2` wie im Standbild (nmap-Golden, msf-Sitzung, mehrdeutiger Callback, Eingabe ohne Echo, Entscheide, «Neu seit», Scope-Warnung, Finding F1); Szenarien `ms2`, `empty`, `noproject`, `locked`. Der Test holt den Anmeldecode über `ctl.sock`. Geprüft von `tests/e2e/test_ui_fixture.py`.
+- `webui/e2e/karte/karte_fixture.py`: baut darauf auf, für Karte, Spalte und Host-Detail.
+- `tests/e2e/user_lab.py`: der Nutzer-Durchlauf. Isoliertes HOME, `ariadne setup`, `init`, `start ms2`, Daemon mit Web-Server, echte zsh-Terminals im PTY mit Shim (pexpect), Werkzeug-Attrappen (`nmap`, `msfconsole`, `nc`, `ip`) mit den Daten aus Anhang A. Gesteuert über JSON-Zeilen auf stdin/stdout (`setup`, `cli`, `term_open`, `run`, `send`, `hidden_input`, `hotkey`, `title`, `ui_url`, `write_file`, `daemon_stop`, `daemon_start`, `close`); auf der Seite des Browsers `webui/e2e/nutzer/lab.ts`.
 
 Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.mktemp`, AF_UNIX-Grenze), echte Shells nur mit `@pytest.mark.pty`, Zieldaten in Tests immer feindlich denken (Escape-Sequenzen, Bidi-Zeichen, gefälschte Marker). Nachgestellte Golden-Fälle sind in `meta.toml` als `source = "nachgestellt"` markiert und werden durch echte Lab-Aufnahmen ersetzt, sobald es sie gibt.
 
@@ -135,7 +157,8 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 | `web/security.py` | äusserste Middleware: Peer, Host, Fetch-Metadaten mit der Ausnahme E115 (`shell_navigation`), OPTIONS, Origin, 1 MiB, Bearer; Header auf jeder Antwort; feste Fehlertexte `ERROR_TEXT` |
 | `web/sse.py`, `web/static.py`, `web/app.py` | Ereignisbus (Bündelung, Ring, Herzschlag, Schliessen pro Sitzung); Statik mit SPA-Fallback; Verteiler `/api` an FastAPI (Sitzung, Ereignisstrom, `api.register`), sonst Statik |
 | `web/server.py`, `web/integration.py`, `web/ctx.py` | eigener Socket und uvicorn im Loop (`PeerGate` mit austauschbarem Resolver, `WebServer`); Erweiterung des Daemons mit den ctl-Operationen `ui.*` und der 2-s-Prüfung (`WebExtension` mit `peer_resolver`, `clock`, `check_interval` für Tests); gemeinsame Typen |
-| `web/api/` | API v2 (Architektur 7.3): `common.Api` als einziger Zugang zum Daemon, `errors`, `text`, `views`, `models`; Routen in `status`, `terminals`, `project`, `graph`, `hosts`, `next`, `timeline`, `evidence`, `decisions`, `search`, `secrets`, `later` (501), Ereignisquellen in `events` |
+| `web/api/` | API v2 (Architektur 7.3): `common.Api` als einziger Zugang zum Daemon, `errors`, `text`, `views`, `models`; Routen in `status`, `terminals`, `project`, `graph`, `hosts`, `next`, `timeline`, `evidence`, `decisions`, `search`, `secrets`, `clipboard` (in die Kali, E111), `suggestions`, `findings` (E113), `ui_state` (Vorlieben E112, «Neu seit» E106, Scope-Quittung), `later` (501), Ereignisquellen in `events` |
+| `ingest/pending.py` | vorläufige Zeilen offener Einheiten (laufender Listener, msf-Sitzung) für Leser im Thread der Auswertung: Logauszug am Kontextvorschlag, Belegzeilen, Remote-Segment in der Zeitachse; nichts davon wird gespeichert |
 
 **Sicherung** (`src/ariadne/backup/`, Architektur 8.9): `model` (Ergebnisse, Fehlercodes `CODES`), `config` (Empfänger), `manifest`, `collect` (Dateien, Sperren), `writer` (Tar-Strom, Pull-Verschlüsselung mit eigenem Schreiber, weil `pyrage.encrypt_io` Schreibfehler nicht zuverlässig meldet), `reader` (Prüfen, temporäre Ordner, Rollback, `DecryptingReader` für `--identity`), `registry`, `reminder`, `api` (`backup_to_stream`, `restore_from_stream`, Zusammenfassungen ohne Zieldaten).
 
@@ -143,7 +166,11 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 
 **CLI des Baus v0.1-Server**: `cli/ui.py` (`ariadne ui`), `cli/backup.py` (`ariadne backup`, `ariadne restore`), `cli/remote.py` (`ariadne remote check`, `ariadne remote serve`, `ensure_runtime_dir`).
 
-**Leer (spätere Versionen)**: `ai/` und `export/` (nur der Hinweis, dass jeder Ausgang `Redactor.redact_for_exit` nutzen muss), `rules/`.
+**Regeln für Denkanstösse** (`src/ariadne/rules/`, [denkanstoesse.md](denkanstoesse.md)): Regel-Engine über der Projektion, Kontext-Encoder für Vorlagen (E68), Zustände über Entscheide.
+
+**Web-Oberfläche** (`webui/`, Architektur 7.4): Svelte 5, Build nach `src/ariadne/web/static/`; Aufbau und Tests in [webui/README.md](../webui/README.md).
+
+**Leer (spätere Versionen)**: `ai/` und `export/` (nur der Hinweis, dass jeder Ausgang `Redactor.redact_for_exit` nutzen muss).
 
 ## Ablauf eines Befehls
 
@@ -176,8 +203,9 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 
 ## Bekannte Grenzen des v0.1-Backends
 
-- **Oberfläche noch der erste Entwurf, kein Export.** Web-Server, Sicherheitsmodell und API v2 sind gebaut; der Build unter `web/static/` stammt aber noch aus `webui/` nach dem Entwurf v1 der API und zeigt darum nicht alles richtig an. Die Oberfläche nach Design v0.1 (E105 bis E114) folgt; `webui/` ändert in diesem Bau niemand. Regeln, KI-Denkanstösse, Screenshots, Findings und Markdown-Export sind noch nicht gebaut (die Routen antworten 501).
-- **Kein echter Browser in den Tests.** Playwright fehlt: T8 bis T11 sind nur serverseitig geprüft (`sessionStorage`, Tabs, `displaySafe`, ESLint offen). Ob Svelte 5 und Cytoscape ohne `'unsafe-inline'` für Styles auskommen, ist offen. Was ein Browser bei der Navigation von der `file://`-Startdatei schickt (`Sec-Fetch-Site: cross-site`, E115), ist angenommen, nicht in Firefox, Safari oder Chrome gemessen.
+- **Kein Export, keine KI-Denkanstösse, keine Screenshots.** Die Oberfläche nach Design v0.1 ist gebaut (Stand 2026-10-18), mit Findings und den Regeln für Denkanstösse. KI-Denkanstösse, Screenshots und Markdown-Export fehlen noch (die Routen antworten 501, die Oberfläche zeigt die Knöpfe deaktiviert mit Grund).
+- **Öffnen und Schliessen von Datenbanken nacheinander.** Die mit `sqlcipher3` gelieferte SQLite nimmt beim Öffnen einer Datei und beim Schliessen einer WAL-Verbindung dieselben zwei Sperren der Unix-VFS in umgekehrter Reihenfolge; öffnet ein Thread `state.db`, während ein anderer eine Verbindung darauf schliesst, hängt der Prozess (einmal im Fixture-Daemon der Browsertests beobachtet, gdb-Backtrace). `crypto/db.py` serialisiert darum Öffnen und Schliessen prozessweit (`_OPEN_CLOSE`, Test `tests/core/test_db_open_close.py`). Eine Verbindung, die ohne `close()` vom Garbage Collector abgeräumt wird, umgeht die Sperre.
+- **Browser nur Chromium.** Die Browsertests laufen mit Chromium headless (Abschnitt «Browsertests»): `sessionStorage` nur für das Token, Tabs, `displaySafe`, strenge CSP ohne `'unsafe-inline'` (Svelte 5 und Cytoscape kommen ohne aus). Firefox und Safari sind nicht getestet; was sie bei der Navigation von der `file://`-Startdatei schicken (`Sec-Fetch-Site: cross-site`, E115), ist angenommen.
 - **Peer-Prüfung.** Den Client-Socket sucht der Server per Netlink `sock_diag` (gezielt, im Loop, etwa 15 µs); nur wenn Netlink fehlt, liest er `/proc/net/tcp` (vorgefiltert nach Port). Fremde Verbindungen schliesst er so sofort; höchstens 16 Suchen in den fd-Tabellen warten gleichzeitig, jede weitere neue Verbindung wird ohne Antwort geschlossen (auch eine eigene, unter einer Flut). Der Fall IPv4-mapped über Netlink ist mangels IPv6 im Container nur mit Fixtures geprüft. Ein Shim, der während eines Stillstands des Daemons endet, sendet weder Daten noch `term.gap` (unverändert; der Stillstand selbst ist behoben).
 - **Peer-Bindung.** Lokal (Weg E) gilt das Token nur aus dem Prozess, der den Code getauscht hat; stellt Firefox Anfragen aus wechselnden Prozessen, endet die Sitzung (lieber neu anmelden). Halten mehrere Prozesse den Socket, bindet der Tausch an die kleinste PID. Über sshd wird eine Verbindung ohne lesbaren Prozess angenommen, solange der gebundene sshd lebt (web-api.md 16, Punkt 8). Nach Ablauf von 12 h antwortet REST sofort mit 401, ein offener Strom schliesst bei der nächsten Prüfung (höchstens 2 s). Der Body (höchstens 1 MiB) wird vor der Token-Prüfung gelesen. Ohne IPv6 im Container ist `bind = "::1"` nur in Unit-Tests geprüft.
 - **Befehlstexte im Web.** Befehlstexte und daraus abgeleitete Titel (Zeitachse, Suche, Einheit, Terminals, Belege, Arbeitsliste) maskieren bekannte Secrets aus `secret_value`, im Präsentationsmodus dazu die Secret-Bereiche der Prompt-Zeilen. Die CLI (`ariadne show timeline`, `search`) zeigt Befehlstexte weiter unmaskiert (eigenes Terminal). Die Volltextsuche verwirft Treffer, die nur dank eines eigenen Secrets entstehen (Tokenizer wie `unicode61` nachgebaut; bei Abweichungen fällt eher ein Treffer weg).

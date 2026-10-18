@@ -67,7 +67,9 @@ test('Anmeldung über die Startadresse: Fragment weg, Token nur in sessionStorag
     await page.keyboard.press(key);
     await page.waitForTimeout(250);
   }
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  // Korrektur A14: die Scope-Warnung des Fixtures ist eine Live-Region (role="alert") und bleibt
+  // stehen; gemeint sind hier Fehlermeldungen beim Wechsel der Reiter.
+  await expect(page.getByRole('alert').filter({ hasNotText: 'Ziel ausserhalb des Scopes' })).toHaveCount(0);
 });
 
 test('Aufnahme-Popover: echte Terminals; Pause wartet auf die Bestätigung, Fortsetzen stellt zurück', async ({ page }) => {

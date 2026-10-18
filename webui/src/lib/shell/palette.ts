@@ -9,7 +9,7 @@
  */
 import type { MessageKey } from '../i18n';
 
-export type PaletteGroup = 'hosts' | 'next' | 'commands' | 'actions' | 'log';
+export type PaletteGroup = 'hosts' | 'next' | 'commands' | 'findings' | 'actions' | 'log';
 
 export interface PaletteItem {
   id: string;
@@ -35,11 +35,12 @@ export function registerPaletteSource(name: string, src: PaletteSource): () => v
   };
 }
 
-export const GROUP_ORDER: PaletteGroup[] = ['hosts', 'next', 'commands', 'actions', 'log'];
+export const GROUP_ORDER: PaletteGroup[] = ['hosts', 'next', 'commands', 'findings', 'actions', 'log'];
 export const GROUP_LABEL: Record<PaletteGroup, MessageKey> = {
   hosts: 'palette.group.hosts',
   next: 'palette.group.next',
   commands: 'palette.group.commands',
+  findings: 'palette.group.findings',
   actions: 'palette.group.actions',
   log: 'palette.group.log',
 };

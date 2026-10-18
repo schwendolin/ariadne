@@ -26,11 +26,12 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 __all__ = [
     "Layer",
@@ -575,15 +576,26 @@ class DUnitDistrust(_M):
 # Findings (E113, web-api.md 18.5). Ergänzt im Bau v0.1-Oberfläche, nur additiv.
 Severity = Literal["critical", "high", "medium", "low", "info"]
 FindingStatus = Literal["draft", "final"]
-_ATTACK_RE = re.compile(r"^T\d{4}(\.\d{3})?$")
-_CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
+# Nur ASCII-Ziffern und ganzer Text (fullmatch): ``$`` passte vor einem LF am Ende, ``\d`` auf
+# Ziffern aller Schriften (Korrektur SEC-FIND-1).
+ATTACK_ID_RE = re.compile(r"T[0-9]{4}(\.[0-9]{3})?")
+CVE_ID_RE = re.compile(r"CVE-[0-9]{4}-[0-9]{4,7}")
+_ATTACK_RE = ATTACK_ID_RE
+_CVE_RE = CVE_ID_RE
+
+
+def title_ok(text: str) -> bool:
+    """Titel eines Findings: keine Zeilentrenner (LF, CR, NEL, U+2028, U+2029) und keine Steuer-,
+    Format-, Surrogat-, privaten oder nicht zugewiesenen Zeichen (Kategorie C*, Zl, Zp)."""
+    return not any(unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp")
+                   for ch in text)
 
 
 class DFindingRef(_M):
     """ATT&CK-Technik oder CVE als Text; ``supported``: vom Menschen als belegt markiert."""
 
     id: str = Field(min_length=1, max_length=32)
-    supported: bool = False
+    supported: StrictBool = False
 
 
 class DEvidenceRef(_M):
@@ -604,7 +616,7 @@ class DEvidenceRef(_M):
 
 def _check_refs(refs: Sequence[DFindingRef], rx: re.Pattern[str], what: str) -> None:
     for r in refs:
-        if not rx.match(r.id):
+        if not rx.fullmatch(r.id):
             raise ValueError(f"{what}: ungültige Kennung")
 
 
@@ -620,8 +632,8 @@ class _FindingFields(_M):
 
     @model_validator(mode="after")
     def _check_fields(self) -> _FindingFields:
-        if self.title is not None and ("\n" in self.title or "\r" in self.title):
-            raise ValueError("title ohne Zeilenumbruch")
+        if self.title is not None and not title_ok(self.title):
+            raise ValueError("title ohne Zeilenumbruch und ohne Steuerzeichen")
         for a in self.affected or ():
             if not a or len(a) > 600:
                 raise ValueError("affected: ungültige Kennung")

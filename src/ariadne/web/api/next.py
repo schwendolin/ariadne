@@ -15,8 +15,9 @@ from typing import Any
 from fastapi import APIRouter
 from starlette.responses import Response
 
-from ariadne.ingest import queries
+from ariadne.ingest import pending, queries
 from ariadne.ingest.proj_build import display
+from ariadne.parsers._common import canon_ip
 from ariadne.rules import api as rules_api
 from ariadne.web.api.common import Api
 from ariadne.web.api.text import Bag, iso
@@ -61,16 +62,45 @@ def _line_pos(conn: Any, unit_id: str, span_json: Any) -> int | None:
     idx = span.get("line_start") if isinstance(span, Mapping) else None
     if not isinstance(idx, int):
         return None
-    row = conn.execute("SELECT pos FROM unit_line WHERE unit_id = ? AND idx = ?", (unit_id, idx)).fetchone()
-    return int(row[0]) if row else None
+    return pending.pos_of_idx(conn, unit_id, idx)
+
+
+def _claim_ts(conn: Any, claim_key: Any) -> int | None:
+    """Zeit der ersten Quelle eines Werts (Callback «um 16:52:31» im Grund des Kontextvorschlags)."""
+    if not isinstance(claim_key, str):
+        return None
+    row = conn.execute("SELECT MIN(ts_utc_ns) FROM claim_source WHERE claim_key = ?", (claim_key,)).fetchone()
+    return int(row[0]) if row is not None and isinstance(row[0], int) else None
+
+
+def _span_lines(span_json: Any) -> int:
+    """Zeilen der Fundstelle (``line_start`` bis ``line_end``), mindestens 1, höchstens EXCERPT_LINES."""
+    span = loads(span_json, None)
+    if not isinstance(span, Mapping):
+        return 1
+    a, b = span.get("line_start"), span.get("line_end")
+    if isinstance(a, int) and isinstance(b, int) and b >= a:
+        return max(1, min(EXCERPT_LINES, b - a + 1))
+    return 1
+
+
+def _callback_ip(remote: str) -> str | None:
+    """IP aus ``host:port``, ``[v6]:port`` oder einer nackten Adresse (Wert einer Callback-Mention)."""
+    ip = canon_ip(remote)
+    if ip is not None:
+        return ip
+    if remote.startswith("[") and "]" in remote:
+        return canon_ip(remote[1 : remote.index("]")])
+    host, sep, port = remote.rpartition(":")
+    return canon_ip(host) if sep and port.isdigit() else None
 
 
 def _excerpt(conn: Any, tid: str, off: int, claim_key: Any, bag: Bag, redactor: Any) -> dict[str, Any] | None:
     """Logauszug zum Kontextvorschlag (18.8): beim zweiten Callback aus einer anderen Adresse in
     derselben Stufe dieser (``note: 'second_callback'``, «Darum mehrdeutig»), sonst die Zeile des
-    vorgeschlagenen Callbacks (``note: 'callback'``). Höchstens :data:`EXCERPT_LINES` Zeilen,
-    bekannte und eigene Secrets wie in der Belegansicht verdeckt. Solange die Zeilen einer offenen
-    Einheit noch nicht gespeichert sind (Listener läuft), gibt es keinen Auszug (``None``)."""
+    vorgeschlagenen Callbacks (``note: 'callback'``). Nur die Zeilen der Fundstelle (höchstens
+    :data:`EXCERPT_LINES`), bekannte und eigene Secrets wie in der Belegansicht verdeckt. Bei einer
+    offenen Einheit (Listener läuft) kommen die Zeilen aus :mod:`ariadne.ingest.pending`."""
     from ariadne.web.api.evidence import render_rows, secret_spans
 
     hits: list[tuple[str, Any, Any, str]] = []
@@ -82,6 +112,24 @@ def _excerpt(conn: Any, tid: str, off: int, claim_key: Any, bag: Bag, redactor: 
         (tid, off),
     ):
         hits.append((str(unit_id), span_json, ts, str(subject)))
+    # Weitere Meldungen des Listeners in derselben Einheit sind Mentions (nur die erste ist eine
+    # Beobachtung): ein zweiter vertrauenswürdiger Callback aus einer anderen Adresse macht die Stufe
+    # mehrdeutig (listener.callback, ``reason: not_first``) und gehört in den Auszug.
+    for unit_id, span_json, ts, value, attrs in conn.execute(
+        "SELECT m.unit_id, m.span_json, m.ts_utc_ns, m.value, m.attrs_json FROM mention m "
+        "JOIN obs_unit u ON u.unit_id = m.unit_id WHERE m.value_type = 'callback' AND u.terminal_id = ? "
+        "AND u.ctx_opened_at = ? ORDER BY m.ts_utc_ns, m.mention_id LIMIT 200",
+        (tid, off),
+    ):
+        a = loads(attrs, {}) or {}
+        ip = (
+            _callback_ip(str(value or ""))
+            if isinstance(a, Mapping) and a.get("reason") == "not_first"
+            else None
+        )
+        if ip is not None:
+            hits.append((str(unit_id), span_json, ts, f"ip:default/{ip}"))
+    hits.sort(key=lambda h: (h[2] if isinstance(h[2], int) else 0, h[0]))
     pick: tuple[str, Any, Any] | None = None
     note = None
     seen: list[str] = []
@@ -105,12 +153,8 @@ def _excerpt(conn: Any, tid: str, off: int, claim_key: Any, bag: Bag, redactor: 
     pos = _line_pos(conn, unit_id, span_json)
     if pos is None:
         return None
-    first = max(0, pos - 1)
-    rows = conn.execute(
-        "SELECT pos, idx, text, flags, sgr FROM unit_line WHERE unit_id = ? AND pos >= ? "
-        "ORDER BY pos LIMIT ?",
-        (unit_id, first, EXCERPT_LINES),
-    ).fetchall()
+    # wie im Design: genau die Zeile(n) der Fundstelle, nicht ihre Umgebung (die zeigt der Beleg)
+    rows = pending.line_rows(conn, unit_id, pos, _span_lines(span_json))
     if not rows:
         return None
     spans = secret_spans(conn, unit_id) if bag.presentation else {}
@@ -275,6 +319,7 @@ def next_view(conn: Any, profile: str, bag: Bag, redactor: Any = None) -> dict[s
                 "claim_key": data.get("claim_key") if isinstance(data.get("claim_key"), str) else None,
                 "terminal": term_ref(data["terminal_id"], refs, bag),
                 "from_ts": iso(_off_ts(conn, data["terminal_id"], data.get("from_off"))),
+                "reason_ts": iso(_claim_ts(conn, data.get("claim_key"))),
                 "excerpt": _excerpt(
                     conn,
                     data["terminal_id"],

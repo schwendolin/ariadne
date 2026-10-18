@@ -41,7 +41,7 @@ const SECURITY_HEADERS = {
 // gibt sich deshalb als die UI des Daemons aus.
 const DAEMON = process.env.ARIADNE_DAEMON_URL ?? 'http://127.0.0.1:7330';
 
-export default defineConfig(({ mode, command }) => {
+export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const mock = mode === 'mock' || env.VITE_ARIADNE_MOCK === '1' || process.env.VITE_ARIADNE_MOCK === '1';
   const isTest = Boolean(process.env.VITEST);
@@ -50,8 +50,6 @@ export default defineConfig(({ mode, command }) => {
     plugins: [svelte(), ...(isTest ? [svelteTesting()] : [])],
     define: {
       __ARIADNE_MOCK__: JSON.stringify(mock),
-      // Im Dev-Server ohne erreichbares Backend schaltet die UI selbst auf Mock.
-      __ARIADNE_DEV_AUTOMOCK__: JSON.stringify(command === 'serve' && !isTest),
       __ARIADNE_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
     },
     build: {
@@ -63,6 +61,9 @@ export default defineConfig(({ mode, command }) => {
       sourcemap: false,
       cssCodeSplit: true,
       reportCompressedSize: false,
+      // Die UI kommt lokal vom Daemon (kein Netz dazwischen); Cytoscape liegt ohnehin in einem
+      // eigenen Chunk. Der Rest (Svelte, markdown-it, DOMPurify) bleibt bewusst ein Bündel.
+      chunkSizeWarningLimit: 800,
     },
     server: {
       host: '127.0.0.1',

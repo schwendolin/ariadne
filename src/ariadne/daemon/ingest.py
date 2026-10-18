@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from ariadne.ingest import queries
+from ariadne.ingest import pending, queries
 from ariadne.ingest.db import get_meta, schema_stale, set_meta
 from ariadne.ingest.pipeline import REPARSE_PENDING, Interrupted, Pipeline, Stats
 from ariadne.ingest.runner import Runner, SubprocessRunner
@@ -404,7 +404,9 @@ class IngestService:
     def _query(self, snap: tuple[int, dict[str, Any]], fn: Callable[[Any], T]) -> T:
         st = self._ensure(snap)
         try:
-            return fn(st.conn)
+            # vorläufige Zeilen offener Einheiten für Logauszug und Belegansicht (ingest.pending)
+            with pending.bound(st.pipeline):
+                return fn(st.conn)
         finally:
             if st.conn.in_transaction:
                 st.conn.rollback()
@@ -412,7 +414,8 @@ class IngestService:
     def _query_journal(self, snap: tuple[int, dict[str, Any]], fn: Callable[[Any, Any], T]) -> T:
         st = self._ensure(snap)
         try:
-            return fn(st.conn, st.journal)
+            with pending.bound(st.pipeline):
+                return fn(st.conn, st.journal)
         finally:
             if st.conn.in_transaction:
                 st.conn.rollback()

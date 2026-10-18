@@ -8,6 +8,9 @@
  *             (tests/e2e/ui_fixture.py, Produktions-Build nach .e2e/dist-prod)
  *     shots   `*.shots.spec.ts`  Screenshots je Screen bei 1440x900 dunkel und hell nach
  *             .e2e/shots/ (Augenprüfung gegen die Design-Screenshots, kein Pixelvergleich)
+ *     nutzer  `*.user.spec.ts`   echter Durchlauf als Nutzer (tests/e2e/user_lab.py: isoliertes HOME,
+ *             setup, init, Daemon mit Web-Server, zsh-Terminals) gegen den Produktions-Build in
+ *             src/ariadne/web/static; startet seinen Daemon selbst, braucht vorher `npm run build`
  * - Welche Server starten, steuert ARIADNE_E2E (mock | daemon | all); die npm-Skripte setzen es.
  * - Freie Ports: einmal im Runner gewählt und über die Umgebung an die Worker gegeben.
  * - Jeder Test bricht ab, wenn die Seite eine CSP-Verletzung oder einen Seitenfehler meldet
@@ -95,5 +98,6 @@ export default defineConfig({
     { name: 'mock', testMatch: /\.mock\.spec\.ts$/, use: { baseURL: `http://127.0.0.1:${MOCK_PORT}` } },
     { name: 'daemon', testMatch: /\.daemon\.spec\.ts$/, use: { baseURL: `http://127.0.0.1:${DAEMON_PORT}` } },
     { name: 'shots', testMatch: /\.shots\.spec\.ts$/, use: { baseURL: `http://127.0.0.1:${MOCK_PORT}` } },
+    { name: 'nutzer', testMatch: /\.user\.spec\.ts$/, timeout: 900_000, use: { contextOptions: { reducedMotion: 'reduce' }, actionTimeout: 15_000 } },
   ],
 });

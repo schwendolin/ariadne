@@ -102,7 +102,10 @@ def test_findings_lifecycle_validation_and_reparse(paths, operator):
         ))
         assert r.status_code == 201, r.text
         fid = r.json()["results"][0]["decision_id"]
+        # Bidi und Zero-Width im Titel: 422 (Korrektur SEC-FIND-1); HTML bleibt erlaubter Text
         r2 = await c.decide(_d("d.finding.create", title=HOSTILE))
+        assert r2.status_code == 422 and r2.json()["error"]["detail"][0]["type"] == "title", r2.text
+        r2 = await c.decide(_d("d.finding.create", title="<script>alert(1)</script> evil"))
         fid2 = r2.json()["results"][0]["decision_id"]
         await sync(d)
         lst = (await c.get("/findings")).json()["findings"]
@@ -111,7 +114,7 @@ def test_findings_lifecycle_validation_and_reparse(paths, operator):
         assert f1["finding_id"] == fid and f1["severity"] == "critical" and f1["status"] == "draft"
         assert f1["affected"] == [{"subject": SVC445, "label": f"{TARGET}:445 netbios-ssn", "ctrl": False}]
         assert f1["evidence_count"] == 1 and f1["warnings"] == []
-        assert lst[1]["ctrl"] is True and "<U+202E>" in lst[1]["title"] and "‮" not in lst[1]["title"]
+        assert lst[1]["ctrl"] is False and lst[1]["title"] == "<script>alert(1)</script> evil"
         assert set(lst[1]["warnings"]) == {"no_evidence", "no_severity"}
         det = (await c.get(f"/findings/{fid}")).json()
         assert det["description"].startswith("**Remote**")

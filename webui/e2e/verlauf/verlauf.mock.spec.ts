@@ -19,7 +19,7 @@ const NMAP = `${T1}@18432`;
 
 const row = (page: Page, id: string) => page.locator(`li.item[data-row="${id}"]`);
 const termRow = (page: Page, tid: string) => page.locator(`li[data-terminal="${tid}"]`);
-const panel = (page: Page) => page.getByRole('region', { name: 'Beleg' });
+const panel = (page: Page) => page.getByRole('dialog', { name: 'Beleg' });
 
 async function timelineReady(page: Page, query = ''): Promise<void> {
   await openMock(page, 'normal', `/zeitachse${query}`);

@@ -59,6 +59,48 @@ describe('SecretValue', () => {
     expect(r.container.textContent).not.toContain('mock-Ziel-Passwort');
   });
 
+  it('Korrektur SEC-UI-2: eine verspätete Antwort von «Aufdecken» zeigt im Präsentationsmodus nichts', async () => {
+    const b = backend();
+    let release: (v: { value: string; ctrl: boolean }) => void = () => undefined;
+    vi.spyOn(b, 'reveal').mockImplementation(() => new Promise((res) => (release = res)));
+    const r = render(SecretValue, { props: { secret: SECRET, pid: base.PID, backend: b, presentation: false, profile: 'lab' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aufdecken' }));
+    // Der Server hat schon geantwortet (ausgeschaltet), die Antwort ist noch unterwegs; jetzt an:
+    await r.rerender({ secret: SECRET, pid: base.PID, backend: b, presentation: true, profile: 'lab' });
+    await settle();
+    release({ value: 'geheim-731', ctrl: false });
+    await settle();
+    expect(r.container.textContent).not.toContain('geheim-731');
+    expect(r.container.textContent).toContain('••••••••');
+    // auch ein Hin und Her während der Anfrage verwirft die Antwort
+    await r.rerender({ secret: SECRET, pid: base.PID, backend: b, presentation: false, profile: 'lab' });
+    await settle();
+    await fireEvent.click(screen.getByRole('button', { name: 'Aufdecken' }));
+    await r.rerender({ secret: SECRET, pid: base.PID, backend: b, presentation: true, profile: 'lab' });
+    await settle();
+    await r.rerender({ secret: SECRET, pid: base.PID, backend: b, presentation: false, profile: 'lab' });
+    await settle();
+    release({ value: 'geheim-732', ctrl: false });
+    await settle();
+    expect(r.container.textContent).not.toContain('geheim-732');
+  });
+
+  it('eine ältere Antwort von «Aufdecken» überschreibt keine neuere', async () => {
+    const b = backend();
+    const waiting: ((v: { value: string; ctrl: boolean }) => void)[] = [];
+    vi.spyOn(b, 'reveal').mockImplementation(() => new Promise((res) => waiting.push(res)));
+    const r = render(SecretValue, { props: { secret: SECRET, pid: base.PID, backend: b, presentation: false, profile: 'lab' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aufdecken' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Aufdecken' }));
+    expect(waiting.length).toBe(2);
+    waiting[1]?.({ value: 'neu-2', ctrl: false });
+    await settle();
+    waiting[0]?.({ value: 'alt-1', ctrl: false });
+    await settle();
+    expect(r.container.textContent).toContain('neu-2');
+    expect(r.container.textContent).not.toContain('alt-1');
+  });
+
   it('nur im Profil lab aufdeckbar', () => {
     render(SecretValue, { props: { secret: SECRET, pid: base.PID, backend: backend(), presentation: false, profile: 'customer' } });
     expect((screen.getByRole('button', { name: 'Aufdecken' }) as HTMLButtonElement).disabled).toBe(true);

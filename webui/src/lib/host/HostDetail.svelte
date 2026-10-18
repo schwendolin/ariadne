@@ -18,7 +18,9 @@
   import type { AccessLevel, Keystep, WorkStatus } from '../api/types';
   import { t } from '../i18n';
   import { registerKeys } from '../keys/keymap';
+  import { pageKeysActive } from '../keys/page';
   import { hostSymbol } from '../karte/model';
+  import { hasVisibleMarkers } from '../safe/displaySafe';
   import SafeMarkdown from '../safe/SafeMarkdown.svelte';
   import type { AppState } from '../stores/app.svelte';
   import type { ProjectStore } from '../stores/project.svelte';
@@ -43,7 +45,11 @@
   const ACCESS: AccessLevel[] = ['none', 'user', 'admin'];
   const STEPS: Keystep[] = ['foothold', 'privesc', 'pivot', 'loot'];
   const secrets = $derived(d?.facts.filter((f) => f.is_secret) ?? []);
-  const namesOut = $derived(d?.identifiers.filter((i) => i.type !== 'ip' && i.type !== 'mac' && i.verdict !== 'in').map((i) => i.label) ?? []);
+  // «Namen ausserhalb» wie im Design: nur Namen (FQDN, NetBIOS, Hostname) mit Urteil ausserhalb, keine Schlüssel
+  const NAME_TYPES = new Set(['fqdn', 'netbios', 'name']);
+  const namesOut = $derived(
+    d?.identifiers.filter((i) => NAME_TYPES.has(i.type) && (i.verdict === 'out' || i.verdict === 'excluded')).map((i) => i.label) ?? [],
+  );
   const quietLine = $derived.by(() => {
     if (!d) return '';
     const parts: string[] = [];
@@ -131,8 +137,8 @@
 
   onMount(() =>
     registerKeys([
-      { keys: ['a'], help: 'help.k.decide', when: () => fog && !!d && !app.offline, run: () => void store.decideFog(true) },
-      { keys: ['x'], when: () => fog && !!d && !app.offline, run: () => void store.decideFog(false) },
+      { keys: ['a'], help: 'help.k.decide', when: () => pageKeysActive('karte') && fog && !!d && !app.offline, run: () => void store.decideFog(true) },
+      { keys: ['x'], when: () => pageKeysActive('karte') && fog && !!d && !app.offline, run: () => void store.decideFog(false) },
     ]),
   );
 </script>
@@ -157,7 +163,7 @@
     <div class="id">
       <span class="sym s-{fog ? 'fog' : d.access}" class:dead={sym === '⊘'} aria-hidden="true">{sym}</span>
       <div class="idtext">
-        <h2 class="label"><Txt value={d.label} mono ctrl={d.ctrl} max={80} /></h2>
+        <h2 class="label"><Txt value={d.label} mono max={80} /></h2>
         <span class="muted">{#if fog}{t('host.fog')}{:else if d.os}<Txt value={d.os} max={80} />{/if}</span>
       </div>
     </div>
@@ -264,14 +270,54 @@
       {/if}
     {/if}
 
+    <div class="foot-block" class:hidden={fog}>
+      <div class="tags">
+        {#each d.tags as tg (tg)}
+          <span class="tag"><Txt value={tg} max={64} /><button type="button" class="x" aria-label={`${t('host.tagRemove')}: ${tg}`} disabled={!!blocked} onclick={() => store.removeTag(tg)}>×</button></span>
+        {/each}
+        {#if !tagOpen}
+          <button type="button" class="tag add" disabled={!!blocked} onclick={() => (tagOpen = true)}>{t('host.addTag')}</button>
+        {/if}
+      </div>
+      {#if tagOpen}
+        <div class="inline-form">
+          <TextField id="host-tag" label={t('host.tagLabel')} bind:value={tag} maxlength={64} error={tagError} autofocus />
+          <span class="actions">
+            <Button variant="primary" size="s" disabled={!!blocked} reason={blocked} onclick={addTag}>{t('host.noteSave')}</Button>
+            <Button size="s" onclick={() => { tagOpen = false; tagError = null; }}>{t('host.noteCancel')}</Button>
+          </span>
+        </div>
+      {/if}
+      {#if noteOpen}
+        <div class="inline-form">
+          <TextField id="host-note" label={t('host.noteLabel')} bind:value={note} multiline rows={5} maxlength={100000} autofocus />
+          {#if hasVisibleMarkers(note)}<p class="hint" role="note">{t('host.noteMarkers')}</p>{/if}
+          <span class="actions">
+            <Button variant="primary" size="s" disabled={!!blocked} reason={blocked} onclick={saveNote}>{t('host.noteSave')}</Button>
+            <Button size="s" onclick={() => (noteOpen = false)}>{t('host.noteCancel')}</Button>
+          </span>
+        </div>
+      {:else if d.note}
+        <button type="button" class="note" title={t('host.noteEdit')} disabled={!!blocked} onclick={editNote}><SafeMarkdown source={d.note} /></button>
+      {:else}
+        <button type="button" class="tag add note-add" disabled={!!blocked} onclick={editNote}>{t('host.noteAdd')}</button>
+      {/if}
+      {#if quietLine || namesOut.length}
+        <p class="quiet">{quietLine}{#if quietLine && namesOut.length}{DOT}{/if}{#each namesOut.slice(0, 4) as n, i (i)}{#if i > 0}{COMMA}{/if}<Txt value={n} max={60} />{/each}{#if namesOut.length > 4}{PLUS}{namesOut.length - 4}{/if}{#if namesOut.length}{SP}{t('host.verdict.out')}{/if}</p>
+      {/if}
+    </div>
+
     {#if d.conflicts.length > 0}
       <div class="section-head"><span>{t('host.conflicts')}</span><span class="n">{d.conflicts.length}</span></div>
       <div class="pad-x conflicts">
         {#each d.conflicts as c (c.conflict_key)}
-          <div class="conflict">
-            <span class="muted">{c.predicate}</span>
+          <div class="conflict" class:settled={c.state !== 'open'}>
+            <span class="muted"
+              ><Txt value={c.subject_label} mono max={60} />{DOT}{c.predicate}{#if c.state === 'resolved'}{DOT}{t('host.conflictResolved')}{:else if c.state === 'kept_open'}{DOT}{t('host.conflictKept')}{/if}</span
+            >
             {#each c.values as v (v.claim_key)}
-              <span class="cv">
+              <span class="cv" class:chosen={c.state === 'resolved' && c.choice === v.claim_key} class:dropped={c.state === 'resolved' && c.choice !== v.claim_key}>
+                {#if c.state === 'resolved' && c.choice === v.claim_key}<span class="ok" aria-hidden="true">✓</span>{/if}
                 <Txt value={v.value} mono ctrl={v.ctrl} max={80} />
                 <span class="muted">{t('next.sources', { n: v.sources })}</span>
                 {#if c.state === 'open'}<Button size="s" disabled={!!blocked} reason={blocked} onclick={() => store.resolveConflict(c.conflict_key, v.claim_key)}>{t('next.a.choose')}</Button>{/if}
@@ -306,42 +352,6 @@
         {/each}
       </ul>
     {/if}
-
-    <div class="foot-block" class:hidden={fog}>
-      <div class="tags">
-        {#each d.tags as tg (tg)}
-          <span class="tag"><Txt value={tg} max={64} /><button type="button" class="x" aria-label={`${t('host.tagRemove')}: ${tg}`} disabled={!!blocked} onclick={() => store.removeTag(tg)}>×</button></span>
-        {/each}
-        {#if !tagOpen}
-          <button type="button" class="tag add" disabled={!!blocked} onclick={() => (tagOpen = true)}>{t('host.addTag')}</button>
-        {/if}
-      </div>
-      {#if tagOpen}
-        <div class="inline-form">
-          <TextField id="host-tag" label={t('host.tagLabel')} bind:value={tag} maxlength={64} error={tagError} autofocus />
-          <span class="actions">
-            <Button variant="primary" size="s" disabled={!!blocked} reason={blocked} onclick={addTag}>{t('host.noteSave')}</Button>
-            <Button size="s" onclick={() => { tagOpen = false; tagError = null; }}>{t('host.noteCancel')}</Button>
-          </span>
-        </div>
-      {/if}
-      {#if noteOpen}
-        <div class="inline-form">
-          <TextField id="host-note" label={t('host.noteLabel')} bind:value={note} multiline rows={5} maxlength={100000} autofocus />
-          <span class="actions">
-            <Button variant="primary" size="s" disabled={!!blocked} reason={blocked} onclick={saveNote}>{t('host.noteSave')}</Button>
-            <Button size="s" onclick={() => (noteOpen = false)}>{t('host.noteCancel')}</Button>
-          </span>
-        </div>
-      {:else if d.note}
-        <button type="button" class="note" title={t('host.noteEdit')} disabled={!!blocked} onclick={editNote}><SafeMarkdown source={d.note} /></button>
-      {:else}
-        <button type="button" class="tag add note-add" disabled={!!blocked} onclick={editNote}>{t('host.noteAdd')}</button>
-      {/if}
-      {#if quietLine || namesOut.length}
-        <p class="quiet">{quietLine}{#if quietLine && namesOut.length}{DOT}{/if}{#each namesOut.slice(0, 4) as n, i (i)}{#if i > 0}{COMMA}{/if}<Txt value={n} max={60} />{/each}{#if namesOut.length > 4}{PLUS}{namesOut.length - 4}{/if}{#if namesOut.length}{SP}{t('host.verdict.out')}{/if}</p>
-      {/if}
-    </div>
 
     {#if d.commands.length > 0}
       <div class="section-head"><span>{t('host.commands')}</span><span class="n">{d.commands.length}</span></div>
@@ -575,6 +585,16 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+  }
+  .cv.dropped {
+    color: var(--faint);
+    text-decoration: line-through;
+  }
+  .cv .ok {
+    color: var(--fg-2);
+  }
+  .conflict.settled .cv:not(.chosen):not(.dropped) {
+    color: var(--muted);
   }
   .ids {
     list-style: none;

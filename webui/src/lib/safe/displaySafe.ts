@@ -121,3 +121,14 @@ export function punycodeHint(name: string): string | null {
     return null;
   }
 }
+
+/**
+ * Markierungen, mit denen der Server Steuerzeichen sichtbar macht (`<ESC>`, `<U+202E>`, `<CR>` …).
+ * Steht so etwas in einem Text, der ins Bearbeitungsfeld geladen wird (Notiz, Beschreibung eines
+ * Findings), sagt die Oberfläche es (Korrektur SEC-UI-1): Gespeichert wird dann der sichtbare
+ * Text, nicht das Steuerzeichen. Zeilenumbruch und Tabulator kommen in diesen Feldern echt an.
+ */
+const MARKER_RE = /<(?:ESC|BEL|BS|DEL|CR|LF|TAB|0x[0-9A-F]{2}|U\+[0-9A-F]{4,6})>/;
+export function hasVisibleMarkers(text: string): boolean {
+  return MARKER_RE.test(text);
+}

@@ -123,9 +123,9 @@ describe('globale Kürzel', () => {
     expect(url.route).toBe('zeitachse');
   });
 
-  it('Anzeige des Modifikators: ⌘K auf dem Mac, sonst Strg K', () => {
+  it('Anzeige des Modifikators: ⌘K auf dem Mac, sonst Strg+K (ohne Leerzeichen, D1)', () => {
     expect(modLabel('K', true)).toBe('⌘K');
-    expect(modLabel('K', false)).toBe('Strg K');
+    expect(modLabel('K', false)).toBe('Strg+K');
     expect(isMac({ platform: 'MacIntel' } as Navigator)).toBe(true);
     expect(isMac({ platform: 'Linux x86_64' } as Navigator)).toBe(false);
   });

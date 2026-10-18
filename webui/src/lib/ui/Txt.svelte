@@ -33,9 +33,11 @@
   const full = $derived(displaySafe(raw, 0));
   const hidden = $derived(ctrl || hasHiddenChars(raw) || /<(ESC|BEL|U\+[0-9A-F]{4,6}|0x[0-9A-F]{2})>/.test(raw));
   const title = $derived(hidden ? `${full} (${t('common.ctrl')})` : shown !== full ? full : undefined);
+  /** Leerzeichen am Anfang eines Elements entfernt Svelte; als Wert bleibt es (Korrektur D4) */
+  const SP = ' ';
 </script>
 
-<span class="txt" class:mono class:target class:hidden {title}>{shown}</span>{#if hidden && flag}<span class="sr-only"> ({t('common.ctrl')})</span>{/if}
+<span class="txt" class:mono class:target class:hidden {title}>{shown}</span>{#if hidden && flag}<span class="sr-only">{SP}({t('common.ctrl')})</span>{/if}
 
 <style>
   .txt {

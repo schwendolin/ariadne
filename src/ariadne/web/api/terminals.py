@@ -18,6 +18,7 @@ from fastapi import APIRouter, Body
 from starlette.responses import Response
 
 from ariadne.daemon.terminal import normalize_host
+from ariadne.ingest import pending
 from ariadne.ingest.proj_build import display
 from ariadne.ingest.queries import term_refs
 from ariadne.scope.matcher import ScopeMatcher
@@ -72,7 +73,10 @@ def terminal_extras(conn: Any, tids: list[str], bag: Bag) -> dict[str, dict[str,
         )
         kind = (loads(seg[0]["context"], {}) or {}).get("kind") if seg else None
         remote = (
-            {"since": iso(seg[0]["ts_utc_ns"]), "lines": int(seg[0]["vis_count"] or 0)}
+            {
+                "since": iso(seg[0]["ts_utc_ns"]),
+                "lines": int(seg[0]["vis_count"] or 0) + pending.visible_extra(conn, str(seg[0]["unit_id"])),
+            }
             if seg and kind not in (None, "local", "su")
             else None
         )  # nur eine Remote-Stufe hat ein «rekonstruiertes» Segment

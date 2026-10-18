@@ -52,7 +52,8 @@ describe('Aufnahme-Popover', () => {
     await settle();
     expect(spy).toHaveBeenCalledWith(base.T2, 10);
     expect(row(pop, base.T2).textContent).toContain('wartet auf Bestätigung');
-    expect((within(row(pop, base.T2)).getByRole('button', { name: /Pause für T2/ }) as HTMLButtonElement).disabled).toBe(true);
+    // gesperrt per aria-disabled (Korrektur A13: der Knopf behält den Fokus)
+    expect(within(row(pop, base.T2)).getByRole('button', { name: /Pause für T2/ }).getAttribute('aria-disabled')).toBe('true');
     expect(app.pendingPause[base.T2]?.kind).toBe('pause');
     // Ein zweiter Klick schickt nichts doppelt
     await app.pause(base.T2);
@@ -78,7 +79,7 @@ describe('Aufnahme-Popover', () => {
     expect(spy).toHaveBeenCalledWith(base.T2, 10);
     expect(base.T2 in app.pauseRefused).toBe(true);
     expect(row(pop, base.T2).textContent).toContain('Pausenbudget aus dem Dashboard erschöpft (30 min pro Stunde). Im Terminal: F12 r');
-    expect((within(row(pop, base.T2)).getByRole('button', { name: /Pause für T2/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(row(pop, base.T2)).getByRole('button', { name: /Pause für T2/ }).getAttribute('aria-disabled')).toBe('true');
     expect(app.ui.notices.some((n) => n.kind === 'error' && n.text.includes('Pausenbudget'))).toBe(true);
   });
 
@@ -90,8 +91,11 @@ describe('Aufnahme-Popover', () => {
     await fireEvent.click(r.container.querySelector('button.rec') as HTMLElement);
     const pop = screen.getByRole('dialog', { name: 'Aufnahme' });
     const btn = within(row(pop, base.T3)).getByRole('button', { name: /Pause für T3/ }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
     expect(btn.title).toContain('Pausenbudget');
+    const spy = vi.spyOn(backend, 'pause');
+    await fireEvent.click(btn);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('held und gesperrt ohne Pausenknopf', async () => {

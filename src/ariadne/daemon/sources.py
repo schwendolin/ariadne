@@ -245,6 +245,9 @@ class LocalSources:
         pending: list[tuple[str, str, str | None, str | None]] = []
         stored = 0
         for raw in paths[:MAX_COMPANIONS]:
+            if raw == "~" or raw.startswith("~/"):
+                # die Shell hat «~» schon ersetzt, argv aus dem Marker zeigt es noch (nur das eigene ~)
+                raw = os.path.join(str(home), raw[2:])
             if not os.path.isabs(raw):
                 if not cmd.cwd or not os.path.isabs(cmd.cwd):
                     continue

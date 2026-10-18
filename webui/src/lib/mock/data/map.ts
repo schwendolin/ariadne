@@ -176,14 +176,15 @@ function tpl(id: string, tool: string, label: string, parts: [string, boolean][]
 }
 
 export function suggestions(): Suggestion[] {
-  const ev = (claim: string, label: string) => ({ claim_key: hex64(claim), unit_id: `${T1}@18432`, lines: [6, 6] as [number, number], label });
+  // wie der Server (18.12): Label ohne Uhrzeit, die Zeit der Quelle in `ts`
+  const ev = (claim: string, label: string) => ({ claim_key: hex64(claim), unit_id: `${T1}@18432`, lines: [6, 6] as [number, number], label, ts: at('14:02:11.204') });
   const d1: Suggestion = {
     suggestion_key: 'sg:5a1f0c3e9b27d4a8c6e2f013', origin: 'rule', rule_id: 'R-ANON-ZUGRIFF', goal_id: 'PZ-AUTH-ANON', kind: 'goal',
     title: 'Unauthentisierten Zugriff auf 192.168.56.101:21 prüfen', ctrl: false,
     title_parts: [{ text: 'Unauthentisierten Zugriff auf ', target: false }, { text: '192.168.56.101:21', target: true }, { text: ' prüfen', target: false }],
     host_id: hostId(IP101), service_id: serviceId(IP101, 21), host_label: IP101,
     reason: 'FTP-Dienst ohne geprüfte anonyme Anmeldung', ctrl_reason: false,
-    evidence: [ev('ftp-21', 'nmap -sV · 14:02 · Zeile 6')],
+    evidence: [ev('ftp-21', 'nmap -sV · Zeile 6')],
     stages: { question: 'Welche Daten gibt dieser Dienst ohne Anmeldung preis?', direction: 'Viele vsftpd-Installationen erlauben Gast- oder anonyme Logins.' },
     templates: [
       tpl('nmap-ftp-anon', 'nmap', 'nmap-Skript ftp-anon', [['nmap -p ', false], ['21', true], [' --script ftp-anon ', false], [IP101, true]], [
@@ -200,7 +201,7 @@ export function suggestions(): Suggestion[] {
     title_parts: [{ text: 'Version recherchieren: ', target: false }, { text: 'vsftpd 2.3.4', target: true }, { text: ' (', target: false }, { text: '192.168.56.101:21', target: true }, { text: ')', target: false }],
     host_id: hostId(IP101), service_id: serviceId(IP101, 21), host_label: IP101,
     reason: 'Produkt und Version bekannt', ctrl_reason: false,
-    evidence: [ev('ftp-21-version', 'nmap -sV · 14:02 · Zeile 6')],
+    evidence: [ev('ftp-21-version', 'nmap -sV · Zeile 6')],
     stages: { question: 'Gibt es für diese Version bekannte Schwachstellen?', direction: 'Exploit-Datenbanken nach Produkt und Version durchsuchen.' },
     templates: [
       tpl('searchsploit', 'searchsploit', 'searchsploit', [['searchsploit ', false], ['vsftpd 2.3.4', true]], [
@@ -240,8 +241,8 @@ export function next(): NextView {
     clarify: [
       {
         kind: 'ctx_suggestion', ordinal: 2, item_key: `ctx:${T3}@412`, ts: at('16:52:31.447'), terminal_id: T3, from_off: 412, stage_kind: 'revshell', units: 1,
-        suggested_host: hostId(IP101), suggested_label: IP101, reason: 'Callback von 192.168.56.101 (nc:4445) um 16:52:31', claim_key: hex64('cb-101'),
-        terminal: TERM[T3] ?? null, from_ts: at('16:52:31.447'),
+        suggested_host: hostId(IP101), suggested_label: IP101, reason: 'Callback von 192.168.56.101 (nc:4445)', claim_key: hex64('cb-101'),
+        terminal: TERM[T3] ?? null, from_ts: at('16:52:31.447'), reason_ts: at('16:52:31.447'),
         excerpt: { unit_id: `${T3}@64`, lines: [3, 3], text: ['connect to [192.168.56.102] from (UNKNOWN) [10.66.66.66] 31337'], ctrl: false, note: 'second_callback', ts: at('16:53:02.118') },
       },
       {

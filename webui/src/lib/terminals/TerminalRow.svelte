@@ -16,6 +16,7 @@
   import Button from '../ui/Button.svelte';
   import SecretValue from '../ui/SecretValue.svelte';
   import Txt from '../ui/Txt.svelte';
+  import { displaySafe } from '../safe/displaySafe';
   import { url } from '../url/state.svelte';
   import { errorText } from '../util/errors';
   import { termShort } from '../util/format';
@@ -42,6 +43,8 @@
   const tid = $derived(term.terminal_id);
   const short = $derived(termShort(term));
   const tty = $derived(typeof term.tty === 'string' ? (/^\/dev\/(pts\/\d{1,5}|tty\w{1,8})$/.exec(term.tty)?.[1] ?? null) : null);
+  // wie im Design «pts/3 · zsh»: nur der Name der Shell, der volle Pfad steht im Tooltip
+  const shellName = $derived(typeof term.shell === 'string' ? (term.shell.split('/').filter(Boolean).pop() ?? term.shell) : null);
   const held = $derived(term.state === 'held');
   const pending = $derived(app.pendingPause[tid]);
   const refused = $derived(tid in app.pauseRefused);
@@ -104,6 +107,7 @@
     busy = true;
     try {
       const res = await app.backend.setContext(tid, { op: 'accept', item_key: s.item_key });
+      project.noteOwn('ctx', { terminal_id: tid, op: 'accept', item_key: s.item_key }, res.decision_id ?? null); // Korrektur A5
       for (const w of res.warnings) app.ui.notify('info', `${t('ctx.host')} ${t(`ctx.warn.${w.code}` as MessageKey)}`);
       app.ui.notify('info', t('term.accepted'), 2500);
     } catch (e) {
@@ -140,7 +144,7 @@
       {#if term.ordinal !== null}T{term.ordinal}{:else}{short}{/if}
       {#if term.label}<Txt value={term.label} max={32} />{/if}
     </span>
-    <span class="tty">{tty ?? short}{#if term.shell}{SEP}<Txt value={term.shell} max={16} />{/if}</span>
+    <span class="tty" title={term.shell ? displaySafe(term.shell, 200) : undefined}>{tty ?? short}{#if shellName}{SEP}<Txt value={shellName} max={16} />{/if}</span>
     {#if renaming}
       <span class="rename">
         <label class="sr-only" for="term-name-{tid}">{t('term.renameLabel')}</label>

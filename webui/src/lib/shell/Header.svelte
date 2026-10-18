@@ -8,7 +8,9 @@
     offline                        «Keine Verbindung · Stand 16:54 · verbindet neu …» statt Aufnahme
   Präsentation ist ein Kennzeichen in jeder Variante. Keine Zahlen von Klärungen oder
   Denkanstössen (E87, E107). Unter 1280 px kompakt (nur CSS): kurze Aufnahme, Suche nur als ⌘K;
-  die Herkunft bleibt immer sichtbar. Besitzer: ui-fundament.
+  die Herkunft bleibt immer sichtbar. Platz (Korrekturen D1, D16, A12): Die Reiter und die Suche
+  kürzen sich nie; reicht der Platz nicht, kürzt sich die linke Gruppe von innen (Aufnahme-Text,
+  Kennzeichen), nie die Herkunft, und läuft nie in die Reiter. Besitzer: ui-fundament.
 -->
 <script lang="ts">
   import { t } from '../i18n';
@@ -104,6 +106,19 @@
     min-width: 0;
     flex: 1 1 auto;
   }
+  .left > :global(*) {
+    flex-shrink: 0;
+  }
+  .header > :global(nav) {
+    flex: none;
+  }
+  /* Neben held (Warnung «nicht gespeichert») steht die Aufnahme in der Kurzform (D2) */
+  .header[data-variant='held'] :global(.rec .long) {
+    display: none;
+  }
+  .header[data-variant='held'] :global(.rec .short) {
+    display: inline;
+  }
   .divider {
     flex: none;
     width: 1px;
@@ -116,6 +131,10 @@
     font-size: 14px;
     letter-spacing: 0.01em;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 2.5em;
+    flex: 0 1 auto;
   }
   .badge {
     display: inline-flex;
@@ -149,6 +168,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+    flex: 0 1 auto;
+  }
+  .left > .badge {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .origin {
     flex: none;
@@ -160,7 +186,10 @@
     flex: 1 1 auto;
     justify-content: flex-end;
   }
+  /* Korrektur D1: Suchknopf und Tastenhinweis brechen nie um und kürzen sich nicht */
   .search {
+    flex: none;
+    white-space: nowrap;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -177,6 +206,8 @@
     border-color: var(--line-hover);
   }
   kbd {
+    flex: none;
+    white-space: nowrap;
     font-family: var(--font-mono);
     font-size: 11.5px;
     padding: 2px 5px;

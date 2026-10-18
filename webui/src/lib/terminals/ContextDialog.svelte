@@ -151,6 +151,7 @@
     error = null;
     try {
       const res = await app.backend.setContext(terminalId, op);
+      project.noteOwn('ctx', { terminal_id: terminalId, op: op.op }, res.decision_id ?? null); // Korrektur A5
       if (!res.stored) app.ui.notify('info', t('ctx.doneStack'), 4000);
       if (res.warnings.length > 0) {
         result = res;

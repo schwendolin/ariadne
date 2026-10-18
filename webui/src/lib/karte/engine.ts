@@ -27,6 +27,8 @@ export interface Viewport {
 
 export interface Frame {
   viewport: Viewport;
+  /** Zoom des letzten Einpassens (Korrektur D3: Ports erst bei Zoom des Menschen darüber) */
+  fitZoom?: number;
   positions: Record<string, Pt>;
   /** Rahmen der Segmente in Modellkoordinaten */
   segments: Record<string, { x1: number; y1: number; x2: number; y2: number }>;
@@ -97,6 +99,14 @@ export class MapEngine {
   private interactingUntil = 0;
   private firstSync = true;
   private userAdjusted = false;
+  /**
+   * Gründe, die Karte gerade nicht zu bewegen (Korrektur A3): Maus über der Karte, Fokus auf einer
+   * Karte, offenes Host-Detail. Solange einer gilt, passt die Karte nach neuen Hosts nicht ein.
+   */
+  private holds = new Set<string>();
+  /** Ein Einpassen steht aus, weil beim Eintreffen neuer Knoten eine Interaktion lief. */
+  private fitPending = false;
+  private lastFitZoom = 1;
   private insets: Insets = { top: 56, right: 56, bottom: 52, left: 24 };
   private themeObserver: MutationObserver | null = null;
   private media: MediaQueryList | null = null;
@@ -190,6 +200,7 @@ export class MapEngine {
           events: 'no',
         },
       },
+      { selector: 'node.segment.empty', style: { padding: 0 } },
       {
         selector: 'edge',
         style: { width: 1.5, 'line-color': line, 'curve-style': 'straight', events: 'no', 'target-arrow-shape': 'none' },
@@ -287,6 +298,7 @@ export class MapEngine {
         cy.add({ group: 'edges', data: { id: e.id, source: e.source, target: e.target }, classes: `${e.kind}${loop ? ' loop' : ''}` });
       }
     });
+    this.placeEmptySegments();
     if (this.firstSync) {
       this.firstSync = false;
       const unplaced = model.cards.filter((c) => !this.placed.has(c.id));
@@ -299,6 +311,50 @@ export class MapEngine {
     }
     if (added.some((id) => !this.placed.has(id))) this.requestLayout();
     this.requestFrame();
+  }
+
+  /**
+   * Leere Scope-Segmente (leeres Projekt, Screen 9 «Erste Schritte»): ein grosser gestrichelter
+   * Rahmen rechts von Kali statt eines winzigen Knotens unter ihr. Sobald ein Host im Segment liegt,
+   * ergibt sich der Rahmen wieder aus den Kindern.
+   */
+  private placeEmptySegments(): void {
+    const cy = this.cy;
+    if (!cy) return;
+    const used = new Set(this.model.cards.map((c) => c.segment).filter((x): x is string => !!x));
+    const empties = this.model.segments.filter((s) => !used.has(s.id));
+    for (const s of this.model.segments) if (used.has(s.id)) cy.getElementById(s.id).removeClass('empty');
+    if (empties.length === 0) return;
+    const kali = cy.getElementById('kali');
+    const k = kali.nonempty() ? kali.position() : { x: 0, y: 0 };
+    const kw = this.sizeOf('kali').w;
+    const w = 600;
+    const h = empties.length > 1 ? 300 : 460;
+    const gap = 40;
+    const total = empties.length * h + (empties.length - 1) * gap;
+    empties.forEach((seg, i) => {
+      const n = cy.getElementById(seg.id);
+      if (n.empty()) return;
+      n.addClass('empty');
+      n.data({ w, h });
+      n.position({ x: k.x + kw / 2 + 180 + w / 2, y: k.y - total / 2 + h / 2 + i * (h + gap) });
+    });
+  }
+
+  /**
+   * Nach einer vollen Lage: Kali als Eingang links neben alles andere, vertikal in der Mitte
+   * (SCREENS 1a). fcose legt nur «links von» fest; ohne das landet Kali oft in einer Ecke.
+   */
+  private placeKali(): void {
+    const cy = this.cy;
+    if (!cy) return;
+    const kali = cy.getElementById('kali');
+    if (kali.empty() || !this.simpleNodes().some((n) => n.id() !== 'kali')) return;
+    const rest = cy.elements().not(kali).not(kali.connectedEdges()).not('node.segment.empty');
+    if (rest.empty()) return;
+    const bb = rest.boundingBox({});
+    const kw = this.sizeOf('kali').w;
+    kali.position({ x: Math.round(bb.x1 - 170 - kw / 2), y: Math.round((bb.y1 + bb.y2) / 2) });
   }
 
   private nearAnchor(segment: string | null, seed: Pt | undefined): Pt {
@@ -328,9 +384,43 @@ export class MapEngine {
         this.layoutTimer = setTimeout(tick, Math.max(wait, 200));
         return;
       }
-      this.runLayout('incremental');
+      // Erste Hosts in einem leeren Projekt: Bisher liegt nur Kali, also eine volle Lage (Kali
+      // links, Hosts rechts davon) statt Kali als festen Anker irgendwo am Rand.
+      const onlyKali = [...this.placed].every((id) => id === 'kali');
+      this.runLayout(onlyKali ? 'full' : 'incremental');
     };
     this.layoutTimer = setTimeout(tick, 60);
+  }
+
+  /** Interaktion an oder aus (Maus über der Karte, Fokus, Host-Detail), Korrektur A3. */
+  setHold(reason: string, on: boolean): void {
+    if (on) this.holds.add(reason);
+    else this.holds.delete(reason);
+    if (!on && this.holds.size === 0 && this.fitPending) {
+      this.fitPending = false;
+      if (!this.userAdjusted && this.anyOutside()) {
+        this.fit();
+        this.requestFrame();
+      }
+    }
+  }
+
+  /** true, solange sich die Karte nicht von selbst bewegen darf. */
+  holding(): boolean {
+    return this.holds.size > 0 || Date.now() < this.interactingUntil;
+  }
+
+  /** true, wenn ein Knoten ganz oder teilweise ausserhalb des sichtbaren Bereichs liegt. */
+  private anyOutside(): boolean {
+    const cy = this.cy;
+    if (!cy) return false;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    if (w <= 0 || h <= 0) return false;
+    return this.simpleNodes().some((n) => {
+      const bb = n.renderedBoundingBox({});
+      return bb.x1 < 0 || bb.y1 < 0 || bb.x2 > w || bb.y2 > h;
+    });
   }
 
   /** Lage berechnen: `full` ohne gespeicherte Lage, `incremental` mit festen bekannten Knoten. */
@@ -380,7 +470,16 @@ export class MapEngine {
       this.layoutRunning = false;
       this.lastLayout = Date.now();
       for (const n of this.simpleNodes()) this.placed.add(n.id());
-      if (mode === 'full' || !this.userAdjusted) this.fit();
+      if (mode === 'full') this.placeKali();
+      this.placeEmptySegments();
+      // Korrektur A3: Bestehende Karten bewegen sich nie von selbst, auch nicht über das Einpassen.
+      // Nach der ersten Lage wird nur noch eingepasst, wenn ein neuer Knoten ausserhalb des Bildes
+      // liegt und keine Interaktion läuft (sonst nach deren Ende).
+      if (mode === 'full') this.fit();
+      else if (!this.userAdjusted && this.anyOutside()) {
+        if (this.holding()) this.fitPending = true;
+        else this.fit();
+      }
       this.cb.onPositionsChanged(this.positions());
       this.requestFrame();
     });
@@ -450,6 +549,8 @@ export class MapEngine {
       zoom: z,
       pan: { x: this.insets.left + aw / 2 - cx * z, y: this.insets.top + ah / 2 - cyy * z },
     });
+    this.lastFitZoom = z;
+    this.fitPending = false;
     this.userAdjusted = false;
   }
 
@@ -457,7 +558,7 @@ export class MapEngine {
   resize(): void {
     if (!this.cy) return;
     this.cy.resize();
-    if (!this.userAdjusted) this.fit();
+    if (!this.userAdjusted && !this.holding()) this.fit();
     this.requestFrame();
   }
 
@@ -507,7 +608,7 @@ export class MapEngine {
       const m = e.midpoint();
       if (Number.isFinite(m.x) && Number.isFinite(m.y)) markers[e.id()] = { x: round(m.x), y: round(m.y) };
     });
-    this.cb.onFrame({ viewport: { zoom: round(cy.zoom()), x: round(pan.x), y: round(pan.y) }, positions, segments, markers });
+    this.cb.onFrame({ viewport: { zoom: round(cy.zoom()), x: round(pan.x), y: round(pan.y) }, fitZoom: round(this.lastFitZoom), positions, segments, markers });
   }
 
   destroy(): void {
@@ -540,5 +641,6 @@ export function fallbackFrame(model: MapModel, width: number, height: number, sa
   const z = Math.max(0.5, Math.min(1, Math.min((width - 80) / (maxX - minX), (height - 120) / (maxY - minY))));
   const x = (width - (maxX - minX) * z) / 2 - minX * z;
   const y = 60 + (height - 120 - (maxY - minY) * z) / 2 - minY * z;
-  return { viewport: { zoom: round(Number.isFinite(z) ? z : 1), x: round(x), y: round(y) }, positions, segments: {}, markers: {} };
+  const zoom = round(Number.isFinite(z) ? z : 1);
+  return { viewport: { zoom, x: round(x), y: round(y) }, fitZoom: zoom, positions, segments: {}, markers: {} };
 }

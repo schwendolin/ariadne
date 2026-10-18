@@ -45,7 +45,7 @@ async function open(target: EvidenceTarget, scenario: Parameters<typeof makeApp>
   return { ...h, project, view };
 }
 
-const panel = () => screen.getByRole('region', { name: 'Beleg' });
+const panel = () => screen.getByRole('dialog', { name: 'Beleg' });
 // gesperrte Knöpfe nennen den Grund im Namen (Bildschirmleser), daher Anfang des Namens
 const btn = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) });
 const isDisabled = (el: HTMLElement) => el.getAttribute('aria-disabled') === 'true' || (el as HTMLButtonElement).disabled;

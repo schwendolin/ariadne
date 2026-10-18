@@ -11,7 +11,7 @@
 import type { Backend } from '../api/backend';
 import type { ChangeSet, DecisionInput, DecisionResponse, ProjectView, StreamEvent } from '../api/types';
 import { errorText, isAbort } from '../util/errors';
-import { clientRef, type AppApi, type DecideOptions, type ProjectCtx, type ProjectPart } from './ctx';
+import { clientRef, type AppApi, type DecideOptions, type OwnDecision, type ProjectCtx, type ProjectPart } from './ctx';
 import { EvidenceStore } from './evidence.svelte';
 import { FindingsStore } from './findings.svelte';
 import { HostStore } from './host.svelte';
@@ -81,13 +81,28 @@ export class ProjectStore implements ProjectCtx {
     this.loaded = true;
   }
 
+  /** Eigene Entscheide dieses Tabs (höchstens 100, 10 Minuten), Korrektur A5. */
+  private own: OwnDecision[] = [];
+
+  noteOwn(kind: string, payload: Record<string, unknown>, decisionId: string | null): void {
+    const now = Date.now();
+    this.own = [...this.own.filter((o) => now - o.at < 600_000).slice(-99), { kind, payload, decisionId, at: now }];
+  }
+
+  ownSince(ms: number): readonly OwnDecision[] {
+    const from = Date.now() - ms;
+    return this.own.filter((o) => o.at >= from);
+  }
+
   async decide(decisions: DecisionInput[], opts: DecideOptions = {}): Promise<DecisionResponse | null> {
     if (this.app.offline || this.disposed) return null;
     try {
-      return await this.backend.decide(
+      const res = await this.backend.decide(
         this.pid,
         decisions.map((d) => ({ ...d, client_ref: d.client_ref ?? clientRef() })),
       );
+      decisions.forEach((d, i) => this.noteOwn(d.kind, d.payload as Record<string, unknown>, res.results[i]?.decision_id ?? null));
+      return res;
     } catch (e) {
       if (isAbort(e)) return null;
       const text = errorText(e, opts.errorPrefix ?? 'err.decisionPrefix');

@@ -11,6 +11,7 @@
   import HostDetail from '../host/HostDetail.svelte';
   import { t } from '../i18n';
   import { registerKeys } from '../keys/keymap';
+  import { pageKeysActive } from '../keys/page';
   import NextColumn from '../next/NextColumn.svelte';
   import FirstSteps from '../shell/FirstSteps.svelte';
   import type { AppState } from '../stores/app.svelte';
@@ -37,7 +38,8 @@
   );
   /** gewählter Eintrag → Hosts mit gestricheltem Ring und Nummer («K2») */
   const linked = $derived.by(() => {
-    if (hostId) return {};
+    // Korrektur D12: ohne Verbindung zeigt die Spalte keinen Eintrag, also auch keinen Ring
+    if (hostId || app.offline) return {};
     const key = project.next.selectedKey;
     const ord = key ? project.next.ordinal(key) : null;
     if (!ord) return {};
@@ -67,11 +69,11 @@
 
   onMount(() =>
     registerKeys([
-      { keys: ['t'], help: 'help.k.table', run: toggleTable },
+      { keys: ['t'], help: 'help.k.table', when: () => pageKeysActive('karte'), run: toggleTable },
       {
         keys: ['Escape'],
         help: 'help.k.close',
-        when: () => !!url.get('host') && !url.get('beleg') && !url.get('tafel'),
+        when: () => !!url.get('host') && pageKeysActive('karte'),
         run: () => void closeDetail(),
       },
     ]),
@@ -84,7 +86,7 @@
       <HostTable {project} selected={hostId} onopen={select} />
     {:else}
       <MapCanvas {app} {project} {layers} selected={hostId} {linked} {useLibrary} onselect={select} onbackground={() => void closeDetail()} />
-      <Lagebild {project} />
+      <Lagebild {project} offline={app.offline} />
       {#if layers.has('oos')}<OutOfScopeStrip {app} {project} />{/if}
       <LayersPopover {app} {layers} />
     {/if}
@@ -125,6 +127,5 @@
   }
   .first {
     overflow: auto;
-    padding: 18px 20px;
   }
 </style>

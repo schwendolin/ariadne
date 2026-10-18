@@ -58,6 +58,9 @@
   --segment-line: #c4cad2;
   --on-accent: #ffffff;
   --access-user-bg: #e6f4f9;
+  /* Hover der Host-Karten (AriadneKarteHell.dc.html style-hover, Korrektur D8) */
+  --access-root-bg-hover: #e6defa;
+  --access-user-bg-hover: #dbedf4;
   --attention-bg: #fbf3e6;
   --error-bg: #fbeaef;
   --pill-bg: transparent;
@@ -77,6 +80,7 @@
     --line-hover: #4a525d; --segment-line: #343b45; --on-accent: #111418;
     --rec-bg: #171b20; --dot-ring: rgba(229, 232, 236, 0.14);
     --access-user-bg: #13262d; --attention-bg: #2a2214; --error-bg: #2d1820;
+    --access-root-bg-hover: #2b2440; --access-user-bg-hover: #182d35;
     --scrim: rgba(0, 0, 0, 0.45);
     --sgr-black: #6b7480; --sgr-red: #f0675c; --sgr-green: #6fcf8a; --sgr-yellow: #e8b14a;
     --sgr-blue: #7aa7ff; --sgr-magenta: #c79cf0; --sgr-cyan: #6cc3e0; --sgr-white: #e5e8ec;
@@ -87,6 +91,7 @@
   --line-hover: #4a525d; --segment-line: #343b45; --on-accent: #111418;
   --rec-bg: #171b20; --dot-ring: rgba(229, 232, 236, 0.14);
   --access-user-bg: #13262d; --attention-bg: #2a2214; --error-bg: #2d1820;
+  --access-root-bg-hover: #2b2440; --access-user-bg-hover: #182d35;
   --scrim: rgba(0, 0, 0, 0.45);
   --sgr-black: #6b7480; --sgr-red: #f0675c; --sgr-green: #6fcf8a; --sgr-yellow: #e8b14a;
   --sgr-blue: #7aa7ff; --sgr-magenta: #c79cf0; --sgr-cyan: #6cc3e0; --sgr-white: #e5e8ec;

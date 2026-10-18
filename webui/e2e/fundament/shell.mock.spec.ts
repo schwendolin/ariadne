@@ -49,7 +49,11 @@ test.describe('Kopfzeile', () => {
     await expect(header(page)).toContainText(/Keine Verbindung · Stand \d\d:\d\d · verbindet neu …/);
     const main = page.locator('main#main');
     await expect(main).toHaveClass(/offline-dim/);
-    await expect(main).toHaveAttribute('inert', '');
+    // Korrektur A11: nicht inert (Fokus und Eingaben bleiben, Stand lesbar), Aktionen gesperrt
+    await expect(main).not.toHaveAttribute('inert', /.*/);
+    await expect(main).toHaveAttribute('aria-busy', 'true');
+    await page.locator('[data-map-card][data-host-id="ip:default/192.168.56.101"]').click();
+    await expect(page).not.toHaveURL(/host=/);
     await expect(header(page).locator('.origin')).toBeVisible();
     // Shift+P bleibt ohne Wirkung
     await page.keyboard.press('Shift+P');
@@ -325,7 +329,7 @@ test.describe('Hell und dunkel (E112)', () => {
 test.describe('Scope-Warnung', () => {
   test('Meldung beim Eintreffen, Kennzeichen bis zum Quittieren, danach weg', async ({ page }) => {
     await openMock(page, 'scope');
-    const card = page.getByRole('alertdialog', { name: /Ziel ausserhalb des Scopes/ });
+    const card = page.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ });
     await expect(card).toContainText(/T1: nmap -6 -sV -oX scans\/v6\.xml fd00:56::101/);
     await expect(card).toContainText('liegt nicht in 192.168.56.0/24');
     await expect(header(page).locator('[data-badge="scope"]')).toBeVisible();
@@ -340,7 +344,7 @@ test.describe('Scope-Warnung', () => {
 
   test('«In der Zeitachse» führt zur Zeile des Befehls', async ({ page }) => {
     await openMock(page, 'scope');
-    await page.getByRole('alertdialog').getByRole('button', { name: 'In der Zeitachse' }).click();
+    await page.getByRole('alert').getByRole('button', { name: 'In der Zeitachse' }).click();
     await expect(page).toHaveURL(/\/zeitachse\?(.*&)?zeile=[^&]+%40\d+/);
   });
 });

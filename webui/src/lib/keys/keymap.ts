@@ -12,6 +12,10 @@
  * - Innerhalb einer Ebene gewinnt die zuletzt angemeldete Bindung (die innerste, zuletzt
  *   eingeblendete Komponente). `run` kann `false` zurückgeben, dann wird weitergesucht.
  * - Behandelte Tasten bekommen `preventDefault()`.
+ * - Enter, Leertaste und Pfeiltasten gehören dem fokussierten Bedienelement (Knopf, Link,
+ *   Radio, Checkbox, Rolle option/menuitem/tab …): Dann wirkt keine Bindung, ausser sie setzt
+ *   `onControl` (etwa die Pfeile zwischen Host-Karten). So aktiviert Enter immer den Knopf mit dem
+ *   Fokus, und die Pfeile wechseln in einer Radiogruppe (Korrektur A1, WCAG 2.1.1).
  * - Kürzel-Schreibweise: 'j', 'Enter', 'Escape', 'ArrowDown', '?', 'Shift+P', 'Mod+K'
  *   (Mod = Cmd auf dem Mac, sonst Strg; beide werden angenommen).
  */
@@ -28,6 +32,8 @@ export interface KeyBinding {
   allowInInput?: boolean;
   /** Text für die Hilfe (i18n-Schlüssel) */
   help?: string;
+  /** Enter, Leertaste oder Pfeile auch mit Fokus auf einem Bedienelement (Korrektur A1) */
+  onControl?: boolean;
 }
 
 interface Entry {
@@ -53,6 +59,22 @@ export function isTypingTarget(target: EventTarget | null): boolean {
     return !['button', 'checkbox', 'radio', 'submit', 'reset', 'range', 'color'].includes(type);
   }
   return false;
+}
+
+/** Tasten, die ein fokussiertes Bedienelement selbst bedient (Korrektur A1). */
+const NATIVE_KEYS = new Set([
+  'Enter', ' ', 'Shift+Enter', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Shift+ArrowDown', 'Shift+ArrowUp', 'Home', 'End',
+]);
+const CONTROL_SELECTOR = [
+  'button', 'a[href]', 'input', 'select', 'textarea', 'summary', '[contenteditable="true"]',
+  '[role="button"]', '[role="link"]', '[role="radio"]', '[role="checkbox"]', '[role="switch"]', '[role="option"]',
+  '[role="menuitem"]', '[role="menuitemradio"]', '[role="menuitemcheckbox"]', '[role="tab"]', '[role="slider"]',
+  '[role="spinbutton"]', '[role="combobox"]', '[role="treeitem"]',
+].join(',');
+
+/** true, wenn der Fokus auf einem Bedienelement liegt, das Enter, Leertaste und Pfeile selbst bedient. */
+export function isControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.matches(CONTROL_SELECTOR);
 }
 
 /**
@@ -84,6 +106,7 @@ function handler(e: KeyboardEvent): void {
   if (e.defaultPrevented || e.isComposing) return;
   const combo = comboOf(e);
   const typing = isTypingTarget(e.target);
+  const control = NATIVE_KEYS.has(combo) && isControlTarget(e.target);
   const layer = modalDepth;
   for (let i = entries.length - 1; i >= 0; i--) {
     const ent = entries[i];
@@ -91,6 +114,7 @@ function handler(e: KeyboardEvent): void {
     const b = ent.binding;
     if (!b.keys.includes(combo)) continue;
     if (typing && !b.allowInInput && isSingleKey(combo)) continue;
+    if (control && !b.onControl && !(typing && b.allowInInput)) continue;
     if (b.when && !b.when()) continue;
     const res = b.run(e);
     if (res === false) continue;
@@ -175,13 +199,16 @@ export function resetKeymapForTests(): void {
   modalDepth = 0;
 }
 
-/** true auf dem Mac (Anzeige «⌘K» statt «Strg K»); die Bindung `Mod+` nimmt beides an. */
+/** true auf dem Mac (Anzeige «⌘K» statt «Strg+K»); die Bindung `Mod+` nimmt beides an. */
 export function isMac(nav: Navigator | null = typeof navigator === 'undefined' ? null : navigator): boolean {
   const p = (nav as (Navigator & { userAgentData?: { platform?: string } }) | null)?.userAgentData?.platform ?? nav?.platform ?? '';
   return /mac|iphone|ipad/i.test(p);
 }
 
-/** Anzeige eines Kürzels mit `Mod`: «⌘K» auf dem Mac, sonst «Strg K». */
+/**
+ * Anzeige eines Kürzels mit `Mod`: «⌘K» auf dem Mac, sonst «Strg+K» (ohne Leerzeichen, damit der
+ * Hinweis nie umbricht; Korrektur D1, D10).
+ */
 export function modLabel(key: string, mac: boolean = isMac()): string {
-  return mac ? `⌘${key}` : `Strg ${key}`;
+  return mac ? `⌘${key}` : `Strg+${key}`;
 }

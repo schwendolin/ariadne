@@ -36,7 +36,7 @@ describe('Zeitachse: Filter aus der URL', () => {
     });
     expect(filterFromParams('bogus', '<script>', null)).toEqual(NO_FILTER);
     // alle Typen = kein Filter
-    expect(filterFromParams('command,segment,file,keystep,context,decision,gap,project,input', null, null).types).toBeNull();
+    expect(filterFromParams('command,segment,file,keystep,context,callback,decision,gap,project,input', null, null).types).toBeNull();
   });
 
   it('schreibt den Filter zurück und vergleicht ihn', () => {
@@ -60,6 +60,23 @@ describe('Zeitachse: Zeilen', () => {
     expect(visibleRows(list, NO_FILTER).some((x) => x.id === 'i:1')).toBe(false);
     expect(visibleRows(list, NO_FILTER).some((x) => x.type === 'input' && x.input.hidden)).toBe(true);
     expect(visibleRows(list, filterFromParams('input', null, null)).some((x) => x.id === 'i:1')).toBe(true);
+  });
+
+  it('zeigt Dateien eines Befehls nur in seiner Unterzeile, mit Typ «Dateien» als eigene Zeile', () => {
+    const owner = items.find((x): x is Cmd => x.type === 'command' && x.files.length > 0) as Cmd;
+    expect(owner).toBeTruthy();
+    const fileId = owner.files[0]?.unit_id;
+    const fileRow: TimelineItem = {
+      id: fileId ?? 'f:x', type: 'file', ts: owner.ts, ts_ns: owner.ts_ns, terminal_id: null, context_label: null, host_id: null, ctrl: false,
+      terminal: null, unit_id: fileId ?? 'f:x', path: 'scans/ms2.xml', cmd_id: owner.cmd.cmd_id,
+    } as TimelineItem;
+    const loose = { ...fileRow, id: 'f:lose', unit_id: 'f:lose', cmd_id: null } as TimelineItem;
+    const list = [...items.filter((x) => x.type !== 'file'), fileRow, loose];
+    const all = visibleRows(list, NO_FILTER);
+    expect(all.some((x) => x.id === fileRow.id)).toBe(false);
+    expect(all.some((x) => x.id === 'f:lose')).toBe(true);
+    expect(visibleRows(list, filterFromParams('file', null, null)).some((x) => x.id === fileRow.id)).toBe(true);
+    expect(visibleRows(list, filterFromParams('file,command', null, null)).some((x) => x.id === fileRow.id)).toBe(false);
   });
 
   it('`zeile` trifft Befehle über id, cmd_id, cmd_ref und unit_id (Scope-Warnung, Host-Detail)', () => {
