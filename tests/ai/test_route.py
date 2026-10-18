@@ -350,6 +350,7 @@ def test_api_key_is_own_secret_at_every_exit(paths, operator):
             f"environ({{'ANTHROPIC_API_KEY': '{KEY_CANARY}'}})\r\n".encode(),
             cwd=str(fx.ws),
         )
+        await fx.term.acked()
         await sync(d)
         r = await c.get(f"{BASE}/p/{fx.pid}/timeline")
         assert r.status_code == 200 and "REVIEWCANARY" not in r.text
@@ -446,6 +447,7 @@ def test_ai_scope_name_only_with_verdict_in(paths, operator):
             b"Nmap done: 1 IP address (1 host up) scanned in 1.00 seconds\r\n"
         )
         await fx.term.command("nmap -sV 10.10.10.3", nmap, cwd=str(fx.ws))
+        await fx.term.acked()
         await sync(d)
         ing = await d._sync_ingest()
         verdicts = await ing.query(lambda conn: dict(evaluate(conn, profile="lab")[0].name_verdict))
