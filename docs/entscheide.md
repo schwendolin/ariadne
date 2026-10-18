@@ -141,6 +141,10 @@ Bezüge zeigen auf den [Fragenkatalog](fragenkatalog.md) (z. B. F2.3) und die [L
 | E116 | 2026-10-18 | Läuft schon ein Tunnel, fragt `ariadne-mac start` nach («Tunnel läuft schon. Neu aufbauen? [j/N]»). Bei Ja wird der alte Tunnel ersetzt, ein offener alter Dashboard-Tab verliert seine Sitzung | kein stiller Verlust einer offenen Sitzung | Nutzer | fest | E92, FZ |
 | E117 | 2026-10-18 | Pausen aus dem Dashboard sind auf 30 Minuten pro Stunde und Terminal begrenzt; eine Pause oder Fortsetzung im Terminal (`F12 r`) oder per CLI setzt das Budget zurück | ein gestohlenes Token darf die Aufnahme nicht dauerhaft abschalten | Nutzer + KI | fest | E22, E92 |
 | E118 | 2026-10-18 | Nach `remote serve restore` beendet sich der gesperrte Daemon selbst und startet mit der zurückgespielten Konfiguration neu; danach `ariadne-mac unlock` | config.toml gilt sofort | Nutzer | fest | E91 |
+| E119 | 2026-10-18 | «Version recherchieren» erscheint als ein Denkanstoss pro Host («Versionen recherchieren: 192.168.56.101 (23 Dienste)»), aufgeklappt mit der Liste und je einer Vorlage, statt einer pro Dienst | ein voller nmap-Lauf auf Metasploitable2 ergab 26 Denkanstösse; E87 «Ruhe zuerst» | Nutzer | fest | E64, E87 |
+| E120 | 2026-10-18 | Die Scope-Warnung steht als erster Eintrag in der Spalte «Als Nächstes», mit Quittieren; nicht als Karte über der Karte | verdeckt keine Host-Karten | Nutzer | fest | E67, E105 |
+| E121 | 2026-10-18 | Ohne Verbindung zum Daemon ist die Ansicht gedämpft und Aktionen sind gesperrt, Tippen in Formularfeldern bleibt möglich; gespeichert wird erst, wenn die Verbindung zurück ist | keine verlorenen Eingaben | Nutzer | fest | Briefing 5.14 |
+| E122 | 2026-10-18 | Finding-Titel mit unsichtbaren Format- oder Bidi-Zeichen (z. B. Zero-Width-Joiner) werden mit klarer Meldung abgelehnt | solche Zeichen können Text täuschend verändern | Nutzer | fest | E13, E113 |
 
 ## Technik
 
