@@ -101,7 +101,7 @@ interface Status {
 interface NextView {
   open: number;
   clarify: { kind: string; item_key: string; ordinal: number | null }[];
-  suggestions: { suggestion_key: string; rule_id: string; title: string; host_id: string | null; templates: { rendered: boolean }[] }[];
+  suggestions: { suggestion_key: string; rule_id: string; title: string; host_id: string | null; templates: { rendered: boolean }[]; items?: { label: string; template: { rendered: boolean } }[] }[];
 }
 interface TimelineItem {
   id: string;
@@ -219,7 +219,7 @@ test('Durchlauf als Nutzer: Anmeldung, MS2-Session, alle Screens, Neustart, Wech
 
   await test.step('10 Scope-Warnung: nmap -6 gegen fd00:56::101', async () => {
     await L.call('run', { name: 'T1', cmd: 'nmap -6 -sV -oX scans/v6.xml fd00:56::101' });
-    const warn = page.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ });
+    const warn = page.locator('[data-scope-entry]');
     await expect(warn).toBeVisible({ timeout: 20_000 });
     await expect(warn).toContainText('fd00:56::101');
     await expect(header(page).locator('[data-badge="scope"]')).toBeVisible();
@@ -403,17 +403,20 @@ test('Durchlauf als Nutzer: Anmeldung, MS2-Session, alle Screens, Neustart, Wech
     await sug.getByRole('button', { name: /3 Vorlage zeigen/ }).click();
     await expect(sug.getByRole('button', { name: 'Kopieren · Mac' }).first()).toBeVisible();
     await expect(col.getByRole('button', { name: /ausführen/i })).toHaveCount(0);
-    // feindliches Produkt auf .110: keine fertige Vorlage, nur Einzelwerte
-    const hostile = next.suggestions.find((s) => s.rule_id === 'R-VERSION-RECHERCHE' && s.host_id === H110 && s.title.includes(':21'));
+    // feindliches Produkt auf .110: keine fertige Vorlage, nur Einzelwerte (E119: ein Denkanstoss pro Host)
+    const hostile = next.suggestions.find((s) => s.rule_id === 'R-VERSION-RECHERCHE' && s.host_id === H110);
     expect(hostile, 'Denkanstoss zum feindlichen Produkt').toBeTruthy();
-    expect(hostile?.templates.every((x) => !x.rendered)).toBe(true);
+    const bad = (hostile?.items ?? []).filter((i) => i.label.includes('sh -c'));
+    expect(bad.length).toBeGreaterThan(0);
+    expect(bad.every((i) => !i.template.rendered)).toBe(true);
     await page.goto(`${base}/karte?sel=${encodeURIComponent(hostile?.suggestion_key ?? '')}`);
     await sug.getByRole('button', { name: /1 Frage zeigen/ }).click();
     await sug.getByRole('button', { name: /2 Richtung zeigen/ }).click();
     await sug.getByRole('button', { name: /3 Vorlage zeigen/ }).click();
     await expect(sug).toContainText('Enthält Shell-Sonderzeichen. Keine fertige Vorlage.');
     await expect(sug).toContainText("vsftpd'; !sh -c 'id");
-    await expect(sug.locator('.tpl code')).toHaveCount(0);
+    // keine fertige Vorlage mit dem feindlichen Produkt (andere Dienste des Hosts dürfen eine haben)
+    await expect(sug.locator('.tpl code', { hasText: 'sh -c' })).toHaveCount(0);
     await shot(page, '4-sonderzeichen');
   });
 
@@ -435,11 +438,11 @@ test('Durchlauf als Nutzer: Anmeldung, MS2-Session, alle Screens, Neustart, Wech
 
   await test.step('4 D2 mit Vorlage (Lernmodus aus)', async () => {
     const next = await api<NextView>(page, `/p/${pid}/next`);
-    const ver = next.suggestions.find((s) => s.rule_id === 'R-VERSION-RECHERCHE' && s.host_id === H101 && s.title.includes(':21'));
+    const ver = next.suggestions.find((s) => s.rule_id === 'R-VERSION-RECHERCHE' && s.host_id === H101);
     expect(ver).toBeTruthy();
     await page.goto(`${base}/karte?sel=${encodeURIComponent(ver?.suggestion_key ?? '')}`);
     const sug = column(page).locator('.card');
-    await expect(sug.locator('.tpl code').first()).toHaveText('searchsploit vsftpd 2.3.4');
+    await expect(sug.locator('.tpl code', { hasText: 'searchsploit vsftpd 2.3.4' })).toHaveCount(1);
     await shot(page, '4-vorlage');
   });
 
@@ -582,7 +585,7 @@ test('Durchlauf als Nutzer: Anmeldung, MS2-Session, alle Screens, Neustart, Wech
       await page.getByRole('button', { name: 'Menü' }).click();
       await page.getByRole('menuitem', { name: item }).click();
       const dlg = page.getByRole('dialog').last();
-      await expect(dlg).toContainText(/kommt in einer späteren Version/i);
+      await expect(dlg).toContainText(/ariadne export --klartext|hostname, whoami und ip a/);
       await shot(page, name);
       await page.keyboard.press('Escape');
       await expect(dlg).toBeHidden();

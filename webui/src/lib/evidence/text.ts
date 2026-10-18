@@ -10,7 +10,7 @@
 import type { EvidenceRefIn, LogLine, StageView, UnitView } from '../api/types';
 import { t } from '../i18n';
 import { visible } from '../safe/displaySafe';
-import type { EvidenceTarget } from '../url/state.svelte';
+import type { LogEvidenceTarget as EvidenceTarget } from '../url/state.svelte';
 import { termName } from '../util/format';
 
 const KIND: Record<string, string> = {

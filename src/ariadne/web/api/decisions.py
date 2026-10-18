@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from starlette.responses import Response
 
 from ariadne import events
+from ariadne.ai import store as ai_store
 from ariadne.daemon.terminal import normalize_host
 from ariadne.ingest.identity import host_identifier, normalize_identifier
 from ariadne.ingest.proj_findings import FINDING_KINDS, evidence_id, fold
@@ -354,7 +355,9 @@ def _check_refs(
             continue
         if kind in ("d.suggestion.done", "d.suggestion.dismiss"):
             try:
-                rules_api.check_decision(conn, kind, h, profile=profile)
+                # Zuerst die KI-Denkanstösse (eigene Schlüssel), sonst die Regel-Engine
+                if not ai_store.check_decision(conn, kind, h):
+                    rules_api.check_decision(conn, kind, h, profile=profile)
             except rules_api.RuleRefError as exc:
                 if exc.code == "basis_required":
                     raise _bad_at(i, ["basis"], "basis_required") from None

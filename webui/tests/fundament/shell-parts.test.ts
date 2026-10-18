@@ -7,12 +7,13 @@ import { ApiError } from '../../src/lib/api/client';
 import { installKeymap, resetKeymapForTests } from '../../src/lib/keys/keymap';
 import { HOSTILE_IMG } from '../../src/lib/mock/data/hostile';
 import MainMenu from '../../src/lib/shell/MainMenu.svelte';
-import ScopeWarningDialog from '../../src/lib/shell/ScopeWarningDialog.svelte';
+import ScopeEntry from '../../src/lib/next/ScopeEntry.svelte';
+import type { ProjectStore } from '../../src/lib/stores/project.svelte';
 import SettingsPanel from '../../src/lib/shell/SettingsPanel.svelte';
 import { applyPrefs } from '../../src/lib/stores/prefs.svelte';
 import { url } from '../../src/lib/url/state.svelte';
 import { applyTabState, FAVICON, FAVICON_ATTENTION, tabTitle } from '../../src/lib/util/favicon';
-import { makeApp, press, settle, stopAll, until } from './helpers';
+import { makeApp, settle, stopAll, until } from './helpers';
 
 beforeAll(() => {
   installKeymap(window);
@@ -167,25 +168,36 @@ describe('Menü', () => {
 });
 
 describe('Scope-Warnung (Briefing 4.5)', () => {
-  it('erscheint einmal beim Eintreffen, nicht modal; Inhalt als Text; Quittieren auf dem Server', async () => {
+  it('E120: erster Eintrag der Spalte aus /next; Inhalt als Text; Quittieren auf dem Server, danach weg', async () => {
     const { app, backend } = await makeApp('scope');
-    expect(app.ui.scopeCard).toBe(true);
-    expect(app.ui.dialog).toBeNull();
-    backend.state.scopeAcked = false;
-    const onclose = vi.fn(() => (app.ui.scopeCard = false));
-    render(ScopeWarningDialog, { props: { app, onclose } });
-    const card = screen.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ });
-    // Korrektur A14: Live-Region (role=alert), nicht modal, nimmt keinen Fokus
-    expect(card.getAttribute('aria-modal')).toBeNull();
-    expect(card.contains(document.activeElement)).toBe(false);
-    expect(card.textContent?.replace(/\s+/g, ' ')).toMatch(/T1: nmap -6 -sV -oX scans\/v6\.xml fd00:56::101/);
-    expect(card.textContent).toMatch(/fd00:56::101\s*liegt nicht in 192\.168\.56\.0\/24 · gestartet \d\d:\d\d:\d\d/);
+    const project = app.project as ProjectStore;
+    await until(() => project.next.view !== null);
+    const w = project.next.view?.scope_warning;
+    expect(w).toBeTruthy();
+    if (!w) return;
+    render(ScopeEntry, { props: { app, project, warning: w } });
+    const entry = screen.getByRole('group', { name: /Ziel ausserhalb des Scopes/ });
+    expect(entry.textContent?.replace(/\s+/g, ' ')).toMatch(/T1: nmap -6 -sV -oX scans\/v6\.xml fd00:56::101/);
+    expect(entry.textContent).toMatch(/fd00:56::101\s*liegt nicht in 192\.168\.56\.0\/24 · gestartet \d\d:\d\d:\d\d/);
     const ack = vi.spyOn(backend, 'ackScopeWarning');
-    await fireEvent.click(within(card).getByRole('button', { name: 'Quittieren' }));
+    await fireEvent.click(within(entry).getByRole('button', { name: 'Quittieren' }));
     await settle();
-    expect(ack).toHaveBeenCalledWith(app.project?.pid, app.status?.scope_warning?.cmd_id);
-    expect(app.ui.scopeCard).toBe(false);
+    expect(ack).toHaveBeenCalledWith(project.pid, w.cmd_id);
+    await until(() => project.next.view?.scope_warning === null);
     expect(app.status?.scope_warning?.acked).toBe(true);
+  });
+
+  it('Kennzeichen der Kopfzeile: Fokus auf den Eintrag (scopeFocus)', async () => {
+    const { app } = await makeApp('scope');
+    const project = app.project as ProjectStore;
+    await until(() => project.next.view !== null);
+    const w = project.next.view?.scope_warning;
+    if (!w) throw new Error('keine Warnung');
+    render(ScopeEntry, { props: { app, project, warning: w } });
+    app.ui.openDialog({ kind: 'scope-warning' });
+    await settle();
+    expect(app.ui.dialog).toBeNull();
+    expect(document.activeElement?.hasAttribute('data-scope-entry')).toBe(true);
   });
 
   it('schliessen ohne Quittieren: Kennzeichen bleibt, dieselbe Warnung kommt nicht wieder', async () => {
@@ -197,30 +209,18 @@ describe('Scope-Warnung (Briefing 4.5)', () => {
   });
 
   it('feindlicher Befehlstext nur als Text; «In der Zeitachse» führt zur Zeile', async () => {
-    const { app, backend } = await makeApp('scope');
-    vi.spyOn(backend, 'status').mockImplementation(async () => {
-      const st = (await import('../../src/lib/mock/data/base')).status(backend.state.terminals, 43, false, 'sshd');
-      return { ...st, scope_warning: st.scope_warning && { ...st.scope_warning, acked: false, text: `nmap ${HOSTILE_IMG}` } };
-    });
-    await app.refreshStatus();
-    const onclose = vi.fn();
-    render(ScopeWarningDialog, { props: { app, onclose } });
-    expect(document.querySelector('.card img')).toBeNull();
-    expect(document.querySelector('.card')?.textContent).toContain(HOSTILE_IMG);
-    await fireEvent.click(screen.getByRole('button', { name: 'In der Zeitachse' }));
-    expect(onclose).toHaveBeenCalled();
-    expect(url.route).toBe('zeitachse');
-    expect(url.get('zeile')).toBe(app.status?.scope_warning?.cmd_id);
-  });
-
-  it('Esc mit Fokus in der Meldung schliesst sie', async () => {
     const { app } = await makeApp('scope');
-    const onclose = vi.fn();
-    render(ScopeWarningDialog, { props: { app, onclose } });
-    const btn = screen.getByRole('button', { name: 'In der Zeitachse' });
-    btn.focus();
-    press('Escape', {}, btn);
-    expect(onclose).toHaveBeenCalledOnce();
+    const project = app.project as ProjectStore;
+    await until(() => project.next.view !== null);
+    const base = project.next.view?.scope_warning;
+    if (!base) throw new Error('keine Warnung');
+    const warning = { ...base, text: `nmap ${HOSTILE_IMG}` };
+    render(ScopeEntry, { props: { app, project, warning } });
+    expect(document.querySelector('[data-scope-entry] img')).toBeNull();
+    expect(document.querySelector('[data-scope-entry]')?.textContent).toContain(HOSTILE_IMG);
+    await fireEvent.click(screen.getByRole('button', { name: 'In der Zeitachse' }));
+    expect(url.route).toBe('zeitachse');
+    expect(url.get('zeile')).toBe(base.cmd_id);
   });
 });
 

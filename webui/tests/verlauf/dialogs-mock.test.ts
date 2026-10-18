@@ -1,5 +1,5 @@
-// Export- und Screenshot-Dialog (deaktiviert mit Hinweis, Screen 10) und die Mock-Handler des
-// Verlaufs (Verhalten wie der Daemon: 404, 409, 422, Widerruf, Zählungen). Besitzer: ui-verlauf.
+// Export- und Screenshot-Dialog (Etappe 4, Screen 10) und die Mock-Handler des Verlaufs
+// (Verhalten wie der Daemon: 404, 409, 422, Widerruf, Zählungen). Besitzer: ui-verlauf, ui.
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../src/lib/api/client';
@@ -12,7 +12,9 @@ import { findingF1 } from '../../src/lib/mock/data/history';
 import { applyHistoryDecision } from '../../src/lib/mock/handlers/history';
 import { createState } from '../../src/lib/mock/state';
 import { url } from '../../src/lib/url/state.svelte';
-import { press, settle } from '../fundament/helpers';
+import { makeApp, press, settle, until } from '../fundament/helpers';
+import type { MockBackend } from '../../src/lib/mock/backend';
+import type { ProjectStore } from '../../src/lib/stores/project.svelte';
 
 beforeAll(() => {
   installKeymap(window);
@@ -27,57 +29,99 @@ afterEach(() => {
 
 const disabled = (el: HTMLElement) => (el as HTMLButtonElement).disabled;
 
-describe('Export-Dialog', () => {
-  it('zeigt den Inhalt aus dem Design, alles gesperrt mit Grund, Hinweis auf später', async () => {
+describe('Export-Dialog (Etappe 4)', () => {
+  async function openExport() {
+    const h = await makeApp('normal');
+    const project = h.app.project as ProjectStore;
+    (h.backend as MockBackend).exportStepMs = 5;
     const onclose = vi.fn();
-    render(ExportDialog, { props: { onclose } });
+    render(ExportDialog, { props: { app: h.app, project, onclose } });
+    await until(() => project.exports.view !== null);
     await settle();
+    return { ...h, project, onclose };
+  }
+
+  it('Vorlage, Phasenhinweis, Klartext nur als Hinweis, frühere Exporte mit Warnung', async () => {
+    const { onclose } = await openExport();
     const dlg = screen.getByRole('dialog');
     expect(dlg.textContent).toContain('Bericht exportieren');
-    expect(screen.getByRole('note').textContent).toContain('kommt in einer späteren Version');
-    const run = screen.getByRole('button', { name: /^Exportieren/ });
-    expect(disabled(run)).toBe(true);
-    expect(run.getAttribute('title')).toBe('Kommt in einer späteren Version');
-    for (const r of screen.getAllByRole('radio')) expect(disabled(r)).toBe(true);
     expect(dlg.textContent).toContain('Credentials');
     expect(dlg.textContent).toContain('verdeckt');
-    expect(dlg.textContent).toContain('Noch keine Exporte');
+    expect(dlg.textContent).toContain('ariadne export --klartext');
+    await until(() => /Befehle? ohne Phase|alle Befehle zugeordnet/.test(dlg.querySelector('[data-export-phases]')?.textContent ?? ''));
+    expect(dlg.querySelectorAll('[data-export-id]').length).toBe(1);
+    expect(dlg.querySelector('[data-export-id]')?.textContent).toContain('exports/20261008T143012Z-cys');
+    expect(screen.queryByRole('checkbox', { name: /Klartext/ })).toBeNull();
     await fireEvent.click(screen.getByRole('button', { name: 'Schliessen' }));
     expect(onclose).toHaveBeenCalledTimes(1);
   });
 
-  it('«in der Zeitachse ›» wechselt zur Zeitachse und schliesst', async () => {
-    const onclose = vi.fn();
-    render(ExportDialog, { props: { onclose } });
-    await settle();
-    await fireEvent.click(screen.getByRole('button', { name: 'in der Zeitachse ›' }));
+  it('Exportieren: Fortschritt, Ergebnis mit Ordner und Warnung, Liste wächst', async () => {
+    const { project, backend } = await openExport();
+    const start = vi.spyOn(backend, 'startExport');
+    await fireEvent.click(screen.getByRole('button', { name: /^Exportieren/ }));
+    expect(start).toHaveBeenCalledWith(project.pid, 'cys');
+    await until(() => document.querySelector('[data-export-result]') !== null, 3000);
+    const res = document.querySelector('[data-export-result]') as HTMLElement;
+    expect(res.textContent).toContain('Export fertig');
+    expect(res.textContent).toMatch(/exports\/\d{8}T\d{6}Z-cys/);
+    expect(res.textContent).toContain('Mögliche Secrets');
+    expect(document.querySelectorAll('[data-export-id]').length).toBe(2);
+  });
+
+  it('htb wählen und «in der Zeitachse prüfen ›» öffnet die Phasen der Vorlage', async () => {
+    const { onclose } = await openExport();
+    await fireEvent.click(screen.getByRole('radio', { name: 'htb' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'in der Zeitachse prüfen ›' }));
     expect(url.route).toBe('zeitachse');
+    expect(url.get('phasen')).toBe('htb');
     expect(onclose).toHaveBeenCalled();
   });
 
   it('Esc schliesst', async () => {
-    const onclose = vi.fn();
-    render(ExportDialog, { props: { onclose } });
-    await settle();
+    const { onclose } = await openExport();
     press('Escape');
     expect(onclose).toHaveBeenCalled();
   });
 });
 
-describe('Screenshot-Dialog', () => {
-  it('Modus und Auslösen gesperrt, Hinweis zur Kali', async () => {
+describe('Screenshot-Dialog (Etappe 4)', () => {
+  async function openShot(scenario: Parameters<typeof makeApp>[0] = 'normal') {
+    const h = await makeApp(scenario);
+    const project = h.app.project as ProjectStore;
     const onclose = vi.fn();
-    render(ScreenshotDialog, { props: { onclose } });
+    render(ScreenshotDialog, { props: { app: h.app, project, onclose } });
     await settle();
+    return { ...h, project, onclose };
+  }
+
+  it('Modus, Countdown, Auslösen sendet den Auftrag; danach Vorschau und Ansehen', async () => {
+    const { project, backend, onclose } = await openShot();
     const dlg = screen.getByRole('dialog');
-    expect(dlg.textContent).toContain('Screenshot der Kali');
-    expect(screen.getByRole('note').textContent).toContain('späteren Version');
     expect(dlg.textContent).toContain('hostname, whoami und ip a');
-    const run = screen.getByRole('button', { name: /^Auslösen/ });
-    expect(disabled(run)).toBe(true);
-    for (const r of screen.getAllByRole('radio')) expect(disabled(r)).toBe(true);
-    await fireEvent.click(screen.getByRole('button', { name: 'Schliessen' }));
-    expect(onclose).toHaveBeenCalledTimes(1);
+    await fireEvent.click(screen.getByRole('radio', { name: 'Monitor' }));
+    await fireEvent.click(screen.getByRole('radio', { name: '0 s' }));
+    const take = vi.spyOn(backend, 'takeScreenshot');
+    await fireEvent.click(screen.getByRole('button', { name: /^Auslösen/ }));
+    expect(take).toHaveBeenCalledWith(project.pid, { mode: 'monitor', delay_s: 0 });
+    await until(() => document.querySelector('[data-shot-done]') !== null, 3000);
+    await fireEvent.click(screen.getByRole('button', { name: 'Ansehen' }));
+    expect(onclose).toHaveBeenCalled();
+    expect(url.get('beleg')).toMatch(/^s:/);
+  });
+
+  it('Bereich braucht gültige Zahlen; Fehler des Servers als fester Text', async () => {
+    const { backend } = await openShot();
+    await fireEvent.click(screen.getByRole('radio', { name: 'Bereich' }));
+    const w = screen.getByLabelText('Breite') as HTMLInputElement;
+    await fireEvent.input(w, { target: { value: 'abc' } });
+    expect(disabled(screen.getByRole('button', { name: /^Auslösen/ }))).toBe(true);
+    await fireEvent.input(w, { target: { value: '640' } });
+    await fireEvent.click(screen.getByRole('radio', { name: '0 s' }));
+    vi.spyOn(backend, 'takeScreenshot').mockRejectedValue(new ApiError('shot_wayland', 503, 'x'));
+    await fireEvent.click(screen.getByRole('button', { name: /^Auslösen/ }));
+    await until(() => screen.queryByRole('alert') !== null);
+    expect(screen.getByRole('alert').textContent).toContain('nur unter X11');
   });
 });
 

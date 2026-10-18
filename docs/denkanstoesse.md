@@ -77,7 +77,7 @@ Prüfziele (Architektur 6.1) sind stabil; neu in v0.1: `PZ-SMB-SHARES`, `PZ-NFS-
 | Regel | Prüfziel | Art | Prio | Subjekt |
 |---|---|---|---|---|
 | R-ANON-ZUGRIFF | PZ-AUTH-ANON | goal | 10 | FTP-Dienst; SMB pro Host |
-| R-VERSION-RECHERCHE | PZ-VULN-RECHERCHE | goal | 20 | Dienst (gleiche Suche auf einem Host einmal) |
+| R-VERSION-RECHERCHE | PZ-VULN-RECHERCHE | goal | 20 | Host (E119; ein Eintrag pro Dienst in `items`) |
 | R-SMB-SHARES | PZ-SMB-SHARES | goal | 30 | Host |
 | R-NFS-EXPORTS | PZ-NFS-EXPORTS | goal | 31 | Host |
 | R-WEB-INHALT | PZ-WEB-INHALT | goal | 40 | Webdienst |
@@ -105,7 +105,14 @@ Prüfziele (Architektur 6.1) sind stabil; neu in v0.1: `PZ-SMB-SHARES`, `PZ-NFS-
 * **Vorlagen:** `nmap -p {port} --script ftp-anon {ip}`, `ftp {ip} {port}`; SMB:
   `rpcclient -U '' -N {ip}`, `nxc smb {ip} -u '' -p ''`.
 
-### R-VERSION-RECHERCHE «Version recherchieren: vsftpd 2.3.4 (192.168.56.101:21)»
+### R-VERSION-RECHERCHE «Versionen recherchieren: 192.168.56.101 (23 Dienste)»
+
+Seit E119 (Etappe 4) **ein** Denkanstoss pro Host: Schlüssel aus Regel und `host_id`, Anlass aus allen
+Diensten. Bei einem einzigen Dienst bleibt der Titel wie bisher («Version recherchieren: vsftpd 2.3.4
+(192.168.56.101:21)»). Jeder Dienst steht als Eintrag in `items` (Label in Teilen und eine
+`searchsploit`-Vorlage, höchstens 64); `templates` trägt für ältere Ansichten die ersten vier. «Erledigt»
+gilt pro Eintrag, «Verwerfen» für den ganzen Host. Alte Entscheide pro Dienst aus Etappe 3 passen nicht mehr
+auf den neuen Schlüssel.
 
 * **Auslöser:** Produkt und genaue Version (erstes Wort wie `2.3.4`, `4.7p1`; keine Bereiche `3.X - 4.X`,
   `8.3.0 - 8.3.7`). Bei Samba mit Bereich gilt die Version aus `smb-os-discovery` (`Samba 3.0.20-Debian`).

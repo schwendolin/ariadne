@@ -6,8 +6,9 @@
     der Cursor auf dem ersten Denkanstoss.
   - Tastatur: `j k` wechseln, `↵` Beleg, `a` übernehmen/zusammenführen/annehmen, `x` verwerfen bzw.
     getrennt lassen, `e` ändern bzw. anderer Host, `u` rückgängig, `n` nächster Denkanstoss.
-  - Fuss: «Denkanstoss anfordern (KI)» gesperrt mit Grund (kommt mit v0.1-KI) und Tastenhinweis.
-  Besitzer: ui-karte.
+  - E120: eine nicht quittierte Scope-Warnung steht als erster Eintrag vor «Klären» (ScopeEntry).
+  - Fuss: «Denkanstoss anfordern (KI)» mit Zustand des Auftrags (AiFoot) und Tastenhinweis.
+  Besitzer: ui-karte, Etappe 4: ui.
 -->
 <script lang="ts">
   import { onMount, tick } from 'svelte';
@@ -18,9 +19,10 @@
   import type { AppState } from '../stores/app.svelte';
   import type { Row } from '../stores/next.svelte';
   import type { ProjectStore } from '../stores/project.svelte';
-  import Button from '../ui/Button.svelte';
   import { url } from '../url/state.svelte';
+  import AiFoot from './AiFoot.svelte';
   import ClarifyItem from './ClarifyItem.svelte';
+  import ScopeEntry from './ScopeEntry.svelte';
   import DoneRow from './DoneRow.svelte';
   import SuggestionItem from './SuggestionItem.svelte';
 
@@ -33,6 +35,13 @@
   const selectedRow = $derived(next.selectedRow);
   const openClarify = $derived(v?.clarify.length ?? 0);
   const openSuggestions = $derived(v?.suggestions.length ?? 0);
+  // E120: aus `/next`; ältere Server ohne Feld: nicht quittierte Warnung aus dem Status
+  const scopeWarning = $derived.by(() => {
+    if (!v) return null;
+    if (v.scope_warning !== undefined) return v.scope_warning;
+    const w = app.status?.scope_warning ?? null;
+    return w && w.acked !== true ? w : null;
+  });
   const short = $derived(ipShortener((project.map.graph?.nodes ?? []).filter((n) => n.kind === 'segment').map((n) => ({ label: n.label }))));
   let body: HTMLDivElement | undefined = $state();
 
@@ -160,6 +169,9 @@
     {:else if !v}
       <p class="muted">{t('next.loading')}</p>
     {:else}
+      {#if scopeWarning}
+        <ScopeEntry {app} {project} warning={scopeWarning} />
+      {/if}
       <div class="group-head">
         <span>{t('next.clarify')}</span>
         {#if openClarify > 0}<span class="n">{openClarify}</span>{:else if clarifyRows.length > 0}<span class="word">{t('next.done')}</span>{/if}
@@ -202,7 +214,7 @@
   {#if !app.offline}
     <!-- Korrektur D12: ohne Verbindung keine Fusszeile (keine Einträge, Aktionen gesperrt) -->
     <footer class="foot">
-      <Button disabled reason={t('next.askAiDisabled')}>{t('next.askAi')}</Button>
+      <AiFoot {app} {project} />
       <span class="keys">{keysLine}</span>
     </footer>
   {/if}
@@ -287,11 +299,6 @@
     gap: 10px;
     padding: 14px 20px 16px;
     border-top: var(--lw-1) solid var(--line);
-  }
-  .foot :global(.btn) {
-    justify-content: center;
-    padding: 9px 12px;
-    font-size: 13px;
   }
   .keys {
     font-family: var(--font-mono);

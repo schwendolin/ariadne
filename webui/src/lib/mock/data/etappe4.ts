@@ -13,6 +13,8 @@ import { HOSTILE_IMG, INJECTION_TITLE } from './hostile';
 import { tpl } from './map';
 
 const IP101 = '192.168.56.101';
+/** Richtungsumkehr (U+202E) im Modelltext: muss sichtbar gemacht werden */
+const RLO = String.fromCharCode(0x202e);
 
 export const MOCK_MODEL = 'test-model';
 
@@ -58,7 +60,7 @@ export function finishJob(job: AiJob, mode: AiMode): AiJob {
   const base = { ...job, ended_at, step: 'fertig' as const, tokens_in: 4212, tokens_out: 388, cost_usd: 0.018 };
   if (mode === 'gone') return { ...base, status: 'failed', message: 'Ollama auf 127.0.0.1 nicht erreichbar: Verbindung abgelehnt', tokens_in: null, tokens_out: null, cost_usd: null, error: 'unreachable' };
   if (mode === 'refuse') {
-    return { ...base, status: 'refused', message: 'Das Modell hat die Anfrage abgelehnt.', refusal: { category: 'policy', text: 'I can’t help with planning attacks against systems.\n<b>Kein HTML</b> ‮' } };
+    return { ...base, status: 'refused', message: 'Das Modell hat die Anfrage abgelehnt.', refusal: { category: 'policy', text: `I can not help with planning attacks against systems.\n<b>Kein HTML</b> ${RLO}` } };
   }
   if (mode === 'inject') return { ...base, status: 'done', message: 'Fertig: 1 Denkanstoss, 2 verworfen', created: 1, dropped: 2, injection_suspect: 1 };
   return { ...base, status: 'done', message: 'Fertig: 1 Denkanstoss', created: 1 };

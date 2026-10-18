@@ -1285,7 +1285,7 @@ var IDEAS = [
       { k: 'Richtung', text: 'Backup-Konten verwenden Passwörter oft mehrfach. Teste gezielt die Dienste mit Login, nicht breit gegen alles.' },
       { k: 'Befehlsvorlage', cmds: [[{ t: 'nxc ssh ' }, { z: '10.10.10.3', ty: 'ip' }, { t: ' -u ' }, { z: 'backup', ty: 'user|sh' }, { t: ' -p ' }, { ph: 'Passwort C1', secret: 'C1' }]] }
     ] },
-  { id: 'd4', kind: 'Hypothese', title: '10.10.20.8 ist der Datenbankserver hinter dem Backup', origin: { ki: 'claude-opus-5-5' },
+  { id: 'd4', kind: 'Hypothese', title: '10.10.20.8 ist der Datenbankserver hinter dem Backup', origin: { ki: 'test-model' },
     why: 'Auf 10.10.20.5 liegt db_dump.sql.gz. 10.10.20.8 heisst laut /etc/hosts db02 und hat Port 3306 offen (Kandidat, niedrige Konfidenz).',
     crit: { ok: 'Login auf 10.10.20.8:3306 gelingt oder der Dump nennt db02', no: '3306 ist ein anderer Dienst oder der Dump stammt von lame' },
     ev: [{ id: 'E12', line: 5, label: 'ls /srv/backup · 14:52 · Zeile 5' }, { id: 'E14', line: 3, label: '/etc/hosts · 14:50 · Zeile 3' }, { id: 'E13', line: 9, label: 'proxychains nmap · 14:47 · Zeile 9' }],
@@ -1295,7 +1295,7 @@ var IDEAS = [
       { k: 'Befehlsvorlage', cmds: [[{ t: 'proxychains -q nmap -sV -p ' }, { z: '3306', ty: 'port' }, { t: ' ' }, { z: '10.10.20.8', ty: 'ip' }], [{ t: 'ls -la --time-style=full-iso /srv/backup' }]] }
     ] }
 ];
-var KI_IDEA = { id: 'd5', kind: 'Frage', title: 'Läuft dieselbe Backup-Routine auch auf 10.10.20.8?', origin: { ki: 'claude-opus-5-5' },
+var KI_IDEA = { id: 'd5', kind: 'Frage', title: 'Läuft dieselbe Backup-Routine auch auf 10.10.20.8?', origin: { ki: 'test-model' },
   why: 'Das Skript auf lame schreibt per rsync nach files. Ein ähnliches Muster auf db02 würde erklären, warum dort ein Dump entsteht.',
   crit: { ok: 'Cron-Eintrag oder Skript mit Ziel files auf db02', no: 'kein Backup-Job auf db02' },
   ev: [{ id: 'E8', line: 4, label: 'backup.sh · 14:31 · Zeile 4' }, { id: 'E12', line: 5, label: 'ls /srv/backup · 14:52 · Zeile 5' }],

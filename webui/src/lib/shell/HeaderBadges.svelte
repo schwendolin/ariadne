@@ -13,6 +13,7 @@
   import type { AppState } from '../stores/app.svelte';
   import { termShort } from '../util/format';
   import { hhmm } from '../util/time';
+  import { url } from '../url/state.svelte';
 
   let { app }: { app: AppState } = $props();
   const s = $derived(app.status);
@@ -60,7 +61,10 @@
     data-badge="scope"
     title={t('header.scopeWarningTitle')}
     aria-label={t('header.scopeWarning')}
-    onclick={() => app.ui.openDialog({ kind: 'scope-warning' })}
+    onclick={() => {
+      url.go('karte', { host: null });
+      app.ui.openDialog({ kind: 'scope-warning' });
+    }}
   >
     <span class="bang" aria-hidden="true">!</span><span class="txt"><span class="long">{t('header.scopeWarning')}</span><span class="short">{t('header.scopeShort')}</span></span>
   </button>

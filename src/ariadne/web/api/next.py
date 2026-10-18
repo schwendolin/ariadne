@@ -26,6 +26,7 @@ from ariadne.parsers._common import canon_ip
 from ariadne.rules import api as rules_api
 from ariadne.web.api.common import Api
 from ariadne.web.api.status import scope_include
+from ariadne.web.api.suggestions import merged as merged_suggestions
 from ariadne.web.api.text import Bag, iso
 from ariadne.web.api.views import (
     chunks,
@@ -379,7 +380,8 @@ def next_view(conn: Any, profile: str, bag: Bag, redactor: Any = None) -> dict[s
         "clarify": clarify,
         "confirm": list(groups.values()) if profile == "customer" else [],
         # Denkanstösse aus der Regel-Engine (web-api.md 18.6, Bau v0.1-Oberfläche): nur offene.
-        "suggestions": rules_api.suggestions(conn, profile=profile, state="open", limit=50)[0],
+        # Dazu die offenen KI-Denkanstösse (vorne), zusammen höchstens 50.
+        "suggestions": merged_suggestions(conn, profile, "open", 50)[0],
         "suggestions_available": not rules_api.STUB,
         "quiet": queries.quiet_summary(conn),
         "open": len(clarify),

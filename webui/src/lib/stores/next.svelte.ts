@@ -218,6 +218,11 @@ export function evidenceLabel(e: EvidenceRef): string {
   return parts.length > 1 ? [parts[0], time, ...parts.slice(1)].join(' · ') : `${e.label} · ${time}`;
 }
 
+/** Quelle in der Zeile: «Regel» oder «KI» */
+export function sugKind(s: Suggestion): string {
+  return s.origin === 'ai' ? t('sug.ai') : t('sug.rule');
+}
+
 export function suggestionEvidence(s: Suggestion): EvidenceTarget | null {
   const e = s.evidence[0];
   if (!e) return null;
@@ -413,7 +418,7 @@ export class NextStore implements ProjectPart {
       const vanished: { key: string; index: number; line: ItemLine }[] = [];
       before.suggestions.forEach((s, index) => {
         if (now.has(s.suggestion_key)) return;
-        const line = { kind: t('sug.rule'), parts: s.title_parts };
+        const line = { kind: sugKind(s), parts: s.title_parts };
         const own = this.pending.get(s.suggestion_key);
         if (!own || own.until <= Date.now()) {
           // Nicht hier entschieden: Ein Denkanstoss verschwindet auch ohne Entscheid (Erledigt-
@@ -668,7 +673,21 @@ export class NextStore implements ProjectPart {
       state: 'done',
       // Zeile zeigt den Titel gedämpft (ein blosses «erledigt» sagt nicht, was erledigt ist)
       msg: null,
-      line: { kind: t('sug.rule'), parts: s.title_parts },
+      line: { kind: sugKind(s), parts: s.title_parts },
+      ctx: null,
+    });
+  }
+
+  /**
+   * KI-Denkanstoss (D3): «Bestätigt» oder «Widerlegt» ist ein `d.suggestion.done` mit `basis` und
+   * dem Grund «bestätigt» bzw. «widerlegt» (fester Text, kein Zieldatum).
+   */
+  suggestionVerdict(s: Suggestion, verdict: 'confirmed' | 'refuted'): Promise<boolean> {
+    const reason = verdict === 'confirmed' ? 'bestätigt' : 'widerlegt';
+    return this.decideFor(s.suggestion_key, 'suggestion', { kind: 'd.suggestion.done', payload: { suggestion_key: s.suggestion_key, basis: s.basis, reason } }, {
+      state: 'done',
+      msg: { key: verdict === 'confirmed' ? 'sug.d.confirmed' : 'sug.d.refuted', params: {}, mono: [] },
+      line: { kind: sugKind(s), parts: s.title_parts },
       ctx: null,
     });
   }
@@ -677,7 +696,7 @@ export class NextStore implements ProjectPart {
     return this.decideFor(s.suggestion_key, 'suggestion', { kind: 'd.suggestion.dismiss', payload: { suggestion_key: s.suggestion_key } }, {
       state: 'dismissed',
       msg: { key: 'next.d.sugDismissed', params: {}, mono: [] },
-      line: { kind: t('sug.rule'), parts: s.title_parts },
+      line: { kind: sugKind(s), parts: s.title_parts },
       ctx: null,
     });
   }

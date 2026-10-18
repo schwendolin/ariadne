@@ -19,14 +19,26 @@ from ariadne.rules import api as rules_api
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError
 
-__all__ = ["add_routes", "suggestions_view", "LIMIT", "STATES"]
+__all__ = ["add_routes", "suggestions_view", "merged", "LIMIT", "STATES"]
 
 LIMIT = 200
 STATES = ("open", "done", "dismissed", "all")
 
 
+def merged(conn: Any, profile: str, state: str, limit: int) -> tuple[list[dict[str, Any]], bool]:
+    """Denkanstösse der KI (:mod:`ariadne.ai.store`, jüngste zuerst) vor denen der Regeln, zusammen
+    höchstens ``limit``. Die KI-Denkanstösse stehen vorne, weil der Mensch sie eigens angefordert hat
+    und es je Auftrag höchstens vier sind."""
+    from ariadne.ai import store as ai_store
+
+    ai, ai_cut = ai_store.suggestions(conn, profile=profile, state=state, limit=limit)
+    rest = max(0, limit - len(ai))
+    rules, rules_cut = rules_api.suggestions(conn, profile=profile, state=state, limit=rest)  # type: ignore[arg-type]
+    return ai + rules, bool(ai_cut or rules_cut)
+
+
 def suggestions_view(conn: Any, profile: str, state: str) -> dict[str, Any]:
-    items, truncated = rules_api.suggestions(conn, profile=profile, state=state, limit=LIMIT)  # type: ignore[arg-type]
+    items, truncated = merged(conn, profile, state, LIMIT)
     return {"suggestions": items, "truncated": truncated}
 
 

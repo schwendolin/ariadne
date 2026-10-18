@@ -6,6 +6,8 @@
 >
 > **Ergänzt im Bau v0.1-Oberfläche** (Phase 1, 2026-10-18): Abschnitt [18](#18-ergänzungen-für-die-oberfläche-v01) spezifiziert, was die Oberfläche nach Design v0.1 ([docs/ui/design-v01](ui/design-v01/README.md), E105 bis E118) braucht und API v2 noch fehlte: Vorlieben (E112), «Neu seit» (E106), Findings (E113), Denkanstösse aus Regeln (Architektur 6.1, E64, E68), «in die Kali kopieren» (E111), Quittieren der Scope-Warnung und additive Felder an bestehenden Antworten. Geänderte Stellen in den Abschnitten 9, 12 bis 16 tragen die Marke «Bau v0.1-Oberfläche». Alle Ergänzungen sind additiv; kein bestehendes Feld ändert Bedeutung oder Typ.
 
+> **Ergänzt in Etappe 4** (2026-10-18): Abschnitt [19](#19-ergänzungen-etappe-4-ki-export-screenshots-e119-e120-v01) mit KI-Denkanstoss, Export, Screenshots und Bildern sowie E119 (Versionen pro Host, `Suggestion.items`) und E120 (`NextView.scope_warning`). Die 501-Marken dieser Routen in 11 und 15 sind entfernt.
+
 **Kennzeichnung pro Endpunkt**
 
 | Marke | Bedeutung |
@@ -34,6 +36,7 @@
 16. [Offene Punkte](#16-offene-punkte)
 17. [Präzisierungen aus dem Bau v0.1-Server](#17-präzisierungen-aus-dem-bau-v01-server)
 18. [Ergänzungen für die Oberfläche v0.1](#18-ergänzungen-für-die-oberfläche-v01) (mit 18.12 Präzisierungen aus dem Bau)
+19. [Ergänzungen Etappe 4: KI, Export, Screenshots, E119, E120](#19-ergänzungen-etappe-4-ki-export-screenshots-e119-e120-v01)
 
 ## 1 Grundregeln
 
@@ -725,9 +728,9 @@ Farben als Namen (`red`, `bright_red`). Bekannte Secrets (Tabelle `secret_value`
 
 «Ganzes Log» als Text mit sichtbar gemachten Escapes, `Content-Type: text/plain; charset=utf-8`, `Content-Disposition: attachment; filename="<unit-kurz-id>.txt"` (Dateiname nie aus Zieldaten), Secrets wie bei `/lines` ersetzt. Rohbytes gibt es nicht über HTTP.
 
-### GET /api/v1/p/{pid}/blobs/{blob_id} [501 bis v0.2]
+### GET /api/v1/p/{pid}/blobs/{blob_id} [v0.1]
 
-Bilder (Screenshots). Nur `image/png`, `image/jpeg`, `image/webp` nach Neukodierung; alles andere als `application/octet-stream` mit `attachment`. Nie SVG, nie HTML.
+Seit Etappe 4 nur für eigene Screenshots (Abschnitt 19.3): `image/png` (kanonisch, ohne Metadaten), sonst 404. Nie SVG, nie HTML, nie Dateien aus dem Ziel (bis v0.2).
 
 ## 12 Entscheide
 
@@ -861,16 +864,16 @@ Der Strom läuft auch ohne Projekt und bei gesperrtem Projekt; dann kommen nur `
 
 | Endpunkt | Zweck | Stand |
 |---|---|---|
-| `POST /p/{pid}/ai/denkanstoss` | KI-Denkanstoss auf Knopfdruck (Architektur 6.3): Lagebild, höchstens 4 Anstösse, Kosten, Ablehnung nie umformuliert; Job per SSE `progress` | [501 bis v0.1-KI] |
+| `POST /p/{pid}/ai/denkanstoss`, `GET …/ai/status`, `…/ai/jobs/{id}`, `…/ai/denkanstoesse` | KI-Denkanstoss auf Knopfdruck (Architektur 6.3): Lagebild, höchstens 4 Anstösse, Kosten, Ablehnung nie umformuliert; Job per SSE `progress` | **[v0.1]** seit Etappe 4 (19.1) |
 | `GET /p/{pid}/suggestions`, Denkanstösse aus Regeln | Regeln, Prüfziele, Befehlsvorlagen nur vom Server mit typisierten Platzhaltern (E68), Lernmodus | **[v0.1]** seit Bau v0.1-Oberfläche (18.6); Prüfziel-Status (`d.goal.status`) bleibt [501 bis v0.2] |
-| `POST /p/{pid}/exports`, `GET …/exports` | Markdown-Export (Architektur 8.7), Vorlagen `cys` und `htb` | [501 bis v0.1-Export]; die UI zeigt den Dialog mit Hinweis, Knöpfe gesperrt |
-| `POST /p/{pid}/screenshots` | Screenshot mit Countdown (`mode`, `delay_s`) | [501 bis v0.1-Screenshots]; die UI zeigt den Dialog mit Hinweis, Knöpfe gesperrt |
+| `POST /p/{pid}/exports`, `GET …/exports`, `…/exports/phases` | Markdown-Export (Architektur 8.7), Vorlagen `cys` und `htb`, Phasen korrigieren | **[v0.1]** seit Etappe 4 (19.2); Klartext nur im Terminal |
+| `POST /p/{pid}/screenshots`, `GET …/screenshots` | Screenshot mit Countdown (`mode`, `delay_s`), Liste | **[v0.1]** seit Etappe 4 (19.3), nur X11 |
 | `GET /p/{pid}/findings`, `GET /p/{pid}/findings/{finding_id}`, `d.finding.*` | Findings (Titel, Schwere, Belege, Massnahme, ATT&CK, CVE) | **[v0.1]** seit Bau v0.1-Oberfläche (18.5, E113) |
 | `GET /p/{pid}/credentials`, `/cred-matrix`, `/credentials/{id}/copy` | Credentials, Matrix, Kopieren in die Kali-Zwischenablage | [501 bis v0.2]; «in die Kali kopieren» für einzelne Secret-Werte gibt es schon in v0.1 (18.7) |
 | `POST /p/{pid}/query`, `POST …/ai/frage` | DSL-Abfragen, Fragen an die Karte (E61) | [501 bis v0.2] |
-| `GET /p/{pid}/blobs/{id}` | Bilder | [501 bis v0.2] |
+| `GET /p/{pid}/blobs/{id}` | Bilder | **[v0.1]** seit Etappe 4 nur für eigene Screenshots (19.3); Bilder aus dem Ziel 404 bis v0.2 |
 | Datei aus der Warteliste übernehmen (`d.file.accept`) | Knopf statt `ariadne import` | [v0.2] |
-| Session abspielen, Export-Vorschau, Phasenzuordnung | | [v0.2] bis [v0.4] |
+| Session abspielen, Export-Vorschau | | [v0.2] bis [v0.4]; die Phasenzuordnung gibt es seit Etappe 4 (19.2) |
 
 Jede Route mit Marke «501» existiert in diesem Bau, durchläuft dieselbe Middleware und Anmeldung und antwortet dann `501 { error: { code: 'not_implemented', message: 'Kommt in einer späteren Version.' } }`.
 
@@ -1197,7 +1200,7 @@ Alle neuen Felder sind Pflichtfelder in der Antwort (Wert `null`, wenn es ihn ni
 
 ### 18.11 Nicht in v0.1
 
-KI-Denkanstoss (`POST /ai/denkanstoss`, 501 bis v0.1-KI; der Knopf «Denkanstoss anfordern (KI)» ist gesperrt und nennt den Grund), Export und Screenshot (501; Dialoge mit Hinweis, Knöpfe gesperrt), Prüfziel-Status `d.goal.status` und KI-Hypothesen `d.hypothesis` (501 bis v0.2), Aufdecken eigener Secrets (nie über HTTP), Übernehmen aus der Warteliste (nur `ariadne import`).
+KI-Denkanstoss, Export und Screenshot sind seit Etappe 4 gebaut (Abschnitt 19). Weiter nicht in v0.1: Prüfziel-Status `d.goal.status` und KI-Hypothesen `d.hypothesis` (501 bis v0.2), Aufdecken eigener Secrets (nie über HTTP), Übernehmen aus der Warteliste (nur `ariadne import`).
 
 ### 18.12 Präzisierungen aus dem Bau v0.1-Oberfläche (Teil «backend-ui»)
 
@@ -1236,6 +1239,483 @@ KI-Denkanstoss (`POST /ai/denkanstoss`, 501 bis v0.1-KI; der Knopf «Denkanstoss
 | Denkanstösse, Prüfziele (18.6) | Neue Prüfziel-IDs: `PZ-SMB-SHARES`, `PZ-NFS-EXPORTS`, `PZ-PORTS-TCP`, `PZ-PORTS-UDP`, `PZ-CRED-DEFAULT`, `PZ-SMTP-USER`, `PZ-DB-ZUGRIFF` (Katalog in [denkanstoesse.md](denkanstoesse.md) 5). |
 | Denkanstösse, Entscheide (18.6, 12) | 409 `conflict`: unbekannter `suggestion_key`, `d.suggestion.dismiss` auf einen verworfenen, `d.suggestion.done` auf einen erledigten oder mit veralteter `basis`. 422 `basis_required`: `d.suggestion.done` ohne `basis`. |
 | Denkanstösse, Belege (18.6) | `evidence[].label` lautet «nmap -sV · Zeile 6»: Werkzeug und Optionen, Zeile für Menschen ab 1 gezählt (`lines[0] + 1`), **ohne Uhrzeit**; dazu additiv `evidence[].ts` (Zeit der Quelle, UTC, sonst `null`). Die Oberfläche setzt die Uhrzeit in Lokalzeit ein («nmap -sV · 14:02 · Zeile 6»), wie bei den Belegen von Findings (Integration v0.1-Oberfläche; vorher Lokalzeit des Daemons im Label). In `CommandTemplate.values` ist der erste Eintrag das Werkzeug (`slot: 'tool'`, `target: false`); bei `searchsploit` ist jedes Wort von Produkt und Version ein eigener Wert. |
+
+## 19 Ergänzungen Etappe 4: KI, Export, Screenshots, E119, E120 [v0.1]
+
+> Stand 2026-10-18, gebaut von den Teilen «ki», «export», «screenshots» und «paket», integriert und getestet.
+> Alle Ergänzungen sind additiv. Neue SSE-Ereignisse: `screenshot`; `progress` kennt neu `kind: 'ai'` und
+> `kind: 'export'` mit zusätzlichen Feldern. Neuer 422-`type`: `budget_confirm`. Neue Fehlercodes:
+> `shot_display`, `shot_wayland`, `shot_window`, `shot_region`, `shot_failed` (503). Neue Entscheidsarten:
+> `d.ai.allow_cloud` (nur Terminal), `d.ai.denkanstoss` (nur Daemon), `d.unit.phase` (über `POST /exports/phases`).
+> Was Ariadne verlässt (KI-Lagebild, Export), geht durch `redact_for_exit` (E72).
+
+### 19.1 KI-Denkanstoss auf Knopfdruck (Architektur 6.3, E64, E66, E68)
+
+Stand: gebaut, integriert und getestet (`tests/ai`, `tests/integ4`). Ersetzt die 501-Route `POST /p/{pid}/ai/denkanstoss`
+(web-api.md 15) und ergänzt Abschnitt 18. Alle Routen unter `/api/v1`, gleiche Middleware, Anmeldung und
+Ausgang (Redaktor E72, zweite Schicht) wie alle anderen.
+
+#### Begriffe
+
+* Anbieter (`provider`): `off` (Standard), `cloud` (Anthropic-API), `local` (Ollama auf 127.0.0.1).
+* Modell-ID: setzt der Nutzer mit `ariadne ai setup`; Ariadne kennt keinen Standard.
+* Freigabe Cloud pro Projekt: Entscheid `d.ai.allow_cloud` (nur im Terminal: `ariadne ai allow-cloud`).
+* Ergebnis eines Auftrags: Entscheid `d.ai.denkanstoss` (Projektion, übersteht Reparse); Zustand der
+  einzelnen Denkanstösse wie bei Regeln über `d.suggestion.done` / `d.suggestion.dismiss` (`basis` Pflicht).
+
+#### GET /api/v1/p/{pid}/ai/status [v0.1]
+
+```ts
+interface AiStatus {
+  provider: 'off' | 'cloud' | 'local';
+  model: string | null;                 // vom Nutzer gesetzte Modell-ID (Text, kein Zieldatum)
+  ready: boolean;                       // Knopf «Denkanstoss anfordern (KI)» aktiv
+  reason: null | 'off' | 'config' | 'no_model' | 'no_key' | 'locked' | 'cloud_not_allowed' | 'profile'
+        | 'public_scope' | 'busy';
+  reason_text: string | null;           // fester deutscher Text zu reason
+  budget: {
+    month: string;                      // '2026-10'
+    limit_usd: number; used_usd: number; pct: number;   // pct 0..100+ (gerundet)
+    level: 'ok' | 'warn' | 'over';      // warn ab 80 %, over ab 100 %
+  };
+  job: AiJob | null;                    // laufender oder letzter Auftrag dieses Daemon-Laufs
+}
+```
+
+#### POST /api/v1/p/{pid}/ai/denkanstoss [v0.1]
+
+Body `{ confirm_budget?: boolean }` (Standard `false`). Antwort **202** `{ job: AiJob }`.
+
+* Ein Auftrag zur Zeit (pro Daemon): läuft schon einer, `409 conflict`.
+* Anbieter aus, Modell fehlt, Schlüssel fehlt, Cloud ohne Freigabe, Profil customer mit Cloud,
+  öffentlicher Scope ohne `d.lab.not_customer`: `403 policy` (Grund steht in `GET …/ai/status`).
+* Monatslimit erreicht (Verbrauch plus Schätzung des Auftrags über 100 %) ohne `confirm_budget: true`:
+  `422 validation` mit `detail: [{ loc: ['body','confirm_budget'], type: 'budget_confirm' }]`.
+
+```ts
+interface AiJob {
+  job_id: string;                       // 'ai-<12 hex>'
+  status: 'queued' | 'running' | 'done' | 'refused' | 'failed';
+  step: 'lagebild' | 'anfrage' | 'pruefung' | 'fertig';
+  message: string;                      // fester deutscher Text, nie Modell- oder Zieltext
+  started_at: string; ended_at: string | null;
+  provider: 'cloud' | 'local'; model: string;
+  tokens_in: number | null; tokens_out: number | null; tokens_estimate: number | null;
+  masked: number;                       // ersetzte eigene Secrets und maskierte Werte im Lagebild
+  cost_usd: number | null;              // aus Tokens mal Preisen der Konfiguration
+  budget_level: 'ok' | 'warn' | 'over';
+  created: number;                      // Zahl neuer Denkanstösse
+  dropped: number;                      // verworfene Einträge (Prüfung), davon
+  injection_suspect: number;            //   als Injection-Verdacht gezählt
+  refusal: { category: string | null; text: string } | null;   // Ablehnung des Modells, wörtlich (Klartext)
+  error: null | 'unreachable' | 'auth' | 'schema' | 'truncated' | 'project_changed' | 'internal';
+  // status 'done' mit created 0: «Keine gültigen Denkanstösse in der Antwort.»
+  // lokal nicht erreichbar: error 'unreachable', message «Ollama auf 127.0.0.1 nicht erreichbar: …»
+}
+```
+
+#### GET /api/v1/p/{pid}/ai/jobs/{job_id} [v0.1]
+
+`{ job: AiJob }`; unbekannt: 404.
+
+#### GET /api/v1/p/{pid}/ai/denkanstoesse?state= [v0.1]
+
+Wie `GET /suggestions` (18.6), nur Denkanstösse mit `origin: 'ai'`: `{ suggestions: Suggestion[], truncated }`,
+`state` = `open` (Standard) | `done` | `dismissed` | `all`, höchstens 200. Fehler: 422.
+
+**Suggestion mit Herkunft KI** (gleiche Form wie 18.6, Unterschiede):
+
+* `origin: 'ai'`, `rule_id: 'KI'`, `kind`: `'hypothesis' | 'question' | 'goal'`, `goal_id` nur aus dem Katalog.
+* `title`, `reason`, `stages.question`, `stages.direction`: Modelltext, geprüft (keine URLs, keine
+  fremden IPs oder Namen, keine Shell-Metazeichenfolgen, keine Steuerzeichen), als Text anzeigen.
+* `evidence`: Belege nur aus Schlüsseln des Lagebilds (Host, Dienst, Wert); `unit_id`/`lines` wie bei Regeln
+  oder `null`.
+* `templates`: nur Vorlagen der Bibliothek (E68), vom Server mit typisierten Platzhaltern gerendert, höchstens 3.
+* `flags` zusätzlich `'ai'` (immer) und `'injection_suspect'` (Modell meldet Verdacht oder Vorlage gesperrt).
+* `ai: { model: string, confirmed_if: string, refuted_if: string, job_id: string, created_at: string }`.
+* `basis` ist fest pro Eintrag: «erledigt» bleibt erledigt.
+
+**Zustand:** `POST /decisions` mit `d.suggestion.done` (mit `basis`) bzw. `d.suggestion.dismiss` und dem
+`suggestion_key` der KI (`decisions._check_refs` prüft zuerst mit `ariadne.ai.store.check_decision`, sonst mit der Regel-Engine).
+`/next` und `/suggestions` liefern die KI-Denkanstösse mit: vorne (jüngste zuerst), danach die Regeln,
+zusammen höchstens 50 (`/next`) bzw. 200 (`/suggestions`). KI-Einträge tragen `items: []` (E119).
+
+#### SSE
+
+`progress` mit `kind: 'ai'` (zusätzliche Felder additiv):
+`{ job_id, kind: 'ai', status, pct, message, tokens_in, tokens_out, tokens_estimate, masked, cost_usd, budget_level }`.
+`status` im Ereignis: `queued` | `running` | `done` | `failed` (eine Ablehnung ist `failed`; Details über
+`GET …/ai/jobs/{job_id}`, dort `status: 'refused'` und `refusal.text` wörtlich). `pct`: 10, 40, 90, 100.
+`message` ist fester Text, nie Modell- oder Zieltext. Vor dem letzten `progress` kommt bei neuen Einträgen
+`suggestion { project_id, open }` (open = offene Regeln plus offene KI-Denkanstösse).
+Die UI lädt nach `done` zusätzlich `/next` und `/ai/denkanstoesse` neu.
+
+#### Fehler
+
+Keine neuen Codes. 422-`type` neu: `budget_confirm`.
+
+#### CLI (nur Terminal)
+
+* `ariadne ai setup [--provider off|cloud|local] [--model ID] [--limit USD] [--key-fd N]`:
+  API-Key nur per getpass (oder Deskriptor), verschlüsselt im Operator-Tresor (ctl `ai.key.set`).
+* `ariadne ai status`, `ariadne ai check` (ok, warn, fail; TLS ohne fremde CA, kein Proxy),
+  `ariadne ai allow-cloud [--yes]` (Entscheid `d.ai.allow_cloud` im offenen Projekt).
+
+#### ctl-Operationen (nur CLI, nicht in ALLOWED_OPS der Web-API)
+
+`ai.status`, `ai.key.set {value}`, `ai.key.remove`, `ai.allow_cloud {origin}`.
+
+**`Status.llm`** (4) kommt jetzt aus `ai.toml` und dem Monatsbuch: `mode` = Anbieter, `model` = gesetzte
+Modell-ID oder `null`, `available` = Anbieter nicht `off` und Modell gesetzt, `budget.month_limit_usd` aus
+`ai.toml` (Standard 20), `budget.month_used_usd` aus dem Monatsbuch des Operators (nicht pro Projekt).
+
+### 19.2 Bericht-Export (Architektur 8.5 bis 8.7, E62)
+
+Stand: gebaut, integriert und getestet (`tests/export`, `tests/e2e/test_etappe4.py`). Ersetzt die früheren 501-Routen `POST/GET /p/{pid}/exports`. Seit der Integration enthält der Export auch die eigenen Screenshots aus `shot.captured` (`Belege/img/`, nur Blobs der Art `screenshot`, geprüft mit `check_png`).
+Alle Routen unter `/api/v1`, gleiche Middleware, Anmeldung und Fehlerformat wie überall.
+Antworten gehen durch `Api.respond` (Redaktor, sichtbare Steuerzeichen). Zieldaten erscheinen
+in diesen Antworten nur als maskierter Befehlstext in der Phasenliste.
+
+#### POST /api/v1/p/{pid}/exports
+
+Startet einen Export im Hintergrund.
+
+Body (JSON, alle Felder optional):
+
+| Feld | Typ | Standard | Bedeutung |
+|---|---|---|---|
+| `template` | `'cys' \| 'htb'` | `'cys'` | Vorlage für das Writeup |
+| `klartext` | `boolean` | `false` | `true` wird **immer** mit 403 `policy` abgelehnt: Klartext nur im Terminal (`ariadne export --klartext`, Profil lab, Bestätigung) |
+
+Antwort `202`:
+
+```json
+{ "job_id": "exp-3", "status": "running", "template": "cys" }
+```
+
+Fehler: 403 `policy` (klartext), 409 `conflict` (ein Export läuft schon in diesem Daemon),
+409 `no_project`/`project_mismatch`, 423 `locked`, 422 `validation` (unbekannte Vorlage,
+unbekannte Felder), 503 `unavailable` (Auswertung nicht bereit).
+
+Fortschritt per SSE `progress`:
+
+```json
+{ "job_id": "exp-3", "kind": "export", "status": "running" | "done" | "failed", "pct": 0..100 | null, "message": "Daten sammeln" }
+```
+
+`message` ist fester deutscher Text: «Daten sammeln», «Dateien schreiben», «Export fertig»,
+«Export fehlgeschlagen». Nach `done` die Liste mit `GET /exports` neu laden.
+
+#### GET /api/v1/p/{pid}/exports
+
+Liste der Exporte im Projektordner (`<projekt>/exports/<zeit>-<vorlage>/`), neueste zuerst,
+höchstens 100, dazu ein laufender Auftrag.
+
+```json
+{
+  "exports": [
+    {
+      "export_id": "20261018T101500Z-cys",
+      "template": "cys",
+      "created_at": "2026-10-18T10:15:00.123Z",
+      "path": "exports/20261018T101500Z-cys",
+      "files": 42,
+      "klartext": false,
+      "warnings": ["sync_folder", "generic_secret"],
+      "chain": { "seq": 1234, "hash": "9f…(64 hex)" }
+    }
+  ],
+  "running": { "job_id": "exp-3", "template": "cys", "status": "running", "pct": 40 } | null,
+  "last_error": { "job_id": "exp-2", "message": "Export fehlgeschlagen" } | null
+}
+```
+
+`warnings`: `sync_folder` (Projektordner liegt in einem Sync-Ordner: .obsidian, Nextcloud,
+ownCloud, Dropbox, Syncthing, OneDrive, Google Drive oberhalb), `generic_secret` (generische
+Secret-Muster wie Private Key, `sk-ant-`, `AKIA` im exportierten Text, nur Warnung),
+`klartext` (Credentials im Klartext exportiert). `path` ist relativ zum Projektordner.
+Einträge ohne lesbares Manifest fehlen.
+
+#### GET /api/v1/p/{pid}/exports/phases?template=cys|htb
+
+Phasenzuordnung der Befehle zum Prüfen vor dem Export (dashboard-funktionen 5.12).
+
+```json
+{
+  "template": "cys",
+  "phases": [ { "key": "recon", "label": "Reconnaissance" }, … , { "key": "omit", "label": "Nicht im Writeup" } ],
+  "commands": [
+    { "cmd_id": "…", "cmd_ref": "c-…", "command": "nmap -sV 192.168.56.101", "ts": "2026-…Z",
+      "phase": "scanning", "source": "rule" | "decision" | "none", "decision_id": "…" | null, "ctrl": false }
+  ]
+}
+```
+
+`phase` ist `null`, wenn keine Regel passt (`source: 'none'`; im Writeup unter «Nicht zugeordnet»).
+`command` ist maskiert wie überall (bekannte Secrets `••••••••`, Steuerzeichen sichtbar). Höchstens
+2000 Befehle, die neuesten.
+
+Phasen `cys`: `recon` Reconnaissance, `scanning` Scanning und Enumeration, `exploitation`
+Exploitation, `post` Post-Exploitation, `reporting` Reporting. Phasen `htb`: `enumeration`
+Enumeration, `foothold` Foothold, `privesc` Privilege Escalation, `pivot` Pivot, `loot` Loot,
+`lessons` Lessons Learned. Beide: `omit` (nicht im Writeup).
+
+#### POST /api/v1/p/{pid}/exports/phases
+
+Korrektur einer Zuordnung als Entscheid `d.unit.phase` (Herkunft `webui`, übersteht Reparse,
+aufhebbar mit `d.revoke`).
+
+Body: `{ "template": "cys", "cmd_id": "…", "phase": "exploitation" }` (`cmd_ref` statt `cmd_id` geht auch).
+
+Antwort `200`: `{ "decision_id": "…", "cmd_id": "…", "template": "cys", "phase": "exploitation" }`.
+
+Fehler: 422 `validation` (Phase passt nicht zur Vorlage), 404 `not_found` (Befehl unbekannt).
+
+#### Entscheid `d.unit.phase` (events.py, additiv)
+
+```
+cmd_id: str (3..200)   template: 'cys' | 'htb'   phase: str (Schlüssel der Vorlage oder 'omit')   reason?: str (≤500)
+```
+
+Der jüngste nicht widerrufene Entscheid je (`template`, `cmd_id`) gilt.
+
+#### ctl-Operationen (CLI)
+
+* `export.run {template, klartext, confirm}` → `{export_id, path, files, warnings, chain}`.
+  `klartext: true` nur im Profil lab und mit `confirm: "KLARTEXT"` (sonst `policy`).
+* `export.list {}` → wie `GET /exports` (ohne `running`).
+* `export.phases {template}` / `export.phase {template, cmd_id|cmd_ref, phase}`.
+
+#### Nachtrag (Stand Ende Bau «export»)
+
+* Umgesetzt wie oben in `src/ariadne/web/api/exports.py`; die 501-Zeilen für `/exports` sind aus
+  `later.py` entfernt. Erstes SSE-Ereignis direkt beim Start: `status: 'running', pct: 0`.
+* `GET /exports/phases` liefert `ts` als ISO-Zeit; `ctrl` zeigt sichtbar gemachte Steuerzeichen im Befehl.
+* Antwort von `export.run` (ctl): `{ export_id, path, files, manifest_sha256, template, warnings,
+  generic_kinds, chain: {seq, hash}, created_at, klartext, masked }` (`masked`: Zahl maskierter
+  Ziel-Credentials).
+* CLI: `ariadne export [--template cys|htb] [--klartext]`, `ariadne export --liste`,
+  `ariadne export --phasen [--template htb]`, `ariadne export --phase <cmd_ref> <phase> [--template]`.
+* Ausgabe: `<projekt>/exports/<YYYYMMDDTHHMMSSZ>-<vorlage>[-n]/` mit `00 Übersicht.md`,
+  `01 Angriffspfad.md`, `02 Writeup.md`, `03 Findings.md`, `Credentials.md`, `Zeitachse.md`,
+  `Hosts/<kurz>-<slug>.md`, `Belege/<kurz>-<slug>.md`, `Belege/Screenshots.md` und
+  `Belege/img/<sha16>.png` (nur wenn Bilder da sind), `_ariadne/manifest.json`.
+
+### 19.3 Screenshots und Bilder (Architektur 4.3)
+
+Stand: umgesetzt in `src/ariadne/web/api/screenshots.py` und `src/ariadne/web/api/blobs.py`. Alle Pfade unter `/api/v1`,
+Anmeldung und Middleware wie überall (Token, CSP, `nosniff`, `no-store`).
+
+Aufgenommen wird immer im Daemon (Architektur 4.3), nur unter X11. Ablage: kanonisches PNG
+(nur IHDR, IDAT, IEND; keine Metadaten), verschlüsselt im Blob-Store (`kind = "screenshot"`),
+dazu ein Journal-Ereignis `shot.captured` mit Kontext.
+
+#### POST /api/v1/p/{pid}/screenshots
+
+Screenshot auslösen (Dashboard-Knopf). Der Server wartet `delay_s` (Countdown, Standard 3 s),
+nimmt dann auf und antwortet erst danach. Die Oberfläche zeigt den Countdown, während die Anfrage
+läuft (Anfrage dauert also etwa `delay_s` + 1 s).
+
+Körper (alle Felder optional, unbekannte Felder 422):
+
+| Feld | Typ | Standard | Bedeutung |
+|---|---|---|---|
+| `mode` | `"window"` \| `"monitor"` \| `"region"` | `"window"` | aktives Fenster, Monitor unter dem Mauszeiger, Bereich |
+| `region` | `{x, y, width, height}` (int; x, y >= 0; 1..16384) | – | nur und genau bei `mode = "region"` |
+| `delay_s` | int 0..10 | 3 | Countdown vor der Aufnahme |
+| `terminal_id` | string | zuletzt aktives Terminal | Terminal für den Kontext |
+| `note` | string, höchstens 500 Zeichen | – | Notiz zum Bild |
+
+Antwort `201`:
+
+```json
+{"screenshot": Screenshot}
+```
+
+Fehler:
+
+| Status | Code | Wann |
+|---|---|---|
+| 409 | `no_project`, `project_mismatch` | wie überall |
+| 409 | `conflict` | ein Screenshot läuft schon, oder das Projekt wurde während des Countdowns gewechselt |
+| 404 | `not_found` | `terminal_id` unbekannt oder geschlossen |
+| 422 | `validation` | Körper ungültig (`region` fehlt bei `region`, oder ist bei anderem Modus gesetzt) |
+| 503 | `shot_display` | keine grafische Sitzung (kein `DISPLAY`) |
+| 503 | `shot_wayland` | Wayland-Sitzung: Screenshots in v0.1 nur unter X11 (Xfce) |
+| 503 | `shot_window` | kein aktives Fenster gefunden (Modus `window`) |
+| 503 | `shot_region` | Bereich liegt ausserhalb des Bildschirms |
+| 503 | `shot_failed` | Aufnahme fehlgeschlagen (X-Server, Zeitlimit) |
+
+Feste Texte (gleiches Format `{"error": {"code", "message"}}`):
+
+- `shot_display`: «Keine grafische Sitzung gefunden (DISPLAY fehlt). Am Kali-Desktop anmelden.»
+- `shot_wayland`: «Wayland-Sitzung: Screenshots gibt es in dieser Version nur unter X11 (Xfce).»
+- `shot_window`: «Kein aktives Fenster gefunden; Modus Monitor oder Bereich wählen.»
+- `shot_region`: «Der Bereich liegt ausserhalb des Bildschirms.»
+- `shot_failed`: «Screenshot fehlgeschlagen.»
+
+#### GET /api/v1/p/{pid}/screenshots?limit=200
+
+Neueste zuerst, `limit` 1..500 (Standard 200).
+
+```json
+{"items": [Screenshot, ...], "presentation": false}
+```
+
+Im Präsentationsmodus: `presentation: true`, `window_title`, `wm_class` und `note` sind `null`,
+und `GET /blobs/{id}` antwortet 403 `policy` (das Bild bleibt verdeckt).
+
+#### Screenshot
+
+```json
+{
+  "id": "<Ereignis-ID von shot.captured>",
+  "seq": 123,
+  "ts": "2026-10-18T10:00:00.000Z",
+  "blob_id": "<uuid>",
+  "url": "/api/v1/p/<pid>/blobs/<blob_id>",
+  "mime": "image/png",
+  "mode": "window",
+  "trigger": "webui",
+  "width": 1280, "height": 800,
+  "sha256": "<hex>",
+  "dhash": "<16 hex>",
+  "window_title": "<Text, sichtbar gemacht, redigiert>" ,
+  "wm_class": "<Text>",
+  "terminal_id": "<id>" ,
+  "stream_off": 4711,
+  "host": "ip:default/10.10.10.5",
+  "host_auto": false,
+  "note": null
+}
+```
+
+`trigger`: `hotkey` (F12 s im Terminal), `cli` (`ariadne shot`), `webui` (Knopf).
+`host`: Host-Kennung der obersten Stufe des Kontextstapels des Terminals zum Zeitpunkt der
+Aufnahme (`null` = lokal oder unbekannt; `host_auto: true` = aus der Auswertung, E23).
+`terminal_id`: das angegebene Terminal, sonst das zuletzt aktive (aufnehmend, jüngster Rahmen).
+`window_title`, `wm_class`: aus dem X-Server (Zieldaten), Steuerzeichen als Leerzeichen,
+höchstens 300 Zeichen, eigene Secrets ersetzt. `stream_off`: Stromposition des Terminals (Textzwilling).
+
+#### GET /api/v1/p/{pid}/blobs/{blob_id}
+
+Liefert das Bild als Bytes. Nur Blobs, die Ariadne selbst als Screenshot abgelegt hat
+(`kind = "screenshot"`), und nur, wenn die Bytes PNG, JPEG oder WebP sind (Magic-Bytes geprüft,
+PNG zusätzlich kanonisch: nur IHDR, IDAT, IEND). Nie SVG, nie HTML, nie andere Dateien.
+
+- `200`, `Content-Type: image/png` (bzw. `image/jpeg`, `image/webp`),
+  `Content-Disposition: inline; filename="screenshot.png"`, dazu wie überall
+  `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`, `CSP: default-src 'none'; sandbox`.
+- `404 not_found`: unbekannt, kein Screenshot-Blob, ungültige ID.
+- `403 policy`: Präsentationsmodus.
+- `415` gibt es nicht: alles andere ist 404.
+
+Die Oberfläche lädt das Bild mit `fetch` (Token im Header) und zeigt es über eine `blob:`-URL
+(die Shell-CSP erlaubt `img-src 'self' blob:`).
+
+#### SSE
+
+Ereignis `screenshot` (nach jeder Aufnahme, egal welcher Auslöser):
+`{"project_id": "<pid>", "id": "<Ereignis-ID>", "trigger": "hotkey|cli|webui"}`.
+Der Daemon meldet es als `_notify("screenshot", project_id, id, trigger)`; `web/api/events.py` gibt nur diese
+drei Felder weiter (feste Wörter für `trigger`), nie Fenstertitel oder Notiz. Die Fehlercodes `shot_display`,
+`shot_wayland`, `shot_window`, `shot_region` und `shot_failed` (alle 503, feste Texte) stehen in
+`ApiErrorCode` und werden auch aus ctl-Fehlern übernommen.
+
+#### Journal
+
+`shot.captured` (Schicht raw), Felder wie bisher plus additiv `dhash`, `host`, `host_auto`,
+`stack` (Kontextstapel ohne Auto-Hosts, wie `term.ctx_snapshot`). `origin`: `shim` (Hotkey),
+`cli`, `webui`. `terminal_id`/`stream_off` der Zeile = Kontext-Terminal und Stromposition.
+
+#### ctl (für die CLI)
+
+`shot.take` mit `mode`, `region` ([x, y, w, h]), `delay_s`, `note`, `terminal_id`, `display`
+(Umgebung der CLI: `DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`,
+`XDG_SESSION_TYPE`), `origin` (`cli`). Antwort wie `Screenshot` ohne `url`.
+Fehlercodes: `no_project`, `conflict`, `invalid`, `shot_display`, `shot_wayland`, `shot_window`,
+`shot_region`, `shot_failed`.
+
+#### CLI
+
+`ariadne shot [window|monitor|region] [--region X,Y,BREITE,HOEHE] [--delay S] [--note TEXT]`
+
+### 19.4 E119 und E120: Versionen pro Host, Scope-Warnung in der Spalte
+
+Stand: gebaut und getestet. Ergänzt `docs/web-api.md` 18.6 (Denkanstösse)
+und 9 (`GET /p/{pid}/next`). Keine neuen Routen, keine neuen SSE-Ereignisse.
+
+#### 1. E119: «Version recherchieren» als ein Denkanstoss pro Host
+
+`R-VERSION-RECHERCHE` liefert **einen** Denkanstoss pro Host statt einen pro Dienst.
+
+* `suggestion_key`: aus `rule_id` und `host_id` (übersteht Merge über die Kennungen des Hosts).
+  Alte Schlüssel pro Dienst (Entscheide `d.suggestion.done`/`dismiss` aus Etappe 3) passen nicht
+  mehr; der neue Denkanstoss ist offen.
+* `basis`: aus allen Paaren Produkt und Version des Hosts. Ein neuer Dienst mit Version oder eine
+  geänderte Version öffnet einen erledigten Denkanstoss wieder (wie bisher: «neuer Anlass»).
+  `dismiss` gilt für den ganzen Host.
+* Titel:
+  * mehrere Dienste: «Versionen recherchieren: 192.168.56.101 (8 Dienste)»
+    (`title_parts`: Adresse `target: true`, Rest fest)
+  * ein Dienst: wie bisher «Version recherchieren: vsftpd 2.3.4 (192.168.56.101:21)»
+* `service_id`: bei genau einem Dienst dessen Kennung, sonst `null`. Sortierung: Priorität, Host,
+  dann Port (bei `null` vor den Diensten des Hosts).
+* `reason`: «Produkt und Version für 8 Dienste bekannt» bzw. bei einem Dienst wie bisher
+  «Produkt und Version bekannt: vsftpd 2.3.4».
+* Erledigt-Erkennung pro Dienst: Ein Dienst, dessen Produkt schon mit `searchsploit` gesucht oder
+  dessen Lauf das Skript `vulners` hatte, fällt aus der Liste. Ist die Liste leer, gibt es keinen
+  Denkanstoss.
+
+#### Neues Feld `items` in `Suggestion` (für alle Regeln vorhanden)
+
+```ts
+interface Suggestion {
+  // … wie 18.6 …
+  items: SuggestionItem[];          // NEU (E119): Liste pro Dienst mit je einer Vorlage;
+                                    // leer bei allen Regeln ausser R-VERSION-RECHERCHE
+}
+interface SuggestionItem {
+  service_id: string;               // 'svc:ip:default/192.168.56.101|tcp/21'
+  port: number; proto: 'tcp' | 'udp' | string;
+  label: string; ctrl: boolean;     // «vsftpd 2.3.4 · 21/tcp» (Produkt und Version sind Zieldaten)
+  label_parts: TextPart[];          // derselbe Text in Teilen; Produkt und Version target: true
+  template: CommandTemplate;        // genau eine Vorlage (searchsploit), Regeln wie 18.6
+}
+```
+
+* `items` ist nach Port sortiert (TCP vor UDP bei gleichem Port), höchstens 64 Einträge.
+* `templates` enthält bei `R-VERSION-RECHERCHE` die Vorlagen der ersten höchstens 4 Einträge
+  (gleiche Objekte wie in `items[].template`), damit ältere Ansichten etwas zeigen.
+  **Die UI zeigt bei nicht leerem `items` die Liste (aufgeklappt: Zeile pro Dienst mit Label
+  und Vorlage) und blendet `templates` aus.**
+* `flags`: `injection_suspect`, sobald eine Vorlage eines Eintrags mit `shell_meta`, `control`
+  oder `newline` gesperrt ist; `from_target` wie bisher.
+* `evidence`: Belege der ersten Einträge, höchstens 5 (wie bisher).
+
+#### 2. E120: Scope-Warnung als erster Eintrag in «Als Nächstes»
+
+`GET /api/v1/p/{pid}/next` bekommt das Feld `scope_warning`:
+
+```ts
+interface NextView {
+  // … wie 9 …
+  scope_warning: ScopeWarning | null;   // NEU (E120): gleiche Form wie Status.scope_warning (18.4);
+                                        // nur solange NICHT quittiert, sonst null
+}
+// ScopeWarning wie 18.4:
+// { cmd_id, cmd_ref, terminal_id, ts, terminal: TermRef, text, ctrl,
+//   targets: { value, verdict, ctrl }[], scope: string[], acked: false }
+```
+
+* Die UI zeigt die Warnung als **ersten Eintrag** der Spalte «Als Nächstes» (vor «Klären»), mit
+  dem Knopf «Quittieren». Keine Karte über der Karte mehr (E120).
+* Quittieren: unverändert `PUT /api/v1/p/{pid}/ui/scope-ack` mit `{ cmd_id }` (202). Danach lädt
+  die UI `/next` neu; `scope_warning` ist dann `null`, bis ein neuerer Befehl mit Ziel ausserhalb
+  kommt.
+* `scope_warning` zählt **nicht** in `open` und hat keine Ordnungsnummer.
+* `Status.scope_warning` bleibt unverändert (Kennzeichen in der Kopfzeile).
+* Fehler: wie `/next`. Ist `state.db` nicht lesbar, gilt «nicht quittiert».
 
 ## Anhang: Lücken aus Briefing B.4 und wo sie jetzt stehen
 

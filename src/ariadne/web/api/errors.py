@@ -18,6 +18,7 @@ from fastapi.routing import APIRoute
 from starlette.requests import Request
 from starlette.responses import Response
 
+from ariadne.sources.screenshot import SHOT_ERRORS
 from ariadne.web.api.text import visible_text
 
 __all__ = [
@@ -54,6 +55,7 @@ MESSAGES: dict[str, str] = {
     ),
     "clipboard_session": "Keine grafische Sitzung in der Kali gefunden. Am Kali-Desktop anmelden.",
     "internal": "Interner Fehler.",
+    **SHOT_ERRORS,  # shot_display, shot_wayland, shot_window, shot_region, shot_failed (alle 503)
 }
 
 STATUS: dict[str, int] = {
@@ -75,6 +77,7 @@ STATUS: dict[str, int] = {
     "clipboard_tool": 503,
     "clipboard_session": 503,
     "internal": 500,
+    **dict.fromkeys(SHOT_ERRORS, 503),
 }
 
 # Codes der ctl-Operationen -> Code der API (web-api.md 1.5); alles andere ist «internal».
@@ -90,6 +93,7 @@ _CTL: dict[str, str] = {
     "no_ingest": "unavailable",
     "clipboard_tool": "clipboard_tool",
     "clipboard_session": "clipboard_session",
+    **{code: code for code in SHOT_ERRORS},
 }
 
 _DETAIL_MAX = 50  # höchstens so viele Einträge in ``detail`` (422)

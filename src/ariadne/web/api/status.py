@@ -136,6 +136,30 @@ def _derived_state(
     return generation, _scope_warning(conn, bag, include, refs), refs
 
 
+def _llm_view(d: Any, with_project: bool) -> dict[str, Any]:
+    """``Status.llm`` aus ``ai.toml`` und dem Monatsbuch der KI (Teil «ki»); bei einem Lesefehler
+    gilt «aus» (der Status darf nie an der KI-Konfiguration scheitern)."""
+    from ariadne.ai.budget import Ledger
+    from ariadne.ai.config import load_config, valid_model
+
+    try:
+        cfg = load_config(d.paths)
+        used = Ledger(d.paths).state(cfg.monthly_limit_usd).used_usd
+    except Exception:  # noqa: BLE001 - kaputte ai.toml: KI gilt als aus, Details zeigt ariadne ai status
+        return {"mode": "off", "model": None, "available": False, "budget": None}
+    model = cfg.model if cfg.model and valid_model(cfg.model) else None
+    return {
+        "mode": cfg.provider,
+        "model": model,
+        "available": cfg.provider != "off" and model is not None,
+        "budget": (
+            {"month_limit_usd": float(cfg.monthly_limit_usd), "month_used_usd": round(float(used), 4)}
+            if with_project
+            else None
+        ),
+    }
+
+
 def add_routes(router: APIRouter, api: Api) -> None:
     @router.get("/status", name="status")
     async def get_status(request: Request) -> Response:
@@ -181,9 +205,7 @@ def add_routes(router: APIRouter, api: Api) -> None:
         a = st.get("active")
         pre = st.get("preroll") or {}
         idle = st.get("idle") or {}
-        settings = p.settings if p is not None and isinstance(p.settings, dict) else {}
-        llm = settings.get("llm") if isinstance(settings.get("llm"), dict) else {}
-        limit = llm.get("monthly_budget_usd")
+        llm = _llm_view(d, p is not None)
         ing = st.get("ingest")
         body = {
             "version": __version__,
@@ -228,16 +250,7 @@ def add_routes(router: APIRouter, api: Api) -> None:
                 )
             },
             "presentation": bool(d.presentation),
-            "llm": {
-                "mode": "off",
-                "model": None,
-                "available": False,
-                "budget": (
-                    {"month_limit_usd": float(limit), "month_used_usd": 0.0}
-                    if p is not None and isinstance(limit, int | float) and not isinstance(limit, bool)
-                    else None
-                ),
-            },
+            "llm": llm,
             "generation": gen if p is not None else None,
             "ingest": (
                 {

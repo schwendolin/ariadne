@@ -229,18 +229,19 @@ export class AppState implements AppApi {
   }
 
   /** Quittiert die Scope-Warnung auf dem Server (kein Browser-Speicher); Fehler als Meldung. */
-  async ackScopeWarning(): Promise<boolean> {
+  async ackScopeWarning(cmdId?: string): Promise<boolean> {
     const w = this.status?.scope_warning;
     const p = this.project;
-    if (!w || !p || this.offline) return false;
+    const id = cmdId ?? w?.cmd_id;
+    if (!id || !p || this.offline) return false;
     try {
-      await this.backend.ackScopeWarning(p.pid, w.cmd_id);
+      await this.backend.ackScopeWarning(p.pid, id);
     } catch (e) {
       this.ui.notify('error', errorText(e));
       return false;
     }
     this.ui.scopeCard = false;
-    if (this.status?.scope_warning?.cmd_id === w.cmd_id) {
+    if (w && this.status?.scope_warning?.cmd_id === id) {
       this.status = { ...this.status, scope_warning: { ...w, acked: true } };
     }
     void this.refreshStatus();

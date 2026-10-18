@@ -14,6 +14,7 @@ import { errorText, isAbort } from '../util/errors';
 import { clientRef, type AppApi, type DecideOptions, type OwnDecision, type ProjectCtx, type ProjectPart } from './ctx';
 import { AiStore } from './ai.svelte';
 import { EvidenceStore } from './evidence.svelte';
+import { ExportStore } from './exports.svelte';
 import { FindingsStore } from './findings.svelte';
 import { HostStore } from './host.svelte';
 import { MapStore } from './map.svelte';
@@ -44,6 +45,7 @@ export class ProjectStore implements ProjectCtx {
   readonly findings: FindingsStore;
   readonly ai: AiStore;
   readonly shots: ShotsStore;
+  readonly exports: ExportStore;
   private readonly parts: ProjectPart[];
   private changesTimer: ReturnType<typeof setTimeout> | null = null;
   private changesBusy = false;
@@ -66,7 +68,8 @@ export class ProjectStore implements ProjectCtx {
     this.findings = new FindingsStore(this);
     this.ai = new AiStore(this);
     this.shots = new ShotsStore(this);
-    this.parts = [this.map, this.next, this.host, this.seen, this.terminals, this.timeline, this.evidence, this.findings, this.ai, this.shots];
+    this.exports = new ExportStore(this);
+    this.parts = [this.map, this.next, this.host, this.seen, this.terminals, this.timeline, this.evidence, this.findings, this.ai, this.shots, this.exports];
   }
 
   get signal(): AbortSignal {

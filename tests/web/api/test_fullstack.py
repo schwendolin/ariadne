@@ -65,7 +65,8 @@ def test_api_behind_real_server_headers_sse_presentation(paths, operator):
             ("GET", f"/api/v1/p/{pid}/timeline?limit=0", 422),
             ("GET", f"/api/v1/p/{pid}/hosts/ip%3Adefault%2F1.2.3.4", 404),
             ("GET", "/api/v1/p/0000000000000000/hosts", 409),
-            ("POST", f"/api/v1/p/{pid}/ai/denkanstoss", 501),
+            ("POST", f"/api/v1/p/{pid}/ai/denkanstoss", 403),  # KI ohne Einrichtung aus
+            ("GET", f"/api/v1/p/{pid}/credentials", 501),
             ("POST", "/api/v1/terminals/all/pause", 202),
         ):
             r = await web.req(method, path, token=token, json_body={} if method == "POST" else None)

@@ -57,8 +57,11 @@ async function hostile() {
 }
 
 function noActiveContent(root: ParentNode): void {
-  expect(root.querySelector('img, script, iframe, object, embed, a, svg')).toBeNull();
+  // Etappe 4: eigene Screenshots (blob:-URL aus dem Blob-Store) sind keine Inhalte aus Zieldaten
+  const own = new Set(Array.from(root.querySelectorAll('[data-shot] img')).filter((i) => (i.getAttribute('src') ?? '').startsWith('blob:')));
+  expect(Array.from(root.querySelectorAll('img, script, iframe, object, embed, a, svg')).filter((e) => !own.has(e))).toEqual([]);
   for (const el of Array.from(root.querySelectorAll('*'))) {
+    if (own.has(el)) continue;
     for (const attr of Array.from(el.attributes)) {
       expect(attr.name.startsWith('on'), `${el.tagName} ${attr.name}`).toBe(false);
       expect(['href', 'src', 'srcdoc', 'action'].includes(attr.name), `${el.tagName} ${attr.name}`).toBe(false);

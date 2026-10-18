@@ -3,9 +3,9 @@
  *
  * - Es ist höchstens ein Dialog offen (`dialog`) und höchstens ein Popover (`popover`).
  *   Dialoge rendert App.svelte nach `dialog.kind`; jeder Bereich öffnet sie nur über `openDialog`.
- * - Die Scope-Warnung (Briefing 4.5, Screen 10) ist kein modaler Dialog, sondern eine Meldung
- *   beim Eintreffen (`scopeCard`), die einen offenen Dialog nicht verdrängt; `openDialog({ kind:
- *   'scope-warning' })` öffnet sie wieder (Kennzeichen in der Kopfzeile).
+ * - Die Scope-Warnung steht als erster Eintrag in «Als Nächstes» (E120); `openDialog({ kind:
+ *   'scope-warning' })` (Kennzeichen in der Kopfzeile) setzt `scopeFocus`, der Eintrag nimmt dann
+ *   den Fokus (auch erst nach dem Wechsel auf den Reiter Karte). `scopeCard` merkt nur noch, dass eine neue Warnung eingetroffen ist.
  * - Tafeln (Beleg, Einstellungen) stehen in der URL (`beleg`, `tafel`), nicht hier.
  * - Meldungen nennen nie Zieldaten (feste Texte aus i18n).
  * - Puls («+N seit», E106): `pulse(ids)` erhöht `pulseToken`; Komponenten fragen `isPulsing(id)`
@@ -32,6 +32,8 @@ export class UiStore {
   dialog = $state<DialogRequest | null>(null);
   /** Meldung «Ziel ausserhalb des Scopes» (nicht modal) */
   scopeCard = $state(false);
+  /** Kennzeichen geklickt: der Eintrag in der Spalte nimmt den Fokus, sobald er da ist (E120) */
+  scopeFocus = $state(false);
   /** Element, das den Dialog geöffnet hat (Fokus kehrt dorthin zurück) */
   dialogReturn: HTMLElement | null = null;
   popover = $state<string | null>(null);
@@ -61,6 +63,7 @@ export class UiStore {
     if (req.kind === 'scope-warning') {
       this.popover = null;
       this.scopeCard = true;
+      this.scopeFocus = true;
       return;
     }
     this.dialogReturn = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;

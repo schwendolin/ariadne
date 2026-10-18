@@ -1,6 +1,6 @@
 # Installation in der Kali
 
-Stand 2026-10-18. Ziel: Kali (Xfce, X11) als normaler Benutzer, Ariadne per `pipx` (E84). Das Paket heisst `ariadne-recon`, der Befehl `ariadne`. Die Weboberfläche ist im Paket enthalten; Node brauchst du in der Kali nicht.
+Stand 2026-10-18, geprüft mit einer frischen Installation aus dem Wheel (neues venv, isoliertes HOME: `doctor`, `setup`, `init`, `ai setup`, `start`, `ui`, `stop`, `setup --remove`). Ziel: Kali (Xfce, X11) als normaler Benutzer, Ariadne per `pipx` (E84). Das Paket heisst `ariadne-recon`, der Befehl `ariadne`. Die Weboberfläche ist im Paket enthalten; Node brauchst du in der Kali nicht.
 
 ## 0 Vorbereitung
 
@@ -82,7 +82,7 @@ ariadne doctor            # Zeile «Weboberfläche vorhanden» muss [ok] sein
 ariadne setup             # Shell-Integration in ~/.zshrc und ~/.bashrc, systemd-Unit
 ```
 
-Danach **alle Terminals schliessen** und ein neues öffnen; erst neue Terminals laufen mit Ariadne.
+Vor `setup` meldet `doctor` «Shell-Integration unvollständig» (`[!!]`); das ist richtig und verschwindet mit `setup`. Danach **alle Terminals schliessen** und ein neues öffnen; erst neue Terminals laufen mit Ariadne.
 
 ```sh
 ariadne init              # Operator-Tresor mit Passphrase (mindestens 8 Zeichen); Recovery-Code sicher notieren
@@ -93,11 +93,16 @@ Nach einem VM-Reset mit Sicherung **nicht** `init`, sondern zurückspielen (sieh
 ## 2 KI (optional)
 
 ```sh
-ariadne ai setup          # Anbieter, Modell-ID, Monatslimit; der API-Key wird ohne Echo abgefragt
-ariadne ai check          # Erreichbarkeit und Schlüssel prüfen
+ariadne ai setup          # Anbieter (cloud oder local), Modell-ID, Monatslimit; bei cloud API-Key ohne Echo
+ariadne ai check          # ok, warn oder fail: TLS ohne fremde CA, kein Proxy, Ollama erreichbar
+ariadne ai status         # Anbieter, Modell, Verbrauch des Monats, Schlüssel vorhanden
 ```
 
-Die Modell-ID setzt du selbst (aus der Liste deines Anbieters). Ohne `ai setup` läuft alles ausser den KI-Denkanstössen. Was an die KI geht, läuft vorher durch den Redaktor (E72).
+Die Modell-ID setzt du selbst (aus der Liste deines Anbieters); Ariadne kennt keinen Standard. Ohne `ai setup` läuft alles ausser den KI-Denkanstössen. Was an die KI geht, läuft vorher durch den Redaktor (E72).
+
+- **cloud:** Der API-Key liegt verschlüsselt im Operator-Tresor (darum zuerst `ariadne init`). Pro Projekt braucht es zusätzlich die Freigabe im Terminal: `ariadne ai allow-cloud` (nach `ariadne start`). Im Profil customer und bei öffentlichen Adressen im Scope ohne `--not-customer` bleibt die Cloud gesperrt.
+- **local:** Ollama auf `127.0.0.1` (`ollama serve`), Port 11434; ein anderer Port steht in `~/.config/ariadne/ai.toml` unter `[local]` als `port = …`.
+- Die Preise in `ai.toml` unter `[prices]` sind vorsichtige Platzhalter; an die Preisliste deines Modells anpassen, sonst rechnet das Budget zu hoch.
 
 ## 3 Start
 
@@ -107,11 +112,11 @@ ariadne status
 ariadne ui                # Dashboard im Browser der Kali (Einmal-Code)
 ```
 
-Vom Mac aus: [Anleitung Fernzugriff](anleitung-fernzugriff.md). Ende der Session: `ariadne stop`.
+Im Terminal: `F12 s` nimmt einen Screenshot des aktiven Fensters auf (nur X11, Xfce), `ariadne shot monitor` den ganzen Bildschirm. Bericht: `ariadne export` (Vorlage `cys`, mit `--template htb` die HTB-Vorlage) schreibt nach `~/ariadne/<projekt>/exports/`; dasselbe geht im Dashboard über «Export». Vom Mac aus: [Anleitung Fernzugriff](anleitung-fernzugriff.md). Ende der Session: `ariadne stop`, danach `ariadne backup --to-file PFAD.age`.
 
 ## 4 Aktualisieren und entfernen
 
-Aktualisieren: denselben Weg wie oben mit `pipx install --force …` wiederholen, danach `ariadne daemon stop`, `ariadne setup` und neue Terminals öffnen. `ariadne doctor` meldet eine fehlende oder unvollständige Weboberfläche mit dem Hinweis `pipx reinstall ariadne-recon`.
+Aktualisieren: zuerst `ariadne stop`, dann denselben Weg wie oben mit `pipx install --force …` wiederholen, danach `ariadne daemon stop`, `ariadne setup` und neue Terminals öffnen. `ariadne doctor` meldet eine fehlende oder unvollständige Weboberfläche mit dem Hinweis `pipx reinstall ariadne-recon`.
 
 Entfernen: `ariadne setup --remove`, dann `pipx uninstall ariadne-recon`. Projekte (`~/ariadne`) und Tresor (`~/.local/share/ariadne`) bleiben liegen, bis du sie selbst löschst.
 

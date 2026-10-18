@@ -320,7 +320,8 @@ test('feindliche Hostnamen und Werte: nur Text, gekürzt, Punycode sichtbar, kei
   await expect(page.locator('a[href^="http"]')).toHaveCount(0);
   // Denkanstoss mit dem feindlichen Produkt: Kennzeichen, keine fertige Vorlage, nur Einzelwerte
   const open = await suggestions(page, 'open');
-  const hostile = open.find((s) => s.rule_id === 'R-VERSION-RECHERCHE' && s.title.includes('192.168.56.105:21'));
+  // E119: ein Denkanstoss pro Host (bei einem Dienst «… (192.168.56.105:21)», sonst «… 192.168.56.105 (n Dienste)»)
+  const hostile = open.find((s) => s.rule_id === 'R-VERSION-RECHERCHE' && s.title.includes('192.168.56.105'));
   expect(hostile).toBeTruthy();
   await page.keyboard.press('Escape');
   await page.goto(`${st.base}/karte?sel=${encodeURIComponent(hostile?.suggestion_key ?? '')}`);
@@ -330,7 +331,8 @@ test('feindliche Hostnamen und Werte: nur Text, gekürzt, Punycode sichtbar, kei
   await sug.getByRole('button', { name: /2 Richtung zeigen/ }).click();
   await sug.getByRole('button', { name: /3 Vorlage zeigen/ }).click();
   await expect(sug).toContainText('Enthält Shell-Sonderzeichen. Keine fertige Vorlage.');
-  await expect(sug.locator('.tpl code')).toHaveCount(0);
+  // keine fertige Vorlage mit dem feindlichen Produkt (andere Dienste des Hosts dürfen eine haben)
+  await expect(sug.locator('.tpl code', { hasText: 'sh -c' })).toHaveCount(0);
   await expect(sug).toContainText("vsftpd'; !sh -c 'id");
   await expect(page.locator('img')).toHaveCount(0);
 });

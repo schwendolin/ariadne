@@ -255,7 +255,7 @@ Formparser brauchen eine Schwelle, zum Beispiel mindestens 3 passende Zeilen und
 
 **Warum faraday_plugins nicht für das Terminal:** Das Paket (GPL-3.0, 1.29.0) löst standardmässig Hostnamen per DNS auf (`hostname_resolution=True`, amap ruft `getaddrinfo` sogar direkt auf), was E10 und E49 verletzt. Dazu kommen `lxml` mit `recover=True`, keine Zeilenbelege und Konsolen-Plugins, die den Befehl selbst ausführen wollen. Von den Lab-Tools deckt es nur hydra, nikto, wpscan, whatweb, dirb und nuclei ab. Für Berichtsdateien ginge es nur in einem eigenen Worker ohne Netz, mit `hostname_resolution=False`, nie automatisch.
 
-**KI-Extraktion.** Im Profil lab läuft sie automatisch nur, wenn die Einheit Zielkontext hat, kein Parser sie vollständig verstanden hat (Parser melden dafür `covered_lines`), sie ein Signal enthält (Mention oder Wörter wie user, pass, key, token, admin, root) und Budget frei ist. Vorher ersetzt Ariadne schon erkannte Ziel-Secrets durch Platzhalter `<<S1>>` und packt die Daten in eine Hülle mit Nonce. Der Pseudo-Parser `llm.extract` prüft die Antwort im Worker: Zitat wörtlich in der Einheit, Wert wörtlich im Zitat, Typ stimmt. Ergebnis: Vertrauen `ai`, Konfidenz 0.5, Spur «entscheiden» (Frage 6). Das Zitat beweist nur, dass der Wert in der Ausgabe steht, nicht, dass die KI ihn dem richtigen Konto oder Host zugeordnet hat. Darum entscheidest du. Modell bleibt `claude-opus-5-5` mit Effort `low` (E66). Kosten: Opus 5.5 kostet 4 USD pro Million Eingabe- und 20 USD pro Million Ausgabe-Tokens, das Denken zählt als Ausgabe. Eine Einheit mit 2000 bis 4000 Tokens Eingabe kostet damit grob 1 bis 3 Rappen. Vor dem Bau mit `usage` an echten Einheiten messen.
+**KI-Extraktion.** Im Profil lab läuft sie automatisch nur, wenn die Einheit Zielkontext hat, kein Parser sie vollständig verstanden hat (Parser melden dafür `covered_lines`), sie ein Signal enthält (Mention oder Wörter wie user, pass, key, token, admin, root) und Budget frei ist. Vorher ersetzt Ariadne schon erkannte Ziel-Secrets durch Platzhalter `<<S1>>` und packt die Daten in eine Hülle mit Nonce. Der Pseudo-Parser `llm.extract` prüft die Antwort im Worker: Zitat wörtlich in der Einheit, Wert wörtlich im Zitat, Typ stimmt. Ergebnis: Vertrauen `ai`, Konfidenz 0.5, Spur «entscheiden» (Frage 6). Das Zitat beweist nur, dass der Wert in der Ausgabe steht, nicht, dass die KI ihn dem richtigen Konto oder Host zugeordnet hat. Darum entscheidest du. Modell aus der Konfiguration des Nutzers mit Effort `low` (E66). Kosten: Preise des gewählten Modells laut Preisliste (in `ai.toml` unter `[prices]`), das Denken zählt als Ausgabe. Eine Einheit mit 2000 bis 4000 Tokens Eingabe kostet damit grob 1 bis 3 Rappen. Vor dem Bau mit `usage` an echten Einheiten messen.
 
 **Parser-Fabrik.** `ariadne fixture export <cmd_id>` macht aus einer echten Einheit einen anonymisierten Golden-Fall, gegen den du mit Claude Code den Parser schreibst; das löst nebenbei O07. Eine Kennzahl «Parser-Abdeckung» meldet etwa: «Für kerbrute hast du dreimal KI-Funde bestätigt, ein Parser lohnt sich.»
 
@@ -460,7 +460,7 @@ Die Web-Ebene zeigt danach: http:80 → `/`, `/admin-old/` (Schlüssel helpdesk)
 | E10 und E11, VISION Grundsatz 1 | Webshot als einzige Ausnahme (v0.3) | Webshots zurückstellen, E10 ohne Ausnahme; Recorder leitet nur weiter | 7 |
 | E49 keine DNS-Auflösung von Zielnamen | gilt ohne Ausnahme | Ausnahme nur für Namen, die der Testbrowser selbst anfragt | 7 |
 | E33 weitere Quellen | Burp und HAR v0.2, Browser-Verlauf v0.3, Erweiterung v0.4+ | Recorder v0.2 ersetzt den Browser-Verlauf, Erweiterung v0.3 | 7 |
-| E66 Modell | `claude-opus-5-5` | bleibt; `claude-haiku-5-5` nur als Schalter pro Funktion | |
+| E66 Modell | aus der Konfiguration des Nutzers | ein günstigeres Modell nur als Schalter pro Funktion | |
 
 ### 5.2 Änderungen an der Architektur
 
@@ -612,7 +612,7 @@ Acht Entscheide, jeder mit Empfehlung. Antworte zum Beispiel mit «1a, 2a, 3b ..
 - Ghostwriter: https://www.ghostwriter.wiki/features/operation-logs/setting-up-automated-logging (BSD-3, Oplog)
 - SysReptor: https://docs.sysreptor.com/cli/tools/burp (CLI-Importer abgekündigt)
 - LangExtract: https://github.com/google/langextract (1.6.0 vom 02.07.2026, Treffer auf Zeichen-Offsets)
-- Claude API, Citations: https://platform.claude.com/docs/en/build-with-claude/citations.md (nicht mit `output_config.format` kombinierbar, bestätigt durch die claude-api-Referenz); Preise laut claude-api-Referenz, Stand 06.10.2026: `claude-opus-5-5` 4 USD und 20 USD pro Million Eingabe- bzw. Ausgabe-Tokens
+- Claude API, Citations: https://platform.claude.com/docs/en/build-with-claude/citations.md (nicht mit `output_config.format` kombinierbar, bestätigt durch die claude-api-Referenz); Preise laut claude-api-Referenz (Stand 06.10.2026) für das vom Nutzer gewählte Modell
 
 **Browser** (abgerufen 2026-10-14):
 

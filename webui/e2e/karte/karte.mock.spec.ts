@@ -236,7 +236,7 @@ test.describe('Als Nächstes', () => {
     await expect(col.getByRole('button', { name: /ausführen/i })).toHaveCount(0);
     const ai = col.getByRole('button', { name: /Denkanstoss anfordern \(KI\)/ });
     await expect(ai).toBeDisabled();
-    await expect(ai).toHaveAttribute('title', /späteren Version/);
+    await expect(ai).toHaveAttribute('title', /KI ist aus/);
     await sug.getByRole('button', { name: 'Erledigt' }).click();
     await expect(col.locator('.done').first()).toContainText('Unauthentisierten Zugriff');
     await expect(col.locator('.card')).toContainText('Version recherchieren');

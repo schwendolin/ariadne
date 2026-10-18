@@ -287,6 +287,8 @@ Dateien ausserhalb des Projekts erscheinen nur als Vorschlag in der Warteliste, 
 
 ### 4.3 Screenshots
 
+> **Stand Etappe 4 (gebaut, 2026-10-18):** Nur X11. Aufgenommen wird in einem eigenen Worker (`python -I -m ariadne.sources.screenshot_worker`, kleine Umgebung, Zeitlimit) mit `mss`; Fenstergeometrie per `python-xlib` (`_NET_ACTIVE_WINDOW`, sonst Eingabefokus, mit `_NET_FRAME_EXTENTS`). Modi: Fenster, Monitor unter dem Mauszeiger, Bereich nur per Koordinaten (keine Auswahl mit der Maus, kein flameshot). Pillow fehlt, darum kodiert Ariadne das PNG selbst (nur IHDR, IDAT, IEND) und prüft es mit `check_png`; fremde Bilder werden nicht neu kodiert und darum nicht ausgeliefert. Ablage: Blob `kind = 'screenshot'` plus `shot.captured` mit Terminal, Stromposition, Host, Kontextstapel, dHash, Fenstertitel und WM_CLASS (Steuerzeichen zu Leerzeichen, höchstens 300 Zeichen). Auslöser: `F12 s` (Ergebnis im Terminaltitel), `ariadne shot`, `POST /screenshots` (Countdown im Server). Sitzung: Umgebung der CLI, dann `HELLO` des Terminals, dann eigene Umgebung oder ein Prozess derselben UID. Ohne X11 die festen Meldungen `shot_display` bzw. `shot_wayland`. Die Pixel sind nicht redigiert; der Export übernimmt nur eigene Screenshot-Blobs. API: [web-api.md](web-api.md) 19.3.
+
 Aufgenommen wird immer im Daemon. Shim-Hotkey `s`, Web-Knopf und `ariadne shot` (CLI, Desktop-Kürzel) senden nur eine Anfrage. Die Display-Umgebung (`DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`) kommt aus dem `HELLO` des Shims bzw. von der CLI, denn ein systemd-User-Dienst kennt sie unter Xfce nicht zuverlässig.
 
 | Sitzung | Monitor, Fenster | Bereich | Version |
@@ -627,6 +629,8 @@ Der Grund für die Stufen: Ein Ziel kann jederzeit `root@db01:~# rm -rf /var/lib
 
 ## 6 KI und Denkanstösse
 
+> **Stand Etappe 4 (gebaut, 2026-10-18):** Gebaut ist 6.3 «Denkanstoss auf Knopfdruck» (`ariadne.ai`). Anbieter `off` (Standard), `cloud` (Anthropic-SDK mit eigenem HTTP-Client ohne Umgebungs-Proxy und fester Basis-URL, adaptives Denken, Effort `high`, strukturierte Ausgabe über `output_config.format`, ohne Werkzeuge) und `local` (Ollama nur auf `127.0.0.1`). Das Modell setzt der Nutzer in `ai.toml` (`ariadne ai setup`); im Repo steht keine Modellkennung. Der API-Key liegt im Operator-Tresor. Das Lagebild entsteht deterministisch aus der Projektion (nie aus Rohausgaben), mit einem Encoder pro Werteart, in einer Hülle mit Nonce, höchstens etwa 8000 Zeichen, zweimal durch `redact_for_exit`. Die Antwort wird streng geprüft (höchstens 4 Einträge, «bestätigt, wenn» und «widerlegt, wenn» Pflicht, Belege nur aus dem Lagebild, Ziele nur aus dem Katalog, Vorlagen nur aus der Bibliothek E68; verdächtiger Freitext fällt weg und zählt als Injection-Verdacht). Ergebnis als Entscheid `d.ai.denkanstoss`, Zustand wie bei Regeln über `d.suggestion.done`/`dismiss`; die Einträge stehen in `/next` und `/suggestions` vor den Regeln. Cloud braucht die Freigabe `d.ai.allow_cloud` pro Projekt (nur Terminal) und ist im Profil customer sowie bei öffentlichen Adressen im Scope ohne `d.lab.not_customer` gesperrt. Budget pro Operator und Monat (`ai-budget.json`), Warnung ab 80 %, ab 100 % nur mit Bestätigung. Nicht gebaut: Extraktion, Zusammenfassung, Vision, Fragen an die Karte (6.3 übrige Funktionen). API: [web-api.md](web-api.md) 19.1.
+
 Vorschläge kommen aus zwei Quellen: der Regel-Engine (immer aktiv, offline, erklärbar) und dem LLM-Gateway (optional, durch Policy gesteuert). Beide erzeugen nur Vorschläge, nie bestätigte Fakten. Kein Modellaufruf bekommt Werkzeuge. Ein Modell kann nichts auslösen, es liefert nur strukturierte Daten, die Ariadne prüft. Ohne Netz und ohne Budget bleibt Ariadne voll nutzbar.
 
 ### 6.1 Regel-Engine, Prüfziele, Befehlsbibliothek
@@ -673,7 +677,7 @@ Aufrufe sind Jobs in einer persistenten Queue (`state.db`). Manuelle Jobs gehen 
 
 **Provider**
 
-- `ClaudeProvider`: Python-SDK `anthropic`, Default-Modell `claude-opus-5-5`. Ein günstigeres Modell (`claude-sonnet-5-5`, `claude-haiku-5-5`) nur, wenn der Nutzer es pro Funktion wählt. Adaptive Thinking (`thinking={"type": "adaptive"}`), Effort pro Funktion explizit gesetzt (Extraktion und Zusammenfassung `low`, Vision und Fragen `medium`, Denkanstösse `high`), denn der Default bei Opus 5.5 ist `medium`. Strukturierte Ausgaben über `output_config.format`, ohne Tools und ohne Prefill. Die Schemas bleiben in der unterstützten JSON-Schema-Teilmenge (`additionalProperties: false` überall, keine `minimum`, `maxLength` usw.). Grenzen prüft die eigene Validierung.
+- `ClaudeProvider`: Python-SDK `anthropic`, Modell aus der Konfiguration des Nutzers (`ai.toml`, `ariadne ai setup`); Ariadne nennt im Code und in der Doku keine Modellkennung. Adaptive Thinking (`thinking={"type": "adaptive"}`), Effort pro Funktion explizit gesetzt (Extraktion und Zusammenfassung `low`, Vision und Fragen `medium`, Denkanstösse `high`), denn der Default des Modells ist meist `medium`. Strukturierte Ausgaben über `output_config.format`, ohne Tools und ohne Prefill. Die Schemas bleiben in der unterstützten JSON-Schema-Teilmenge (`additionalProperties: false` überall, keine `minimum`, `maxLength` usw.). Grenzen prüft die eigene Validierung.
 - Das SDK bekommt einen eigenen `http_client` (`DefaultHttpxClient`), der die Proxy-Variablen der Umgebung nicht übernimmt. Sonst laufen API-Key und Payloads durch Burp, falls `HTTPS_PROXY` in der Shell gesetzt ist. Den genauen Parameter prüfen (zu verifizieren).
 - `OllamaProvider`: `POST /api/chat` mit `format` (JSON-Schema), `images` und `stream: false`. Als «lokal» gelten nur `127.0.0.1` und `::1`. Ein Ollama auf einem anderen Rechner nur über SSH-Tunnel, als eigene Policy-Klasse «eigenes Netz». Ollama-Antworten sind nicht vertrauenswürdig, der Modell-Digest wird mitprotokolliert.
 
@@ -745,7 +749,7 @@ import anthropic
 class ClaudeProvider:
     cloud = True
 
-    def __init__(self, api_key: str, modell: str = "claude-opus-5-5"):
+    def __init__(self, api_key: str, modell: str):  # Modell aus ai.toml
         self.client = anthropic.Anthropic(
             api_key=api_key,  # aus dem Operator-Tresor
             http_client=anthropic.DefaultHttpxClient(),  # ohne Umgebungs-Proxy, zu verifizieren
@@ -979,6 +983,8 @@ Keine eigene Kryptografie. Beide Formate lassen sich im Notfall mit den Kali-Pak
 
 ### 8.5 Eigene Secrets
 
+> **Stand Etappe 4:** KI-Gateway und Export nutzen den Redaktor jetzt tatsächlich: Das Lagebild läuft zweimal durch `redact_for_exit`, der Export ersetzt eigene Secrets immer und maskiert Ziel-Credentials mit `••••••••` (bekannte Werte aus `secret_value`, Secret-Bereiche der Parser, verdeckter Text, Zeilen ohne Echo) und schickt jede Datei vor dem Schreiben noch einmal durch den Redaktor. Klartext von Ziel-Credentials nur im Profil lab mit `ariadne export --klartext` und getipptem `KLARTEXT`; die Web-API lehnt Klartext immer ab (403 `policy`).
+
 Seit E72 speichert das Journal alles ungeschwärzt, nur verschlüsselt (E71): Output, Eingaben, Marker, Begleitdateien und Importe (`file.observed.redactions` bleibt leer). Es gibt genau einen Redaktor, `ariadne.secrets.redactor`. Er ersetzt eigene Secrets erst an den Ausgängen, mit der Ausgangs-API:
 
 - `Redactor.redact_for_exit(text | bytes) -> (gleicher Typ, labels)` und `Redactor.redact_json(obj) -> (kopie, labels)`. Nur exakte Treffer der eigenen Liste (Operator-Tresor, dazu zur Laufzeit `ariadne:passphrase` und `ariadne:recovery`), längenerhaltend in Bytes. Die Instanz ist `Daemon.redactor`.
@@ -992,6 +998,8 @@ CLI-Befehle, die Schlüsselmaterial abfragen oder zeigen (`init`, `unlock`, `sta
 
 ### 8.6 Daemon-Betrieb
 
+> **Stand Etappe 4:** Neue ctl-Operationen als Erweiterungen am Ende von `daemon/core.py` (`_OPS.update`): `ai.status`, `ai.key.set`, `ai.key.remove`, `ai.allow_cloud` (Teil «ki», nur CLI), `export.run`, `export.list`, `export.phases`, `export.phase` (Teil «export») und `shot.take` (Teil «screenshots»). Je ein KI-Auftrag, ein Export und eine Aufnahme gleichzeitig pro Daemon (sonst `conflict`); ihr Zustand liegt nur im Speicher. Der Daemon meldet `screenshot` an den Web-Server, der es als SSE-Ereignis nur mit Kennungen weitergibt.
+
 - `ariadne setup` ist der einzige Installer: Launcher, `init.zsh` und `init.bash` (fish ab v0.2), RC-Zeile zwischen Markern, systemd-User-Units. `ariadne setup --remove` baut alles zurück.
 - Zwei Sockets mit klaren Rollen: `term.sock` (Binärrahmen für Shims) und `ctl.sock` (JSON für CLI und Einmalcodes). Ein Service `ariadned.service` mit `Type=notify`, `Restart=on-failure`, `UMask=0077`, `LimitCORE=0`, `NoNewPrivileges=yes`. Ohne systemd startet die CLI den Daemon mit `--detach` und `flock`.
 - Shim-Verbindungen nimmt der Daemon nur von Prozessen an, deren `/proc/<pid>/exe` der Interpreter des Ariadne-venv ist und deren `comm` `ariadne-shim` lautet.
@@ -1001,6 +1009,8 @@ CLI-Befehle, die Schlüsselmaterial abfragen oder zeigen (`init`, `unlock`, `sta
 - Speicher-Wächter: Unter 2 GiB freiem Platz schaltet der Daemon auf «nur Metadaten», schreibt Gaps und warnt deutlich. Grosse Output-Chunks werden vor der Verschlüsselung komprimiert (zstd).
 
 ### 8.7 Export
+
+> **Stand Etappe 4 (gebaut, 2026-10-18):** Abweichend von der Skizze unten heisst der Ordner `<projekt>/exports/<YYYYMMDDTHHMMSSZ>-<vorlage>[-n]/`, dazu kommen `03 Findings.md` (Schwere, Massnahme, ATT&CK, CVE; beide gelten als Hypothese, bis sie belegt sind), `Belege/<kurz-id>-<slug>.md` statt `<event-id>.md`, `Belege/Screenshots.md` und `Belege/img/<sha16>.png` (nur eigene Screenshots, kanonisches PNG). Die Phasen schlagen Regeln in `ingest/proj_phases.py` vor (nach Programmname ohne `sudo`, `proxychains`, `timeout`, Interpreter, und nach Kontext); korrigiert wird per Entscheid `d.unit.phase` (jüngster nicht widerrufener je Vorlage und Befehl gilt, übersteht Reparse; Web: `POST /exports/phases`). Einziger Markdown-Encoder ist `export/mdsafe.py` (E13). Gesammelt wird nur lesend im Thread der Auswertung; `writer.py` schreibt per `openat` mit `O_NOFOLLOW | O_EXCL`, Dateien 0600, Ordner 0700, und warnt bei Sync-Ordnern (`sync_folder`) und generischen Secret-Mustern (`generic_secret`). Keine Mermaid-Grafik. API: [web-api.md](web-api.md) 19.2.
 
 Ein Exporter `ariadne.export`, ausgelöst per Web-UI oder `ariadne export`. Ziel ist immer `<projekt>/exports/<UTC>/`. Einen Export in einen Obsidian-Vault gibt es nicht.
 

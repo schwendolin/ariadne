@@ -392,6 +392,45 @@ def _keystep_unit(conn: Any, k: Mapping[str, Any]) -> str | None:
     return str(row[0]) if row else None
 
 
+def _shots(
+    journal: Any, jconn: Any, read_blob: Callable[[str], bytes] | None, m: Any
+) -> list[dict[str, Any]]:
+    """Screenshots aus ``shot.captured`` (Teil «screenshots»): nur Blobs, die Ariadne selbst als Screenshot
+    abgelegt hat (``blob.kind = 'screenshot'``), nur kanonisches PNG (``check_png``). Die Pixel sind nicht
+    redigiert; Fenstertitel und Notiz gehen wie Zieldaten durch den Maskierer."""
+    from ariadne.sources.screenshot import check_png
+    from ariadne.sources.screenshot_service import BLOB_KIND
+
+    if journal is None or not hasattr(journal, "iter_events"):
+        return []
+    out: list[dict[str, Any]] = []
+    for r in journal.iter_events(kinds=["shot.captured"]):
+        if len(out) >= 500:
+            break
+        h = r.header if isinstance(r.header, dict) else {}
+        blob_id, sha = h.get("blob_id"), h.get("sha256")
+        data: bytes | None = None
+        if read_blob is not None and jconn is not None and isinstance(blob_id, str):
+            try:
+                row = jconn.execute("SELECT kind FROM blob WHERE blob_id = ?", (blob_id,)).fetchone()
+                if row is not None and row[0] == BLOB_KIND:
+                    data = read_blob(blob_id)
+                    check_png(data)
+            except Exception:  # noqa: BLE001 - fehlt oder kein kanonisches PNG: nur vermerken
+                data = None
+        title = h.get("window_title") or h.get("note")
+        out.append(
+            {
+                "unit_id": None,
+                "sha256": sha if isinstance(sha, str) else None,
+                "ts": iso_ms(r.ts_utc_ns),
+                "data": data if isinstance(data, bytes) and len(data) <= _IMG_MAX else None,
+                "title": m.target(title) if isinstance(title, str) and title else None,
+            }
+        )
+    return out
+
+
 def collect(
     conn: Any,
     journal: Any,
@@ -538,6 +577,8 @@ def collect(
                 "title": m.target(path) if path else None,
             }
         )
+
+    images.extend(_shots(journal, jconn, read_blob, m))
 
     head = journal.read_head() if journal is not None and hasattr(journal, "read_head") else (0, b"")
     times = [

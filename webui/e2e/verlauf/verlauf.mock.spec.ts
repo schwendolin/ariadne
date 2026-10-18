@@ -174,19 +174,19 @@ test.describe('Terminals und Kontext', () => {
 });
 
 test.describe('Dialoge', () => {
-  test('Export und Screenshot aus dem Menü: gesperrt mit Hinweis', async ({ page }) => {
+  test('Export und Screenshot aus dem Menü (Etappe 4: aktiv)', async ({ page }) => {
     await openMock(page, 'normal', '/zeitachse');
     await page.getByRole('button', { name: 'Menü' }).click();
     await page.getByRole('menuitem', { name: 'Bericht exportieren …' }).click();
     const exp = page.getByRole('dialog', { name: 'Bericht exportieren' });
-    await expect(exp).toContainText('späteren Version');
-    await expect(exp.getByRole('button', { name: /^Exportieren/ })).toBeDisabled();
+    await expect(exp).toContainText('ariadne export --klartext');
+    await expect(exp.getByRole('button', { name: /^Exportieren/ })).toBeEnabled();
     await page.keyboard.press('Escape');
     await expect(exp).toBeHidden();
     await page.getByRole('button', { name: 'Menü' }).click();
     await page.getByRole('menuitem', { name: 'Screenshot der Kali …' }).click();
     const shot = page.getByRole('dialog', { name: 'Screenshot der Kali' });
-    await expect(shot.getByRole('button', { name: /^Auslösen/ })).toBeDisabled();
+    await expect(shot.getByRole('button', { name: /^Auslösen/ })).toBeEnabled();
     await shot.getByRole('button', { name: 'Schliessen' }).click();
     await expect(shot).toBeHidden();
   });
@@ -206,7 +206,10 @@ test.describe('feindliche Werte', () => {
     const p = panel(page);
     await expect(p.locator('.line')).toHaveCount(3);
     await expect(p).toContainText('<U+202E>');
-    const bad = await page.evaluate(() => document.querySelectorAll('main img, main script, main iframe, main a[href^="http"]').length);
+    // Etappe 4: eigene Screenshots (blob:-URL aus dem Blob-Store im Streifen) zählen nicht
+    const bad = await page.evaluate(
+      () => Array.from(document.querySelectorAll('main img, main script, main iframe, main a[href^="http"]')).filter((e) => !(e.closest('[data-shot]') && (e.getAttribute('src') ?? '').startsWith('blob:'))).length,
+    );
     expect(bad).toBe(0);
     expect(await page.evaluate(() => (window as unknown as { __pwned?: boolean }).__pwned ?? false)).toBe(false);
   });

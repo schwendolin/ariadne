@@ -14,7 +14,8 @@ import tomlkit
 __all__ = ["SCHEMA", "DEFAULT_MODEL", "SettingsError", "default_settings", "parse_settings"]
 
 SCHEMA = "ariadne.project/1"
-DEFAULT_MODEL = "claude-opus-5-5"
+# Kein Modell im Code: Das Modell setzt der Nutzer mit `ariadne ai setup` (ai.toml, Teil «ki»).
+DEFAULT_MODEL = ""
 
 
 class SettingsError(ValueError):

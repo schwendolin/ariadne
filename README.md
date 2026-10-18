@@ -2,7 +2,7 @@
 
 Flugschreiber und Kartograf für Pentests unter Linux. Ariadne nimmt Terminals, Dateien und Screenshots auf, liest daraus Hosts, Services und Zugänge aus und malt Schritt für Schritt eine Karte der Zielumgebung. Zu jedem Fakt zeigt es die Quelle. Ariadne beobachtet und gibt Denkanstösse, greift aber nie selbst an.
 
-Status: v0.1 im Bau (Stand 2026-10-18). Aufnahme, verschlüsseltes Journal und Auswertung mit Karte laufen über die CLI; dazu das Dashboard im Browser nach Design v0.1 (Karte, «Als Nächstes» mit Denkanstössen aus Regeln, Terminals, Zeitachse, Belege, Findings), Sicherung und Fernzugriff vom Mac. KI-Denkanstösse, Screenshots und Export folgen. Nicht für Kundendaten.
+Status: v0.1 im Bau (Stand 2026-10-18). Aufnahme, verschlüsseltes Journal und Auswertung mit Karte laufen über die CLI; dazu das Dashboard im Browser nach Design v0.1 (Karte, «Als Nächstes» mit Denkanstössen aus Regeln, Terminals, Zeitachse, Belege, Findings), Sicherung und Fernzugriff vom Mac, seit Etappe 4 auch KI-Denkanstösse auf Knopfdruck, Screenshots (X11) und der Bericht-Export als Markdown. Nicht für Kundendaten.
 
 ## Im Alltag
 
@@ -12,7 +12,10 @@ Einmal einrichten (Kali, normaler Benutzer):
 pipx install <wheel oder git-URL>   # Paket ariadne-recon, Befehl ariadne
 ariadne setup                        # Zeile in .zshrc/.bashrc, systemd-Dienst
 ariadne init                         # Operator-Tresor: Passphrase, Recovery-Code offline aufbewahren
+ariadne ai setup                     # optional: KI-Anbieter (cloud oder local) und Modell-ID
 ```
+
+Alle Wege ins private Repo (Deploy-Key, Token ohne Echo, Wheel über die Datei-Übertragung) und die Prüfung mit `ariadne doctor` stehen in [docs/installation.md](docs/installation.md).
 
 Danach offene Terminals einmal neu öffnen. Ohne Projekt zeigt der Fenstertitel `[kein Projekt (Vorlauf 15 min)]`: Ariadne hält die letzten Minuten nur im Arbeitsspeicher.
 
@@ -63,6 +66,12 @@ Eine Anmeldung gilt höchstens 12 Stunden und endet mit `lock`, `stop`, einem Ne
 
 Im Dashboard steht links die Karte (Kali, Scope-Segmente, Hosts mit Zugriff, Nebel und Sackgassen, der rote Faden der Schlüsselschritte), rechts die Spalte «Als Nächstes»: zuerst, was du klären musst (Kontext einer Reverse Shell, Zusammenführen, Widersprüche), dann Denkanstösse mit Begründung, Beleg und Befehlsvorlage zum Kopieren. Ausgeführt wird nie etwas. Dazu die Reiter Terminals, Zeitachse (mit Rückgängig pro Befehl) und Findings; jeder Wert führt zu seinem Beleg bis zur Logzeile. Tasten: `1` bis `4` Reiter, `j k` wechseln, `a x e u` annehmen, verwerfen, ändern, rückgängig, `↵` Beleg, `⌘K` bzw. `Strg K` Palette, `⇧P` Präsentationsmodus (Secrets und Eingaben ohne Echo bleiben verdeckt), `?` Hilfe. Secrets kopiert «In die Kali» über den Daemon, nie in die Zwischenablage des Browsers. Die Schnittstelle beschreibt [docs/web-api.md](docs/web-api.md), die Oberfläche [webui/README.md](webui/README.md).
 
+## KI, Screenshots und Export
+
+- **KI-Denkanstoss** (optional): Knopf «Denkanstoss anfordern (KI)» in der Spalte «Als Nächstes». Ariadne schickt ein knappes Lagebild aus der Karte (nie Rohausgaben, eigene Secrets ersetzt) an den Anbieter aus `ariadne ai setup`: `cloud` (Anthropic-API, pro Projekt mit `ariadne ai allow-cloud` freigeben) oder `local` (Ollama auf `127.0.0.1`). Zurück kommen höchstens vier geprüfte Hypothesen, Fragen oder Prüfziele mit «bestätigt, wenn» und «widerlegt, wenn»; Befehle nur aus der Vorlagenbibliothek. Monatslimit mit Warnung ab 80 %; `ariadne ai status` zeigt den Verbrauch.
+- **Screenshots** (X11): `F12 s` im Terminal (aktives Fenster), `ariadne shot window|monitor|region`, im Dashboard mit Countdown. Gespeichert verschlüsselt als PNG ohne Metadaten, mit Terminal, Host und Zeit; die Pixel selbst werden nicht geschwärzt.
+- **Export**: `ariadne export` (Vorlage `cys`, `--template htb`) oder «Export» im Dashboard schreibt Markdown nach `~/ariadne/<projekt>/exports/<zeit>-<vorlage>/`: Übersicht, Angriffspfad, Writeup nach Phasen, Findings, Hosts, Zeitachse, Belege mit Kettenkopf und `manifest.json`. Ziel-Credentials sind maskiert; Klartext nur im Terminal (`--klartext`, Profil lab). Phasen der Befehle prüfst und korrigierst du in der Zeitachse oder mit `ariadne export --phasen` und `--phase`.
+
 ## Sicherung
 
 Die Schule kann die VM jederzeit zurücksetzen. Darum nach jeder Session sichern, verschlüsselt mit age an Empfänger ausserhalb der VM (`~/.config/ariadne/backup-recipients.txt`, eine Zeile `age1…` pro Empfänger):
@@ -85,6 +94,7 @@ Mit Tailscale und SSH erscheint das Dashboard im Browser des Macs, die Passphras
 - [Lösungsarchitektur](docs/architektur.md): Teilsysteme, Datenmodell, Sicherheitsarchitektur, Roadmap im Detail
 - [Entwicklung](docs/entwicklung.md): Umgebung, Tests, Landkarte der Module, bekannte Grenzen
 - [Web-API](docs/web-api.md): HTTP-Schnittstelle des Dashboards (v2)
+- [Installation](docs/installation.md) und [Praxistest](docs/praxistest.md): Installation in der Kali, Checkliste für den ersten echten Lauf
 - [Anleitung Fernzugriff](docs/anleitung-fernzugriff.md) und [Konzept Fernzugriff](docs/konzept-fernzugriff.md): Dashboard auf dem Mac, Sicherung, Sicherheitskonzept
 - [Entscheidungsprotokoll](docs/entscheide.md): was entschieden wurde, warum und von wem
 - [Fragenkatalog](docs/fragenkatalog.md): Brainstorming mit Antwortoptionen und Empfehlungen

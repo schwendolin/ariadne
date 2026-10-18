@@ -326,25 +326,28 @@ test.describe('Hell und dunkel (E112)', () => {
   });
 });
 
-test.describe('Scope-Warnung', () => {
-  test('Meldung beim Eintreffen, Kennzeichen bis zum Quittieren, danach weg', async ({ page }) => {
+test.describe('Scope-Warnung (E120: erster Eintrag der Spalte)', () => {
+  test('Eintrag vor «Klären», Kennzeichen bis zum Quittieren, danach weg; keine Karte unten rechts', async ({ page }) => {
     await openMock(page, 'scope');
-    const card = page.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ });
-    await expect(card).toContainText(/T1: nmap -6 -sV -oX scans\/v6\.xml fd00:56::101/);
-    await expect(card).toContainText('liegt nicht in 192.168.56.0/24');
+    const entry = page.locator('[data-scope-entry]');
+    await expect(entry).toContainText(/T1: nmap -6 -sV -oX scans\/v6\.xml fd00:56::101/);
+    await expect(entry).toContainText('liegt nicht in 192.168.56.0/24');
+    await expect(page.getByRole('alert', { name: /Ziel ausserhalb des Scopes/ })).toHaveCount(0);
     await expect(header(page).locator('[data-badge="scope"]')).toBeVisible();
-    // nicht modal: die Tastatur der Seite wirkt weiter
-    await page.locator('body').click({ position: { x: 300, y: 600 } });
-    await page.keyboard.press('2');
-    await expect(page).toHaveURL(/\/terminals/);
-    await card.getByRole('button', { name: 'Quittieren' }).click();
-    await expect(card).toBeHidden();
+    // erster Eintrag der Spalte: vor der Gruppe «Klären»
+    const first = await page.locator('section[data-keyzone="next"] .body > *').first().getAttribute('data-scope-entry');
+    expect(first).not.toBeNull();
+    await entry.getByRole('button', { name: 'Quittieren' }).click();
+    await expect(entry).toHaveCount(0);
     await expect(header(page).locator('[data-badge="scope"]')).toHaveCount(0);
   });
 
-  test('«In der Zeitachse» führt zur Zeile des Befehls', async ({ page }) => {
-    await openMock(page, 'scope');
-    await page.getByRole('alert').getByRole('button', { name: 'In der Zeitachse' }).click();
+  test('Kennzeichen führt zum Eintrag; «In der Zeitachse» führt zur Zeile des Befehls', async ({ page }) => {
+    await openMock(page, 'scope', '/terminals');
+    await header(page).locator('[data-badge="scope"]').click();
+    await expect(page).toHaveURL(/\/karte/);
+    await expect(page.locator('[data-scope-entry]')).toBeFocused();
+    await page.locator('[data-scope-entry]').getByRole('button', { name: 'In der Zeitachse' }).click();
     await expect(page).toHaveURL(/\/zeitachse\?(.*&)?zeile=[^&]+%40\d+/);
   });
 });

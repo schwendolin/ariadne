@@ -34,11 +34,18 @@ def _inbox_keys(conn: Any) -> list[str]:
     return [str(r[0]) for r in rows]
 
 
+_SHOT_TRIGGERS = frozenset({"hotkey", "cli", "webui"})
+
+
 def _count_suggestions(conn: Any, profile: str) -> int | None:
-    """Zahl offener Denkanstösse (web-api.md 18.9); ``None``, solange die Regel-Engine ein Stub ist."""
+    """Zahl offener Denkanstösse der Regeln und der KI (web-api.md 18.9); ``None``, solange die
+    Regel-Engine ein Stub ist."""
     if rules_api.STUB:
         return None
-    return int(rules_api.open_count(conn, profile=profile))
+    from ariadne.ai import store as ai_store
+
+    ai = len(ai_store.suggestions(conn, profile=profile, state="open", limit=1000)[0])
+    return int(rules_api.open_count(conn, profile=profile)) + ai
 
 
 class _Sources:
@@ -88,6 +95,11 @@ class _Sources:
             self._pub("project", {"project_id": None, "change": kind, "locked": kind == "locked"})
         elif kind == "presentation":
             self._pub("presentation", {"on": bool(data.get("on"))})
+        elif kind == "screenshot":
+            # Nur Kennungen und feste Wörter, nie Fenstertitel oder Notiz (die holt die Liste).
+            pid, sid, trigger = data.get("project_id"), data.get("id"), data.get("trigger")
+            if isinstance(pid, str) and isinstance(sid, str) and trigger in _SHOT_TRIGGERS:
+                self._pub("screenshot", {"project_id": pid, "id": sid, "trigger": trigger})
         elif kind == "job":
             status = data.get("status")
             job_kind = data.get("kind")

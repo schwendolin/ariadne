@@ -15,7 +15,6 @@ import httpx2
 from ariadne.ai import store
 from ariadne.ai.config import AiConfig, save_config
 from ariadne.ai.providers import CloudProvider
-from ariadne.store.api import AppendItem
 from tests.web.api.helpers import BASE, HOSTILE, OWN_SECRET, TARGET, all_strings, clean, run_api, sync
 
 API_KEY = "sk-test-CANARY-KEY-0123456789"
@@ -202,15 +201,37 @@ def test_denkanstoss_end_to_end_policy_secrets_and_state(paths, operator):
             await check("d.suggestion.done", {"suggestion_key": hyp["suggestion_key"], "basis": hyp["basis"]})
             is True
         )
-        d.submit(
-            AppendItem(
-                "d.suggestion.done",
-                {"suggestion_key": hyp["suggestion_key"], "basis": hyp["basis"]},
-                origin="webui",
-            )
+        # Integration: KI-Denkanstösse stehen in /next und /suggestions (vorne, Form mit items)
+        nxt = (await c.get(f"{P}/next")).json()["suggestions"]
+        assert [s["suggestion_key"] for s in nxt[:2]] == [s["suggestion_key"] for s in items]
+        assert all(s["items"] == [] for s in nxt[:2])
+        listed = (await c.get(f"{P}/suggestions")).json()["suggestions"]
+        assert hyp["suggestion_key"] in [s["suggestion_key"] for s in listed]
+        # Erledigen über POST /decisions (geprüft mit store.check_decision)
+        r = await c.post(
+            f"{P}/decisions",
+            json={
+                "decisions": [
+                    {"kind": "d.suggestion.done", "payload": {"suggestion_key": hyp["suggestion_key"]}}
+                ]
+            },
         )
-        d.flush()
+        assert r.status_code == 422  # basis fehlt
+        r = await c.post(
+            f"{P}/decisions",
+            json={
+                "decisions": [
+                    {
+                        "kind": "d.suggestion.done",
+                        "payload": {"suggestion_key": hyp["suggestion_key"], "basis": hyp["basis"]},
+                    }
+                ]
+            },
+        )
+        assert r.status_code == 201, r.text
         await sync(d)
+        done_all = (await c.get(f"{P}/suggestions", params={"state": "done"})).json()["suggestions"]
+        assert hyp["suggestion_key"] in [s["suggestion_key"] for s in done_all]
         open_ = (await c.get(f"{P}/ai/denkanstoesse")).json()["suggestions"]
         done = (await c.get(f"{P}/ai/denkanstoesse", params={"state": "done"})).json()["suggestions"]
         assert [s["suggestion_key"] for s in done] == [hyp["suggestion_key"]]

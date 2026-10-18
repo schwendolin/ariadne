@@ -22,7 +22,7 @@
   import Popover from '../ui/Popover.svelte';
   import SecretValue from '../ui/SecretValue.svelte';
   import Txt from '../ui/Txt.svelte';
-  import { url, type EvidenceTarget } from '../url/state.svelte';
+  import { url, type LogEvidenceTarget as EvidenceTarget } from '../url/state.svelte';
   import { copyText } from '../util/clipboard';
   import { errorCode, errorText } from '../util/errors';
   import { termName } from '../util/format';

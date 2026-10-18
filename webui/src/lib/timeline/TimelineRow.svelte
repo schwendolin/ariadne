@@ -44,7 +44,7 @@
     onopen: () => void;
     onundo: () => void;
     /** Inhalt unter der Zeile (Rückgängig inline) */
-    below?: Snippet;
+    below?: Snippet<[TimelineItem]>;
   } = $props();
   const SEP = ' · ';
   const SP = ' ';
@@ -302,7 +302,7 @@
       {/if}
     </span>
   </div>
-  {#if below}<div class="below">{@render below()}</div>{/if}
+  {#if below}<div class="below">{@render below(item)}</div>{/if}
 </li>
 
 <style>

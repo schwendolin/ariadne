@@ -32,12 +32,15 @@
   import { encodeEvidence, url } from '../url/state.svelte';
   import { hhmm } from '../util/time';
   import KaliDetail from './KaliDetail.svelte';
+  import ShotStrip from '../shots/ShotStrip.svelte';
   import ServicesBlock from './ServicesBlock.svelte';
 
   let { app, project, hostId, onback }: { app: AppState; project: ProjectStore; hostId: string; onback: () => void } = $props();
 
   const store = $derived(project.host);
   const d = $derived(store.detail && store.detail.id === hostId ? store.detail : null);
+  // Etappe 4: Screenshots, deren Kontext bei der Aufnahme dieser Host war
+  const hostShots = $derived(d ? project.shots.forHost([d.label, ...(d.addresses ?? [])]) : []);
   const node = $derived(project.map.host(hostId));
   const fog = $derived(d ? d.claim_state === 'candidate' : node?.claim_state === 'candidate');
   const blocked = $derived(store.busy ? t('host.loading') : app.offline ? t('err.network') : null);
@@ -270,6 +273,10 @@
       {/if}
     {/if}
 
+    {#if hostShots.length > 0}
+      <div class="pad-x shots"><ShotStrip {project} shots={hostShots} presentation={app.presentation} label={t('host.shots')} /></div>
+    {/if}
+
     <div class="foot-block" class:hidden={fog}>
       <div class="tags">
         {#each d.tags as tg (tg)}
@@ -369,6 +376,9 @@
 </section>
 
 <style>
+  .shots {
+    padding-top: 12px;
+  }
   .detail {
     display: flex;
     flex-direction: column;

@@ -81,7 +81,7 @@ def test_settings_parse():
     with pytest.raises(SettingsError):
         parse_settings("kein toml = = =")
     data = parse_settings('schema = "ariadne.project/1"\n[project]\nname = "x"\nprofile = "lab"\n')
-    assert data["llm"]["model"] == "claude-opus-5-5" and data["scope"]["include"] == []
+    assert data["llm"]["model"] == "" and data["scope"]["include"] == []
 
 
 # ------------------------------------------------------------------ Service
@@ -111,7 +111,7 @@ def test_create_open_close_list(paths, operator):
     assert p.info == info
     assert p.settings["project"] == {"name": "Geheimname Kunde X", "profile": "lab"}
     assert p.settings["scope"]["include"] == ["10.10.10.3", "lame.htb"]
-    assert p.settings["llm"]["model"] == "claude-opus-5-5" and p.settings_version == 1
+    assert p.settings["llm"]["model"] == "" and p.settings_version == 1
     kinds = [r.kind for r in p.journal.iter_events()]
     assert kinds == ["system.project_created", "d.scope.update"]
     assert len(p.project_key) == 32

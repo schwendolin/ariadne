@@ -18,13 +18,14 @@
  *   zeile     gewählte Zeitachsenzeile (TimelineItem.id)                      Reiter Zeitachse
  *   typ, terminal, hostf   Filter der Zeitachse (Komma-Liste der Typen, terminal_id, host_id)
  *   utc       '1' = Zeiten in UTC statt Lokalzeit
+ *   phasen    'cys' | 'htb': Phasen der Exportvorlage in der Zeitachse         Reiter Zeitachse
  */
 
 export const ROUTES = ['karte', 'terminals', 'zeitachse', 'findings'] as const;
 export type RouteId = (typeof ROUTES)[number];
 
 export const PARAM_KEYS = [
-  'host', 'sel', 'ebenen', 'ansicht', 'tabelle', 'beleg', 'tafel', 'finding', 'zeile', 'typ', 'terminal', 'hostf', 'utc',
+  'host', 'sel', 'ebenen', 'ansicht', 'tabelle', 'beleg', 'tafel', 'finding', 'zeile', 'typ', 'terminal', 'hostf', 'utc', 'phasen',
 ] as const;
 export type ParamKey = (typeof PARAM_KEYS)[number];
 export type ParamPatch = Partial<Record<ParamKey, string | null>>;
@@ -32,13 +33,17 @@ export type ParamPatch = Partial<Record<ParamKey, string | null>>;
 /** Ziel der Belegansicht (Tafel). */
 export type EvidenceTarget =
   | { kind: 'claim'; claim_key: string }
-  | { kind: 'unit'; unit_id: string; lines: [number, number] | null };
+  | { kind: 'unit'; unit_id: string; lines: [number, number] | null }
+  /** Etappe 4: Screenshot (ShotPanel) */
+  | { kind: 'shot'; id: string };
+/** Belegansicht für Log und Wert (EvidencePanel); Screenshots haben ihre eigene Tafel. */
+export type LogEvidenceTarget = Exclude<EvidenceTarget, { kind: 'shot' }>;
 
 /** Parameter, die nur auf einem Reiter gelten und beim Reiterwechsel entfallen. */
 const ROUTE_PARAMS: Record<RouteId, ParamKey[]> = {
   karte: ['host', 'sel', 'ansicht', 'tabelle'],
   terminals: [],
-  zeitachse: ['zeile', 'typ', 'terminal', 'hostf'],
+  zeitachse: ['zeile', 'typ', 'terminal', 'hostf', 'phasen'],
   findings: ['finding'],
 };
 
@@ -48,6 +53,7 @@ export function isRoute(s: string): s is RouteId {
 
 export function encodeEvidence(t: EvidenceTarget): string {
   if (t.kind === 'claim') return `c:${t.claim_key}`;
+  if (t.kind === 'shot') return `s:${t.id}`;
   return t.lines ? `u:${t.unit_id}:${t.lines[0]}-${t.lines[1]}` : `u:${t.unit_id}`;
 }
 
@@ -56,6 +62,10 @@ export function decodeEvidence(s: string | null): EvidenceTarget | null {
   if (s.startsWith('c:')) {
     const key = s.slice(2);
     return /^[0-9a-f]{64}$/.test(key) ? { kind: 'claim', claim_key: key } : null;
+  }
+  if (s.startsWith('s:')) {
+    const id = s.slice(2);
+    return /^[0-9A-Za-z-]{1,100}$/.test(id) ? { kind: 'shot', id } : null;
   }
   if (s.startsWith('u:')) {
     const rest = s.slice(2);

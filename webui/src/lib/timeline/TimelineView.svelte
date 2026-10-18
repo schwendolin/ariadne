@@ -6,11 +6,16 @@
   Tastatur: j k wählen, ↵ öffnet den Beleg, u macht den gewählten Befehl rückgängig, Esc bricht
   Rückgängig ab; nur solange keine Tafel offen ist. Live-Daten ohne Springen: der Store lädt im
   Hintergrund nach, die Liste behält Auswahl und Scrollposition (Scroll-Anker des Browsers).
+  Etappe 4 (ui): Phasen der Exportvorlage (`phasen=cys|htb`) unter jeder Befehlszeile mit
+  Korrektur (PhaseSelect, `POST /exports/phases`); Screenshots als Streifen über der Liste.
   Besitzer: ui-verlauf.
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import type { HostNode, TimelineItem, TimelineType } from '../api/types';
+  import type { ExportTemplate, HostNode, PhasesView, TimelineItem, TimelineType } from '../api/types';
+  import ShotStrip from '../shots/ShotStrip.svelte';
+  import { openPhases } from '../stores/exports.svelte';
+  import Segmented from '../ui/Segmented.svelte';
   import { t, type MessageKey } from '../i18n';
   import { registerKeys } from '../keys/keymap';
   import type { AppState } from '../stores/app.svelte';
@@ -33,6 +38,7 @@
     type TimelineFilter,
   } from './model';
   import PendingStrip from './PendingStrip.svelte';
+  import PhaseSelect from './PhaseSelect.svelte';
   import TimelineRow from './TimelineRow.svelte';
   import UndoInline from './UndoInline.svelte';
 
@@ -50,6 +56,57 @@
   );
   const terms = $derived(project.terminals.all.filter((x) => x.term.state !== 'held'));
   const startedAt = $derived(project.info?.created_at ?? project.info?.started_at ?? null);
+
+  // ------------------------------------------------------------------ Phasen (Export, 5.12)
+  const phaseTemplate = $derived<ExportTemplate | null>(url.get('phasen') === 'htb' ? 'htb' : url.get('phasen') === 'cys' ? 'cys' : null);
+  let phaseView = $state.raw<PhasesView | null>(null);
+  let phaseError = $state<string | null>(null);
+  let phaseBusy = $state(false);
+  const phaseByCmd = $derived(new Map((phaseView?.commands ?? []).map((c) => [c.cmd_id, c])));
+  const phaseMissing = $derived(openPhases(phaseView));
+  const phaseTemplates = [
+    { value: 'cys' as const, label: 'cys' },
+    { value: 'htb' as const, label: 'htb' },
+  ];
+
+  $effect(() => {
+    const tp = phaseTemplate;
+    phaseView = null;
+    phaseError = null;
+    if (!tp) return;
+    let live = true;
+    project.exports.phases(tp).then(
+      (v) => {
+        if (live) phaseView = v;
+      },
+      (e: unknown) => {
+        if (live) phaseError = errorText(e, 'tl.phase.loadFailed');
+      },
+    );
+    return () => {
+      live = false;
+    };
+  });
+
+  async function setPhase(cmdId: string, phase: string): Promise<void> {
+    const tp = phaseTemplate;
+    if (!tp || !phase || phaseBusy || app.offline) return;
+    phaseBusy = true;
+    try {
+      const r = await project.backend.setExportPhase(project.pid, tp, cmdId, phase);
+      if (phaseView && phaseView.template === tp) {
+        phaseView = {
+          ...phaseView,
+          commands: phaseView.commands.map((c) => (c.cmd_id === cmdId ? { ...c, phase: r.phase, source: 'decision' as const, decision_id: r.decision_id } : c)),
+        };
+      }
+      app.ui.notify('info', t('tl.phase.saved'), 2000);
+    } catch (e) {
+      app.ui.notify('error', errorText(e, 'tl.phase.failed'));
+    } finally {
+      phaseBusy = false;
+    }
+  }
 
   /** Serverzeit jetzt (ms): «läuft noch» und Fristen hängen an der Uhr des Daemons */
   let clock = $state(Date.now());
@@ -237,6 +294,15 @@
         </div>
       </Popover>
     </span>
+    <span class="phases">
+      {#if phaseTemplate}
+        <Segmented options={phaseTemplates} value={phaseTemplate} onchange={(v) => url.set({ phasen: v })} label={t('tl.phase.template')} />
+        <span class="pmeta" data-phase-missing={phaseMissing}>{#if phaseError}{phaseError}{:else if phaseView}{t('tl.phase.open', { n: phaseMissing })}{/if}</span>
+        <button type="button" class="fbtn on" aria-pressed="true" onclick={() => url.set({ phasen: null })}>{t('tl.phase.off')}</button>
+      {:else}
+        <button type="button" class="fbtn" aria-pressed="false" onclick={() => url.set({ phasen: 'cys' })}>{t('tl.phase.button')}</button>
+      {/if}
+    </span>
     <span class="zone">
       {utc ? t('tl.zoneUtc') : t('tl.zone', { zone: zoneName() })} ·
       <button type="button" class="utc" aria-pressed={utc} onclick={() => url.set({ utc: utc ? null : '1' })}>{utc ? t('tl.showLocal') : t('tl.showUtc')}</button>
@@ -244,6 +310,9 @@
   </div>
 
   <PendingStrip {project} />
+  {#if project.shots.items.length > 0}
+    <div class="shots"><ShotStrip {project} shots={project.shots.items} presentation={app.presentation} /></div>
+  {/if}
 
   <div class="scroll">
     {#if store.error}
@@ -264,10 +333,15 @@
           onselect={() => void select(i)}
           onopen={() => openEvidence(it)}
           onundo={() => startUndo(it)}
-          below={undo && undo.rowId === it.id ? belowUndo : undefined}
+          below={undo && undo.rowId === it.id ? belowUndo : phaseTemplate && phaseView && it.type === 'command' ? belowPhase : undefined}
         />
       {/each}
     </ol>
+    {#snippet belowPhase(it: TimelineItem)}
+      {#if it.type === 'command' && phaseView}
+        <PhaseSelect entry={phaseByCmd.get(it.cmd.cmd_id) ?? null} phases={phaseView.phases} cmdRef={it.cmd.cmd_ref} disabled={phaseBusy || app.offline} onpick={(p) => void setPhase(it.cmd.cmd_id, p)} />
+      {/if}
+    {/snippet}
     {#snippet belowUndo()}
       {@const it = rows.find((r) => r.id === undo?.rowId)}
       {#if undo && it}<UndoInline {store} {undo} item={it} offline={app.offline} onclose={closeUndo} />{/if}
@@ -281,6 +355,18 @@
 </section>
 
 <style>
+  .phases {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pmeta {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  .shots {
+    padding: 8px 20px 4px;
+  }
   .tl {
     height: 100%;
     display: flex;

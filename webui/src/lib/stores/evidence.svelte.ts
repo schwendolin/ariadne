@@ -12,7 +12,7 @@
  *   laufende Einheit, lädt er nur den letzten Block neu. Auswahl und Scrollposition bleiben.
  */
 import type { ChangeSet, FactSources, LogLine, SourceView, StreamEvent, UnitView } from '../api/types';
-import type { EvidenceTarget } from '../url/state.svelte';
+import type { LogEvidenceTarget as EvidenceTarget } from '../url/state.svelte';
 import { isAbort } from '../util/errors';
 import type { ProjectCtx, ProjectPart } from './ctx';
 

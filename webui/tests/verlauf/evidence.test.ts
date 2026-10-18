@@ -12,7 +12,7 @@ import { evidenceMarkdown, logFileName } from '../../src/lib/evidence/text';
 import { installKeymap, resetKeymapForTests } from '../../src/lib/keys/keymap';
 import { hex64, T1, T2 } from '../../src/lib/mock/data/base';
 import type { ProjectStore } from '../../src/lib/stores/project.svelte';
-import { url, type EvidenceTarget } from '../../src/lib/url/state.svelte';
+import { url, type LogEvidenceTarget as EvidenceTarget } from '../../src/lib/url/state.svelte';
 import { makeApp, press, settle, stopAll, until } from '../fundament/helpers';
 
 const MSF = `${T2}@1024`;

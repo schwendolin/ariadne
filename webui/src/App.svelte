@@ -8,8 +8,8 @@
     `blockOffline` an einer Stelle (Speichern bleibt gesperrt).
   - Kopfzeile immer (ausser bei der Anmeldung); Reiter Karte, Terminals, Zeitachse, Findings.
   - Höchstens ein Dialog (UiStore.dialog), höchstens eine Tafel (URL `beleg` oder `tafel`); die
-    Scope-Warnung ist eine nicht modale Meldung (UiStore.scopeCard); solange eine Tafel offen ist,
-    tritt sie zurück (das Kennzeichen in der Kopfzeile bleibt) und erscheint danach wieder.
+    Scope-Warnung steht als erster Eintrag in «Als Nächstes» (E120), nicht mehr als Karte.
+  - Belegansicht eines Screenshots (`beleg=s:<id>`) als eigene Tafel (ShotPanel).
   - Globale Kürzel: ⌘K Palette, ? Hilfe, 1 bis 4 Reiter, ⇧P Präsentationsmodus (nur mit Fokus
     ausserhalb von Eingabefeldern), Esc schliesst Tafel bzw. Detail (in den Komponenten).
   - Palette: Quelle «actions» (Reiter, Präsentation, Darstellung, Einstellungen, Scope, Hilfe,
@@ -31,8 +31,8 @@
   import LoginView from './lib/shell/LoginView.svelte';
   import { installGlobal } from './lib/shell/global';
   import ScopeViewDialog from './lib/shell/ScopeViewDialog.svelte';
-  import ScopeWarningDialog from './lib/shell/ScopeWarningDialog.svelte';
   import SettingsPanel from './lib/shell/SettingsPanel.svelte';
+  import ShotPanel from './lib/shots/ShotPanel.svelte';
   import StateView from './lib/shell/StateView.svelte';
   import type { AppState } from './lib/stores/app.svelte';
   import ContextDialog from './lib/terminals/ContextDialog.svelte';
@@ -98,7 +98,9 @@
           {:else if route === 'findings'}
             <FindingsView {app} {project} />
           {/if}
-          {#if evidence}
+          {#if evidence?.kind === 'shot'}
+            <ShotPanel {app} {project} id={evidence.id} />
+          {:else if evidence}
             <EvidencePanel {app} {project} target={evidence} />
           {/if}
         {/key}
@@ -112,20 +114,16 @@
   </div>
 {/if}
 
-{#if app.ui.scopeCard && phase === 'project' && !evidence && !settingsOpen}
-  <ScopeWarningDialog {app} onclose={() => (app.ui.scopeCard = false)} />
-{/if}
-
 {#if dialog?.kind === 'palette'}
   <CommandPalette {app} onclose={() => app.ui.closeDialog()} />
 {:else if dialog?.kind === 'help'}
   <HelpDialog onclose={() => app.ui.closeDialog()} />
 {:else if dialog?.kind === 'scope-view'}
   <ScopeViewDialog {app} onclose={() => app.ui.closeDialog()} />
-{:else if dialog?.kind === 'export'}
-  <ExportDialog onclose={() => app.ui.closeDialog()} />
-{:else if dialog?.kind === 'screenshot'}
-  <ScreenshotDialog onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'export' && project}
+  <ExportDialog {app} {project} onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'screenshot' && project}
+  <ScreenshotDialog {app} {project} onclose={() => app.ui.closeDialog()} />
 {:else if dialog?.kind === 'context' && project}
   <ContextDialog {app} {project} terminalId={dialog.terminalId} itemKey={dialog.itemKey} fromOff={dialog.fromOff} onclose={() => app.ui.closeDialog()} />
 {/if}

@@ -218,6 +218,7 @@ def _json(conn: Any, f: Facts, e: _Entry, sources: dict[str, Any], profile: str)
             "direction": _text(it.get("direction"), known)[0],
         },
         "templates": templates,
+        "items": [],  # einheitliche Form mit den Regeln (E119); KI-Denkanstösse haben keine Dienstliste
         "state": e.state,
         "decision_id": e.decision_id,
         "basis": e.basis,

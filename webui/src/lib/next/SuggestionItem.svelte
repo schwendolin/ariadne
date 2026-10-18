@@ -5,7 +5,11 @@
     Kennzeichen (Injection-Verdacht, vom Ziel angeboten), Vorlagen (TemplateBlock, «Kopieren · Mac»),
     «Erledigt» (mit `basis`, kommt bei neuem Anlass wieder) und «Verwerfen» (bleibt verworfen).
   - Lernmodus (Vorlieben): Stufen 1 Frage, 2 Richtung, 3 Vorlage, jede erst auf Klick.
-  Ariadne führt nichts davon aus (E10): es gibt keinen Ausführen-Knopf. Besitzer: ui-karte.
+  - KI (D3, Etappe 4): Kennzeichen «KI», «bestätigt, wenn» und «widerlegt, wenn» (Modelltext, nur
+    als Text), Knöpfe Bestätigt, Widerlegt, Verwerfen; Injection-Verdacht wie bei Regeln.
+  - E119: Bei nicht leerem `items` eine Zeile pro Dienst mit Label und genau einer Vorlage;
+    `templates` bleibt dann ausgeblendet.
+  Ariadne führt nichts davon aus (E10): es gibt keinen Ausführen-Knopf. Besitzer: ui-karte, ui.
 -->
 <script lang="ts">
   import { tick } from 'svelte';
@@ -40,7 +44,10 @@
   const title = $derived(titleParts(s));
   const shortParts = $derived<TextPart[]>(collapsedParts(title).map((p) => (p.target ? { ...p, text: short(p.text) } : p)));
   const showTemplates = $derived(!learning || stage >= 3);
+  const isAi = $derived(s.origin === 'ai');
+  const items = $derived(s.items ?? []);
   const offline = $derived(app.offline);
+  const why = $derived(busy ? t('next.loading') : offline ? t('err.network') : null);
 
   function openEvidence(): void {
     next.openEvidence({ type: 'suggestion', key: s.suggestion_key, index: 0, s });
@@ -81,13 +88,17 @@
     onclick={openLine}
     title={displaySafe(s.title, 400)}
   >
-    <span class="src">{t('sug.rule')}</span>
+    <span class="src" class:ai={isAi}>{isAi ? t('sug.ai') : t('sug.rule')}</span>
     <span class="title"><Parts parts={shortParts} /></span>
   </button>
 {:else}
   <div class="card" data-suggestion-key={s.suggestion_key} aria-current="true" aria-busy={busy} tabindex="-1" bind:this={card}>
     <div class="head">
-      {t(`sug.kind.${s.kind}`)} · {t('sug.rule')} <span class="mono"><Txt value={s.rule_id} max={40} /></span>
+      {#if isAi}
+        <Badge tone="ai">{t('sug.ai')}</Badge> {t(`sug.kind.${s.kind}`)}
+      {:else}
+        {t(`sug.kind.${s.kind}`)} · {t('sug.rule')} <span class="mono"><Txt value={s.rule_id} max={40} /></span>
+      {/if}
       {#if s.flags.includes('injection_suspect')}<Badge tone="attention">{t('sug.flag.injection_suspect')}</Badge>{/if}
       {#if s.flags.includes('from_target')}<Badge>{t('sug.flag.from_target')}</Badge>{/if}
     </div>
@@ -116,14 +127,42 @@
         </button>
       {/if}
     {/if}
+    {#if isAi && s.ai}
+      <dl class="crit">
+        <dt>{t('sug.ai.confirmedIf')}</dt>
+        <dd><Txt value={s.ai.confirmed_if} max={400} /></dd>
+        <dt>{t('sug.ai.refutedIf')}</dt>
+        <dd><Txt value={s.ai.refuted_if} max={400} /></dd>
+      </dl>
+      <p class="aihint">{t('sug.ai.hint')} {t('sug.ai.model')} <span class="mono"><Txt value={s.ai.model} max={60} /></span></p>
+    {/if}
     {#if showTemplates}
-      {#each s.templates as tpl (tpl.template_id)}
-        <TemplateBlock template={tpl} showLabel={s.templates.length > 1} />
-      {/each}
+      {#if items.length > 0}
+        <div class="items" data-items={items.length}>
+          <span class="st">{t('sug.items', { n: items.length })}</span>
+          <ul>
+            {#each items as it (it.service_id)}
+              <li>
+                <span class="ilabel"><Parts parts={it.label_parts} max={120} /></span>
+                <TemplateBlock template={it.template} showLabel={false} />
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {:else}
+        {#each s.templates as tpl (tpl.template_id)}
+          <TemplateBlock template={tpl} showLabel={s.templates.length > 1} />
+        {/each}
+      {/if}
     {/if}
     <div class="actions">
-      <Button variant="primary" disabled={busy || offline} reason={busy ? t('next.loading') : offline ? t('err.network') : null} onclick={() => next.suggestionDone(s)}>{t('sug.done')}</Button>
-      <Button disabled={busy || offline} reason={busy ? t('next.loading') : offline ? t('err.network') : null} onclick={() => next.suggestionDismiss(s)}>{t('sug.dismiss')}</Button>
+      {#if isAi}
+        <Button variant="primary" disabled={busy || offline} reason={why} onclick={() => next.suggestionVerdict(s, 'confirmed')}>{t('sug.ai.confirmed')}</Button>
+        <Button disabled={busy || offline} reason={why} onclick={() => next.suggestionVerdict(s, 'refuted')}>{t('sug.ai.refuted')}</Button>
+      {:else}
+        <Button variant="primary" disabled={busy || offline} reason={why} onclick={() => next.suggestionDone(s)}>{t('sug.done')}</Button>
+      {/if}
+      <Button disabled={busy || offline} reason={why} onclick={() => next.suggestionDismiss(s)}>{t('sug.dismiss')}</Button>
     </div>
   </div>
 {/if}
@@ -246,5 +285,53 @@
   .actions {
     display: flex;
     gap: 8px;
+  }
+  .src.ai {
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .crit {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 10px;
+    margin: 0;
+    font-size: var(--fs-s);
+  }
+  .crit dt {
+    color: var(--muted);
+  }
+  .crit dd {
+    margin: 0;
+    color: var(--fg-2);
+    overflow-wrap: anywhere;
+  }
+  .aihint {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  .items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .items ul {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 360px;
+    overflow: auto;
+  }
+  .items li {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ilabel {
+    font-size: var(--fs-s);
+    color: var(--fg-2);
   }
 </style>
