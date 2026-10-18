@@ -57,6 +57,17 @@
   const hasEvidence = $derived(item.type === 'command' || item.type === 'segment' || item.type === 'file' || item.type === 'callback');
   const distrusted = $derived(item.type === 'command' && item.distrusted !== null);
   const undoable = $derived(canUndo(item));
+  let scopeBusy = $state(false);
+  async function revertScope(): Promise<void> {
+    if (item.type !== 'decision' || scopeBusy) return;
+    scopeBusy = true;
+    const ok = await project.scope.undo(item.decision_id);
+    scopeBusy = false;
+    if (ok) {
+      app.ui.notify('info', t('scope.add.undone'));
+      void project.timeline.load();
+    }
+  }
 
   /** offene Kontextklärung zum Terminal eines laufenden Befehls («Kontext unklar · K2») */
   const unclear = $derived.by(() => {
@@ -295,6 +306,9 @@
         <button type="button" class="link" disabled={app.offline} aria-label={t('tl.trustAgainFor', { ref: item.cmd.cmd_ref })} onclick={() => {
           if (item.type === 'command' && item.distrusted) void project.timeline.trustAgain(item, item.distrusted.decision_id);
         }}>{t('tl.trustAgain')}</button>
+      {:else if item.type === 'decision' && item.scope_change?.revertible && project.scope.editable}
+        <!-- web-api.md 20.3: Scope-Änderung rückgängig (op 'revert'), nicht d.revoke -->
+        <button type="button" class="link" disabled={app.offline || scopeBusy} onclick={revertScope}>{t('tl.scopeRevert')}</button>
       {:else if undoable}
         <button type="button" class="undo" disabled={app.offline} aria-label={t('tl.undoFor', { ref: item.type === 'command' ? item.cmd.cmd_ref : '' })} onclick={onundo}
           >{t('tl.undo')} <kbd>u</kbd></button

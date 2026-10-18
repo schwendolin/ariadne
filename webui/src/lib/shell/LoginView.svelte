@@ -6,12 +6,17 @@
     validation     «Eingabe ungültig.» (auch schon im Browser, ohne Anfrage)
     network        «Daemon nicht erreichbar.»
   Nie ein Passphrase-Feld (type=password), nie der Code in URL, Titel, Speicher oder Konsole; das
-  Feld behält den falschen Code markiert (er ist danach wertlos). Nach einer beendeten Sitzung erscheint die Seite ohne
-  Grund. Besitzer: ui-fundament.
+  Feld behält den falschen Code markiert (er ist danach wertlos).
+  Praxistest 1: Hinweis «Code im Terminal holen: ariadne ui --code (oder ariadne ui öffnet den
+  Browser direkt)», Muster XXXXX-XXXXX (Tippcode: 10 Zeichen, sessions.format_typed). Sieht die
+  Eingabe nach einer Passphrase aus (ohne Bindestrich, kein plausibler Code), steht darunter «Das
+  ist der Einmal-Code aus dem Terminal, nicht die Passphrase», und sie geht nicht an den Server.
+  Endete die Sitzung durch stop, lock, Projektwechsel oder Neustart, nennt die Seite den Grund
+  (`app.endNotice`). Besitzer: ui-fundament, Praxistest: ui.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { normalizeTypedCode } from '../api/auth';
+  import { looksLikePassphrase, normalizeTypedCode } from '../api/auth';
   import { t, type MessageKey } from '../i18n';
   import type { AppState } from '../stores/app.svelte';
   import LogoMark from '../ui/LogoMark.svelte';
@@ -36,6 +41,16 @@
               : null,
   );
   const error = $derived<MessageKey | null>(localError ?? serverError);
+  const passNote = $derived(looksLikePassphrase(code) && localError !== 'login.passphrase');
+  const ended = $derived.by<string | null>(() => {
+    const n = app.endNotice;
+    if (!n) return null;
+    if ((n.reason === 'stop' || n.reason === 'idle') && n.slug) return t(n.reason === 'stop' ? 'login.ended.stop' : 'login.ended.idle', { slug: n.slug });
+    if (n.reason === 'stop') return t('login.ended.stopPlain');
+    if (n.reason === 'idle') return t('login.ended.idlePlain');
+    return t(`login.ended.${n.reason}` as MessageKey);
+  });
+  const describedBy = $derived([error ? 'login-error' : null, passNote ? 'login-pass' : null, 'login-pattern'].filter(Boolean).join(' '));
   const locked = $derived(app.loginError === 'rate_limited');
 
   async function submit(e: SubmitEvent): Promise<void> {
@@ -45,6 +60,11 @@
     const c = normalizeTypedCode(code);
     if (!c) {
       localError = 'login.err.validation';
+      return;
+    }
+    // Passphrase statt Code: nie an den Server schicken
+    if (looksLikePassphrase(code)) {
+      localError = 'login.passphrase';
       return;
     }
     busy = true;
@@ -72,6 +92,7 @@
 <main class="login" id="main">
   <form class="box" onsubmit={submit} novalidate aria-label={t('login.title')}>
     <h1 class="brand"><LogoMark size={22} decorative /><span>{t('login.title')}</span></h1>
+    {#if ended}<p class="ended" role="status" data-testid="login-ended">{ended}</p>{/if}
     <div class="field">
       <label for="login-code">{t('login.label')}</label>
       <input
@@ -89,17 +110,22 @@
         maxlength="80"
         disabled={locked}
         aria-invalid={!!error}
-        aria-describedby={error ? 'login-error' : undefined}
+        aria-describedby={describedBy}
         data-autofocus
       />
+      <p id="login-pattern" class="pattern">{t('login.pattern')}</p>
       {#if error}<p id="login-error" class="error" role="alert">{t(error)}</p>{/if}
+      {#if passNote}<p id="login-pass" class="pass" role="note">{t('login.passphrase')}</p>{/if}
       {#if locked}<button type="button" class="retry" onclick={retry}>{t('login.retry')}</button>{/if}
     </div>
     <button type="submit" class="submit" disabled={busy || locked}>{busy ? t('login.busy') : t('login.submit')}</button>
     <div class="info">
+      <p class="where">
+        {t('login.where.code')} <code>ariadne ui --code</code> ({t('login.where.orUi')} <code>ariadne ui</code>
+        {t('login.where.direct')})
+      </p>
       <p>
-        {t('login.where.mac')} <code>ariadne-mac start</code> {t('login.where.or')} <code>ssh -t kali-sl code</code>{t('login.where.kali')}
-        <code>ariadne ui</code>.
+        {t('login.where.mac')} <code>ariadne-mac start</code> {t('login.where.or')} <code>ssh -t kali-sl code</code>
       </p>
       <p class="never">{t('login.never')}</p>
     </div>
@@ -170,6 +196,29 @@
     margin: 0;
     color: var(--error);
     font-size: var(--fs-m);
+  }
+  .pattern {
+    margin: 0;
+    color: var(--faint);
+    font-size: var(--fs-xs);
+  }
+  .pass {
+    margin: 0;
+    color: var(--attention);
+    font-size: var(--fs-s);
+  }
+  .ended {
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: var(--lw-1) solid var(--line-strong);
+    background: var(--surface-2);
+    color: var(--fg);
+    font-size: var(--fs-s);
+    line-height: 1.45;
+  }
+  .where {
+    color: var(--fg-2);
   }
   .retry {
     align-self: flex-start;

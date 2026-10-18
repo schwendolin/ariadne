@@ -22,6 +22,7 @@ from ariadne.scope.normalize import has_idna_deviation
 __all__ = [
     "DEFAULT_NETWORKS",
     "DEFAULT_SUFFIXES",
+    "is_public_name",
     "InvalidTarget",
     "Target",
     "LabAllowlist",
@@ -37,7 +38,10 @@ DEFAULT_NETWORKS = (
     "10.129.0.0/16",
     "100.64.0.0/10",
 )
-DEFAULT_SUFFIXES = (".htb", ".local", ".lab", ".thm", ".vl")
+# Lab-Domains und Endungen, die es im öffentlichen DNS nicht gibt (``.internal`` reserviert ICANN für
+# private Netze, ``.test`` RFC 2606). Ergänzt nach dem Praxistest (E130: recovery.vantis.internal).
+DEFAULT_SUFFIXES = (".htb", ".local", ".lab", ".thm", ".vl", ".internal", ".test", ".lan", ".home",
+                    ".localdomain", ".home.arpa")
 
 _LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -147,3 +151,11 @@ def split_targets(raw: Iterable[str], allowlist: LabAllowlist) -> tuple[list[Tar
         seen.setdefault(t.value, t)
     targets: Sequence[Target] = list(seen.values())
     return list(targets), [t for t in targets if not allowlist.allows(t)]
+
+
+def is_public_name(name: str) -> bool:
+    """Name (auch ``*.domain``) mit öffentlicher Endung, also nicht aus :data:`DEFAULT_SUFFIXES` (E130:
+    zusätzlicher Warnhinweis). Nur syntaktisch, nie DNS."""
+    n = name.lower().rstrip(".")
+    n = n[2:] if n.startswith("*.") else n
+    return not any(n.endswith(s) and len(n) > len(s) for s in DEFAULT_SUFFIXES)

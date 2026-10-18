@@ -9,7 +9,10 @@
   - decide_value: Wert mit Grund und Kennzeichen; Annehmen `a`, Verwerfen `x`, Ändern `e`, Beleg.
   - conflict: Werte mit Quellen; einen Wert wählen oder bewusst offen lassen (nie verwerfen).
   - orphan_decision: Widerrufen. mass_find: in der Zeitachse einzeln entscheiden.
-  Zieldaten nur über Txt. Besitzer: ui-karte.
+  - scope_name (E130): «<Name> gehört laut nmap zu <IP>. In den Scope aufnehmen?», Wahl nur
+    Name oder Domain-Wildcard, Warnhinweis bei öffentlicher Endung; «Aufnehmen …» öffnet den
+    Bestätigungsdialog (E129) mit dem gewählten Eintrag, «Verwerfen» `x`. Nie automatisch.
+  Zieldaten nur über Txt. Besitzer: ui-karte, E130: ui.
 -->
 <script lang="ts">
   import { DOT, SP } from '../karte/sep';
@@ -17,7 +20,7 @@
   import type { CtxExcerpt, NextItem, StageKind } from '../api/types';
   import { t, type MessageKey } from '../i18n';
   import type { AppState } from '../stores/app.svelte';
-  import { itemEvidence, itemLine } from '../stores/next.svelte';
+  import { itemEvidence, itemLine, scopeChoices } from '../stores/next.svelte';
   import type { ProjectStore } from '../stores/project.svelte';
   import Badge from '../ui/Badge.svelte';
   import Button from '../ui/Button.svelte';
@@ -119,6 +122,19 @@
   }
   function revoke(): void {
     if (item.kind === 'orphan_decision') void next.revokeOrphan(item);
+  }
+  // E130: gewählter Vorschlag (Name oder Wildcard), Standard der erste (genauer Name)
+  let scopeChoice = $state<string | null>(null);
+  const scopeOpts = $derived(item.kind === 'scope_name' ? scopeChoices(item) : []);
+  const scopeSel = $derived(scopeOpts.find((o) => o.entry === scopeChoice) ?? scopeOpts[0] ?? null);
+  const scopeEditable = $derived(project.scope.editable && (item.kind !== 'scope_name' || item.change_allowed !== false));
+  // Ausserhalb der Lab-Allowlist ohne «kein Kundenauftrag»: nur im Terminal (web-api.md 20.5)
+  const scopeNeedsNc = $derived(!!scopeSel?.outside_lab && app.profile === 'lab' && project.scope.view?.not_customer !== true);
+  function scopeAdd(): void {
+    if (item.kind === 'scope_name') next.openScopeAdd(item, scopeSel?.entry ?? null);
+  }
+  function scopeDismiss(): void {
+    if (item.kind === 'scope_name') void next.scopeDismiss(item);
   }
   function massGo(): void {
     if (item.kind === 'mass_find') url.go('zeitachse', { zeile: item.unit.cmd_id ?? item.unit.unit_id });
@@ -267,6 +283,43 @@
       </div>
       <div class="actions">
         <Button variant="primary" disabled={!!blockReason} reason={blockReason} onclick={revoke}>{t('next.a.revoke')}</Button>
+      </div>
+    {:else if item.kind === 'scope_name'}
+      <h3 class="title scope-q">
+        <span class="mono"><Txt value={item.name} mono ctrl={item.ctrl ?? false} max={120} /></span>
+        <span class="pred">{t('next.scopeSug.belongs')}</span>
+        <span class="mono"><Txt value={item.ip} mono max={60} /></span>.
+        {t('next.scopeSug.question')}
+      </h3>
+      {#if scopeOpts.length > 0}
+        <fieldset class="choice">
+          <legend class="k">{t('next.scopeSug.choose')}</legend>
+          {#each scopeOpts as o, oi (`${oi}:${o.entry}`)}
+            <label class="opt">
+              <input type="radio" name="scope-sug-{item.item_key}" value={o.entry} checked={scopeSel?.entry === o.entry} onchange={() => (scopeChoice = o.entry)} />
+              <span class="mono s"><Txt value={o.entry} mono ctrl={o.ctrl ?? false} max={120} /></span>
+              <span class="muted s">{t(o.kind === 'wildcard' ? 'scope.add.kind.wildcard' : 'scope.add.kind.name')}</span>
+            </label>
+          {/each}
+        </fieldset>
+      {/if}
+      {#if scopeSel?.public || item.public}<p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.public')}</p>{/if}
+      {#if scopeNeedsNc}<p class="warn" role="note"><span aria-hidden="true">!</span> {t('scope.add.outsideLab')}</p>{/if}
+      <p class="note">{t('next.scopeSug.never')} {t('scope.add.dns')}</p>
+      <div class="grid">
+        <span class="k">{t('next.f.source')}</span>
+        <span>{item.source === 'ptr' ? t('next.scopeSug.ptr') : t('next.scopeSug.nmap')}{#if item.unit}{DOT}<Txt value={item.unit.title} mono ctrl={item.unit.ctrl} max={120} />{#if item.unit.ts}{DOT}{hhmm(item.unit.ts)}{/if}{/if}</span>
+      </div>
+      <div class="actions">
+        <Button
+          variant="primary"
+          kbd="a"
+          disabled={!!blockReason || !scopeSel || !scopeEditable || scopeNeedsNc}
+          reason={blockReason ?? (!scopeEditable ? t('scope.edit.err.policy') : !scopeSel ? t('scope.add.none') : scopeNeedsNc ? t('scope.edit.err.guardrail') : null)}
+          onclick={scopeAdd}>{t('next.a.scopeAdd')}</Button
+        >
+        <Button kbd="x" disabled={!!blockReason} reason={blockReason} onclick={scopeDismiss}>{t('next.a.scopeDismiss')}</Button>
+        {#if evidence}<Button kbd="↵" onclick={openEvidence}>{t('next.a.evidence')}</Button>{/if}
       </div>
     {:else if item.kind === 'mass_find'}
       <p class="text">{t('next.massText', { hosts: item.hosts, candidates: item.candidates })}</p>
@@ -441,6 +494,40 @@
     flex: 1;
     min-width: 0;
     font-size: var(--fs-s);
+  }
+  .choice {
+    margin: 0;
+    padding: 0;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .choice legend {
+    padding: 0;
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+  .opt {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: baseline;
+    cursor: pointer;
+  }
+  .opt .muted {
+    grid-column: 2;
+    font-size: var(--fs-xs);
+  }
+  .warn {
+    margin: 0;
+    color: var(--attention);
+    font-size: var(--fs-s);
+  }
+  .note {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--fs-xs);
   }
   .edit {
     display: flex;

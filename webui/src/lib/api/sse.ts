@@ -118,7 +118,7 @@ export function backoffDelay(attempt: number, initialMs = 1000, maxMs = 30000, j
 }
 
 const EVENT_NAMES = new Set<StreamEventName>([
-  'changes', 'terminal', 'inbox', 'suggestion', 'progress', 'presentation', 'project', 'reset', 'prefs', 'screenshot', 'session',
+  'changes', 'terminal', 'inbox', 'suggestion', 'progress', 'presentation', 'project', 'reset', 'prefs', 'screenshot', 'session', 'scope',
 ]);
 
 /** Wandelt eine SSE-Nachricht in ein typisiertes Ereignis; unbekannte oder kaputte werden verworfen. */
@@ -140,7 +140,7 @@ export interface SseClientOptions {
   url: string;
   tokens: TokenStore;
   onEvent: (ev: StreamEvent) => void;
-  onState?: (state: ConnectionState, info: { attempt: number; delayMs: number | null }) => void;
+  onState?: (state: ConnectionState, info: { attempt: number; delayMs: number | null; cause?: 'network' | 'ended' | null }) => void;
   onUnauthorized?: () => void;
   fetch?: typeof fetch;
   initialDelayMs?: number;
@@ -218,6 +218,7 @@ export class SseClient {
       };
 
       let unauthorized = false;
+      let cause: 'network' | 'ended' | null = null;
       try {
         const headers: Record<string, string> = {
           Accept: 'text/event-stream',
@@ -250,7 +251,10 @@ export class SseClient {
           try {
             for (;;) {
               const { value, done } = await reader.read();
-              if (done) break;
+              if (done) {
+                cause = 'ended';
+                break;
+              }
               kick();
               for (const msg of parser.push(value)) {
                 this.lastEventId = parser.lastEventId;
@@ -265,6 +269,7 @@ export class SseClient {
         }
       } catch {
         // Netzfehler, Abbruch durch Wachhund oder stop(): unten entscheiden.
+        if (!conn.signal.aborted && cause === null) cause = 'network';
       } finally {
         if (watchdog) clearTimeout(watchdog);
         this.stopCtrl.signal.removeEventListener('abort', onStop);
@@ -276,7 +281,7 @@ export class SseClient {
       }
       if (this.stopped) break;
       const delay = backoffDelay(this.attempt, serverRetry ?? opts.initialDelayMs ?? 1000, opts.maxDelayMs ?? 30000, opts.jitter ?? 0.2, opts.random);
-      opts.onState?.('retrying', { attempt: this.attempt, delayMs: delay });
+      opts.onState?.('retrying', { attempt: this.attempt, delayMs: delay, cause });
       this.attempt++;
       await sleep(delay, this.stopCtrl.signal);
     }

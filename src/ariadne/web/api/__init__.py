@@ -57,6 +57,7 @@ def register(app: Any, ctx: WebContext) -> None:
         hosts,
         later,
         project,
+        scope,
         screenshots,
         search,
         secrets,
@@ -96,6 +97,7 @@ def register(app: Any, ctx: WebContext) -> None:
         exports,  # Bau v0.1-Export: Bericht-Export und Phasen (Teil «export»)
         screenshots,  # Bau v0.1-Screenshots: Screenshots (Teil «screenshots»)
         blobs,  # Bau v0.1-Screenshots: Bilder aus dem Blob-Store (Teil «screenshots»)
+        scope,  # Korrektur nach dem Praxistest: Scope anzeigen und ändern (E129)
     ):
         mod.add_routes(router, api)
     later.add_routes(router)

@@ -95,6 +95,10 @@ class _Sources:
             self._pub("project", {"project_id": None, "change": kind, "locked": kind == "locked"})
         elif kind == "presentation":
             self._pub("presentation", {"on": bool(data.get("on"))})
+        elif kind == "scope":
+            pid, version = data.get("project_id"), data.get("version")
+            if isinstance(pid, str) and isinstance(version, int):
+                self._pub("scope", {"project_id": pid, "version": version})
         elif kind == "screenshot":
             # Nur Kennungen und feste Wörter, nie Fenstertitel oder Notiz (die holt die Liste).
             pid, sid, trigger = data.get("project_id"), data.get("id"), data.get("trigger")

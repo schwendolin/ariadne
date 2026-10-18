@@ -24,6 +24,7 @@ Pro Lab und nach jedem Neustart der VM:
 ```sh
 ariadne start lame --target 10.10.10.3   # Passphrase, Projekt anlegen oder öffnen
 ariadne start                            # später: das zuletzt aktive Projekt
+ariadne scope add recovery.lab           # Scope später erweitern (fragt [j/N], rückgängig: ariadne scope undo)
 ```
 
 `ariadne start` fragt, ob die letzten Minuten aus dem Vorlauf übernommen werden sollen. Ab dann nehmen alle Terminals auf, auch parallele, mit der Zeit des Shims auf etwa 1 ms genau. Titel: `[REC lame]`.
@@ -53,7 +54,7 @@ Nach 12 Stunden ohne Ausgabe in irgendeinem Terminal beendet Ariadne das Projekt
 
 ## Dashboard
 
-Der Daemon liefert das Dashboard nur auf `127.0.0.1:7330` aus. Anmelden geht nur mit einem Einmal-Code aus der CLI, nie mit der Passphrase:
+Der Daemon liefert das Dashboard nur auf `127.0.0.1:7330` aus. Anmelden geht nur mit einem Einmal-Code aus der CLI, nie mit der Passphrase (das Feld «Anmeldecode» will den Code aus `ariadne ui --code`):
 
 ```sh
 ariadne ui              # Browser der Kali öffnen (Startdatei mit Code, nach 10 s gelöscht)

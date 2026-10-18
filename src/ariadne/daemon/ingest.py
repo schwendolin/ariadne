@@ -42,6 +42,7 @@ from ariadne.ingest import pending, queries
 from ariadne.ingest.db import get_meta, schema_stale, set_meta
 from ariadne.ingest.pipeline import REPARSE_PENDING, Interrupted, Pipeline, Stats
 from ariadne.ingest.runner import Runner, SubprocessRunner
+from ariadne.ingest.seg_activity import rescope
 from ariadne.scope.matcher import ScopeMatcher
 from ariadne.store.api import EventRecord
 from ariadne.store.journal import JournalReader
@@ -323,6 +324,11 @@ class IngestService:
             set_meta(st.conn, "rebuild_pending", "1")
             st.conn.commit()
             st.scope_version = version
+        if get_meta(st.conn, "activity_scope_version") != str(version):
+            # Scope-Warnungen folgen dem aktuellen Scope (E129), auch nach einem Neustart
+            rescope(st.conn, st.pipeline.scope)
+            set_meta(st.conn, "activity_scope_version", str(version))
+            st.conn.commit()
         return st
 
     @staticmethod

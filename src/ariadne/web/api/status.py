@@ -86,10 +86,13 @@ def scope_include(settings: Any) -> list[str]:
 
 
 def _scope_warning(
-    conn: Any, bag: Bag, include: list[str], refs: Mapping[str, Mapping[str, Any]]
+    conn: Any, bag: Bag, include: list[str], refs: Mapping[str, Mapping[str, Any]],
+    allowlist: Any = None,
 ) -> dict[str, Any] | None:
     """Jüngster Befehl mit einem Ziel ausserhalb des Scopes (E67) mit dem Inhalt der Meldung (18.4).
-    ``acked`` setzt die Route aus ``state.db``."""
+    ``acked`` setzt die Route aus ``state.db``. Jedes Ziel mit Urteil ``out`` trägt die Vorschläge
+    für «in den Scope aufnehmen» (E129, web-api.md 20.4)."""
+    from ariadne.scope.suggest import proposals
     for cmd_id, tid, ts, scope, text in conn.execute(
         "SELECT cmd_id, terminal_id, ts_utc_ns, target_scope, cmd_text FROM activity "
         "WHERE target_scope != '[]' ORDER BY ts_utc_ns DESC LIMIT 500"
@@ -104,11 +107,14 @@ def _scope_warning(
         for t in outside[:SCOPE_TARGETS_MAX]:
             tb = bag.new()
             raw = t.get("raw") if isinstance(t.get("raw"), str) else t.get("id")
+            verdict = t.get("verdict") if t.get("verdict") in _VERDICTS else "unknown"
+            props = proposals(raw, allowlist) if verdict == "out" and isinstance(raw, str) else []
             targets.append(
                 {
                     "value": tb(raw if isinstance(raw, str) else "") or "",
-                    "verdict": t.get("verdict") if t.get("verdict") in _VERDICTS else "unknown",
+                    "verdict": verdict,
                     "ctrl": tb.ctrl,
+                    "proposals": [{**pr, "entry": tb(pr["entry"]) or ""} for pr in props],
                 }
             )
         out = {

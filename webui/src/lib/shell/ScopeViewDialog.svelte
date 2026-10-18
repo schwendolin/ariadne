@@ -1,7 +1,7 @@
 <!--
   «Scope ansehen» aus dem Menü (Screen 11): Ziele und Ausschlüsse aus GET /project (Eingaben des
-  Nutzers, trotzdem als Text über Txt), Version. Erweitern geht in v0.1 nur im Terminal (kritische
-  Operation, 12.2). Besitzer: ui-fundament.
+  Nutzers, trotzdem als Text über Txt), Version. Ändern in den Einstellungen (E129) oder im
+  Terminal mit `ariadne scope`; im Profil customer nur im Terminal. Besitzer: ui-fundament.
 -->
 <script lang="ts">
   import { t } from '../i18n';
@@ -26,7 +26,7 @@
   {:else}
     <p class="none">{t('scope.view.empty')}</p>
   {/if}
-  <p class="hint">{t('scope.view.hint')}</p>
+  <p class="hint">{app.profile === 'customer' ? `${t('scope.view.hintCustomer')} ${t('scope.view.cli')}` : t('scope.view.hint')}</p>
 </Dialog>
 
 <style>

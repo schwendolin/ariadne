@@ -5,7 +5,12 @@
  * - Status: `/status` beim Start, nach jedem `terminal`/`project`/`presentation`-Ereignis, jede
  *   Minute (Pause-Restzeit, Leerlauf) und ohne Projekt alle 5 s.
  * - Ein globaler SSE-Strom pro Tab (auch ohne Projekt). Bei `project` wird der ProjectStore
- *   verworfen und neu angelegt (E70); bei 401 geht es ohne Grund zur Anmeldung.
+ *   verworfen und neu angelegt (E70); bei 401 geht es zur Anmeldung.
+ * - Abmeldegrund (Praxistest 1): Endet die Sitzung (401 während der Anmeldung), nennt die
+ *   Anmeldeseite den Grund (`endNotice`): aus dem SSE-Ereignis `session` vor dem Ende, sonst aus
+ *   `project` (closed mit `reason`, locked, Wechsel), sonst «neu gestartet», wenn der Strom vorher
+ *   keine Verbindung bekam, sonst aus dem letzten Status (`active.stopped`), sonst allgemein.
+ *   Selbst abmelden zeigt keinen Grund.
  * - Keine Verbindung: nach 5 s ohne offenen Strom bzw. bei Netzfehlern `offline = true`; Daten
  *   bleiben gedämpft sichtbar mit «Stand HH:MM», Aktionen sind gesperrt.
  * - Pause und Fortsetzen: Anzeige «wartet auf Bestätigung», bis das Ereignis `terminal` den neuen
@@ -21,7 +26,7 @@
 import type { Backend } from '../api/backend';
 import { isApiError, type ClientErrorCode } from '../api/client';
 import type { ConnectionState } from '../api/sse';
-import type { Profile, Status, StreamEvent } from '../api/types';
+import type { Profile, SessionEndReason, Status, StreamEvent } from '../api/types';
 import { t } from '../i18n';
 import { errorText } from '../util/errors';
 import type { AppApi } from './ctx';
@@ -33,6 +38,10 @@ import { url } from '../url/state.svelte';
 export type AuthState = 'init' | 'login' | 'ready';
 export type Phase = 'boot' | 'login' | 'no_project' | 'locked' | 'project';
 export type PendingPause = { kind: 'pause' | 'resume'; since: number };
+export type EndNotice = { reason: SessionEndReason | 'other'; slug: string | null };
+
+/** So lange gilt ein Hinweis aus dem Strom als Ursache eines folgenden 401 */
+const END_HINT_MS = 120_000;
 
 const OFFLINE_AFTER_MS = 5000;
 
@@ -52,6 +61,11 @@ export class AppState implements AppApi {
   pendingPause = $state<Record<string, PendingPause>>({});
   /** Terminals, deren Web-Pause der Server abgelehnt hat (E117), mit dem Budget zu dem Zeitpunkt */
   pauseRefused = $state<Record<string, number | null>>({});
+  /** Grund der beendeten Sitzung für die Anmeldeseite (nur im Speicher dieses Tabs) */
+  endNotice = $state.raw<EndNotice | null>(null);
+  private endHint: (EndNotice & { at: number }) | null = null;
+  /** Der Strom bekam seit der letzten offenen Verbindung keine Verbindung (Daemon weg) */
+  private netLostSinceOpen = false;
 
   private unsubscribe: (() => void) | null = null;
   private offUnauthorized: (() => void) | null = null;
@@ -71,7 +85,7 @@ export class AppState implements AppApi {
   constructor(backend: Backend) {
     this.backend = backend;
     this.prefs = new PrefsStore(backend, this.ui);
-    this.offUnauthorized = backend.onUnauthorized(() => this.toLogin());
+    this.offUnauthorized = backend.onUnauthorized(() => this.sessionEnded());
   }
 
   get presentation(): boolean {
@@ -128,6 +142,9 @@ export class AppState implements AppApi {
   private async enter(): Promise<void> {
     this.auth = 'ready';
     this.loginError = null;
+    this.endNotice = null;
+    this.endHint = null;
+    this.netLostSinceOpen = false;
     void this.prefs.load();
     this.subscribe();
     if (typeof document !== 'undefined') {
@@ -151,7 +168,29 @@ export class AppState implements AppApi {
     }
   }
 
-  /** Sitzung beendet (401, Abmelden): Anmeldung ohne Grund (Briefing 4.1), alle Daten weg. */
+  /** 401: Sitzung beendet; Grund aus Strom, Verbindung oder letztem Status (Praxistest 1). */
+  private sessionEnded(): void {
+    if (this.auth === 'ready') this.endNotice = this.endReason();
+    this.toLogin();
+  }
+
+  private endReason(): EndNotice {
+    const slug = this.status?.project?.slug ?? this.status?.active?.slug ?? null;
+    const h = this.endHint;
+    if (h && Date.now() - h.at < END_HINT_MS) return { reason: h.reason, slug: h.slug ?? slug };
+    if (this.netLostSinceOpen || this.offline) return { reason: 'restart', slug };
+    const a = this.status?.active;
+    if (a?.stopped && (a.end_reason === 'stop' || a.end_reason === 'idle')) return { reason: a.end_reason, slug: a.slug };
+    if (this.status?.locked) return { reason: 'lock', slug };
+    return { reason: 'other', slug };
+  }
+
+  /** Hinweis aus dem Strom merken (Grund eines folgenden 401). */
+  private hintEnd(reason: SessionEndReason, slug: string | null): void {
+    this.endHint = { reason, slug, at: Date.now() };
+  }
+
+  /** Sitzung beendet (401, Abmelden): Anmeldung, alle Daten weg. */
   private toLogin(): void {
     this.closeProject();
     this.unsubscribe?.();
@@ -174,13 +213,15 @@ export class AppState implements AppApi {
     this.unsubscribe?.();
     this.unsubscribe = this.backend.subscribe({
       onEvent: (ev) => this.handleEvent(ev),
-      onState: (st) => this.setConnection(st),
+      onState: (st, cause) => this.setConnection(st, cause),
     });
   }
 
-  private setConnection(st: ConnectionState): void {
+  private setConnection(st: ConnectionState, cause?: 'network' | 'ended' | null): void {
     this.connection = st;
+    if (st === 'retrying' && cause === 'network') this.netLostSinceOpen = true;
     if (st === 'open') {
+      this.netLostSinceOpen = false;
       if (this.offlineTimer) clearTimeout(this.offlineTimer);
       this.offlineTimer = null;
       if (this.offline) {
@@ -284,11 +325,20 @@ export class AppState implements AppApi {
 
   handleEvent(ev: StreamEvent): void {
     switch (ev.name) {
-      case 'project':
+      case 'session':
+        // Praxistest 1: die Sitzung endet gleich, der Grund kommt vor dem 401
+        if (ev.data.change === 'ending') this.hintEnd(ev.data.reason, ev.data.slug ?? this.status?.project?.slug ?? null);
+        return;
+      case 'project': {
+        const slug = ev.data.slug ?? this.status?.project?.slug ?? null;
+        if (ev.data.change === 'closed') this.hintEnd(ev.data.reason ?? 'stop', slug);
+        else if (ev.data.change === 'locked') this.hintEnd('lock', slug);
+        else if (ev.data.change === 'opened' && this.project && ev.data.project_id !== this.project.pid) this.hintEnd('switch', slug);
         // Projekt gewechselt, gesperrt oder geschlossen: alles verwerfen (E70).
         this.closeProject();
         void this.refreshStatus();
         return;
+      }
       case 'terminal':
         void this.refreshStatus();
         break;

@@ -23,7 +23,9 @@ from starlette.responses import Response
 from ariadne.ingest import pending, queries
 from ariadne.ingest.proj_build import display
 from ariadne.parsers._common import canon_ip
+from ariadne.project.guardrails import LabAllowlist
 from ariadne.rules import api as rules_api
+from ariadne.scope.matcher import ScopeMatcher
 from ariadne.web.api.common import Api
 from ariadne.web.api.status import scope_include
 from ariadne.web.api.suggestions import merged as merged_suggestions
@@ -388,12 +390,58 @@ def next_view(conn: Any, profile: str, bag: Bag, redactor: Any = None) -> dict[s
     }
 
 
-def scope_warning(conn: Any, bag: Bag, include: list[str]) -> dict[str, Any] | None:
+def scope_warning(conn: Any, bag: Bag, include: list[str], allowlist: Any = None) -> dict[str, Any] | None:
     """Jüngster Befehl mit Ziel ausserhalb des Scopes (E67, E120) wie ``Status.scope_warning`` (18.4);
-    ``acked`` ist hier immer ``false`` (quittierte Warnungen liefert die Route nicht aus)."""
+    ``acked`` ist hier immer ``false`` (quittierte Warnungen liefert die Route nicht aus). Die Ziele
+    tragen die Vorschläge für «in den Scope aufnehmen» (E129, web-api.md 20.4)."""
     from ariadne.web.api.status import _scope_warning
 
-    return _scope_warning(conn, bag, include, queries.term_refs(conn))
+    return _scope_warning(conn, bag, include, queries.term_refs(conn), allowlist)
+
+
+def scope_name_items(
+    conn: Any, bag: Bag, scope: Any, allowlist: Any = None, profile: str = "lab"
+) -> list[dict[str, Any]]:
+    """E130: Klärung «<name> gehört laut <Quelle> zu <ip> (im Scope). In den Scope aufnehmen?» pro
+    Name, den nmap (Scan-Bericht oder PTR) einer IP im Scope zuordnet und der selbst ausserhalb liegt.
+    Nie automatisch; Verwerfen ist ``d.suggestion.dismiss`` mit ``suggestion_key``."""
+    from ariadne.scope.suggest import SOURCE_LABEL, name_candidates
+
+    cands = name_candidates(conn, scope, allowlist=allowlist)
+    if not cands:
+        return []
+    units = commands_for(conn, [c.unit_id for c in cands if c.unit_id])
+    sbag = with_secrets(bag, conn)
+    out: list[dict[str, Any]] = []
+    for c in cands:
+        b = bag.new()
+        name, ip = b(c.name) or "", b(c.ip) or ""
+        label = SOURCE_LABEL.get(c.source, c.source)
+        row = units.get(c.unit_id or "")
+        out.append({
+            "kind": "scope_name",
+            "item_key": c.key,
+            "suggestion_key": c.key,
+            "ts": iso(c.ts),
+            "name": name,
+            "ip": ip,
+            "host_id": b(c.host_id) or "",
+            "source": c.source,
+            "source_label": label,
+            "text": f"{name} gehört laut {label} zu {ip} (im Scope). In den Scope aufnehmen?",
+            "choices": [{**ch, "entry": b(ch["entry"]) or ""} for ch in c.choices],
+            "public": c.public,
+            "warning": (
+                "Öffentliche Domain: Die Zuordnung stammt vom Ziel. Nur aufnehmen, wenn sie sicher "
+                "zum Auftrag gehört." if c.public else None
+            ),
+            "claim_key": c.claim_key,
+            "change_allowed": profile != "customer",  # im Profil customer nur im Terminal (E129)
+            "unit": unit_brief(row, sbag) if row else None,
+            "ordinal": None,
+            "ctrl": b.ctrl,
+        })
+    return out
 
 
 async def _acked(api: Api, p: Any, cmd_id: str) -> bool:
@@ -417,16 +465,24 @@ def add_routes(router: APIRouter, api: Api) -> None:
         profile = p.info.profile
         redactor = api.daemon.redactor
         include = scope_include(p.settings)
+        matcher = ScopeMatcher.from_settings(p.settings, p.settings_version)
+        allowlist = LabAllowlist.from_config(api.daemon.paths.config_file)
 
         def build(c: Any) -> dict[str, Any]:
             out = next_view(c, profile, bag, redactor)
-            out["scope_warning"] = scope_warning(c, bag, include)
+            out["scope_warning"] = scope_warning(c, bag, include, allowlist)
+            # E130 nach den Einträgen der Projektion (zählt in «open»)
+            out["clarify"].extend(scope_name_items(c, bag, matcher, allowlist, profile))
+            out["open"] = len(out["clarify"])
             return out
 
         view = await api.query(p, build)
         warning = view["scope_warning"]
         if warning is not None and await _acked(api, p, str(warning["cmd_id"])):
             view["scope_warning"] = None
+        if view["scope_warning"] is not None:
+            # E129: «in den Scope aufnehmen» im Dashboard, im Profil customer nur im Terminal
+            view["scope_warning"]["change_allowed"] = profile != "customer"
         keys = [str(i["item_key"]) for i in view["clarify"]]
         if keys:
             from ariadne.web.api.ui_state import item_ordinals, state_call

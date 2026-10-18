@@ -32,6 +32,8 @@ from ariadne.ingest.identity import host_identifier, normalize_identifier
 from ariadne.ingest.proj_findings import FINDING_KINDS, evidence_id, fold
 from ariadne.ingest.queries import entity_of_subject
 from ariadne.rules import api as rules_api
+from ariadne.scope import suggest as scope_suggest
+from ariadne.scope.matcher import ScopeMatcher
 from ariadne.store.api import AppendItem
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError, validation_detail
@@ -333,6 +335,7 @@ def _check_refs(
     items: list[tuple[str, dict[str, Any]]],
     profile: str = "lab",
     positions: list[int] | None = None,
+    scope: Any = None,
 ) -> None:
     """Bezüge gegen den Stand prüfen; Fehler: 409 ``conflict`` (oder 403 bei kritischen Zielen,
     422 bei ``severity_required``, ``same_request`` und ``basis_required``). ``positions`` nennt die
@@ -355,7 +358,10 @@ def _check_refs(
             continue
         if kind in ("d.suggestion.done", "d.suggestion.dismiss"):
             try:
-                # Zuerst die KI-Denkanstösse (eigene Schlüssel), sonst die Regel-Engine
+                # Zuerst E130 (Name zu IP im Scope) und die KI-Denkanstösse (eigene Schlüssel),
+                # sonst die Regel-Engine
+                if scope is not None and scope_suggest.check_decision(conn, scope, kind, h):
+                    continue
                 if not ai_store.check_decision(conn, kind, h):
                     rules_api.check_decision(conn, kind, h, profile=profile)
             except rules_api.RuleRefError as exc:
@@ -495,7 +501,8 @@ def add_routes(router: APIRouter, api: Api) -> None:
         items = [(body.decisions[i].kind, validated[i]) for i in todo]
         if any(k in ("d.suggestion.done", "d.suggestion.dismiss") for k, _h in items):
             await api.sync(p)  # die Regel-Engine liest frühere Entscheide aus der Projektion
-        await api.query_journal(p, lambda c, j: _check_refs(c, j, items, profile, todo))
+        matcher = ScopeMatcher.from_settings(p.settings, p.settings_version)
+        await api.query_journal(p, lambda c, j: _check_refs(c, j, items, profile, todo, matcher))
         # Ab hier kein await: Projekt prüfen, einreihen, ein Commit (E70)
         d = api.daemon
         if d.project is not p or p.info.id != pid:

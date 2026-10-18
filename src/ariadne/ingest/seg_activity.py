@@ -17,7 +17,7 @@ from ariadne.scope.api import ScopeChecker
 from ariadne.scope.normalize import to_identifier
 from ariadne.scope.targets import analyze_targets, tool_name
 
-__all__ = ["activity_row", "write_activity", "add_route"]
+__all__ = ["activity_row", "write_activity", "add_route", "rescope"]
 
 _COLS = (
     "cmd_id", "terminal_id", "ts_utc_ns", "ts_end_ns", "operator_id", "ctx_kind", "ctx_host", "ctx_user",
@@ -95,3 +95,33 @@ def add_route(conn: Any, seq: int, header: Mapping[str, Any]) -> None:
     if header.get("src_ip"):
         conn.execute("UPDATE activity SET src_ip = ? WHERE cmd_id = ? AND src_ip IS NULL",
                      (header.get("src_ip"), header.get("cmd_id")))
+
+
+def rescope(conn: Any, scope: ScopeChecker | None) -> int:
+    """Scope-Urteile der Ziele im Aktivitätsprotokoll neu berechnen (nach ``d.scope.update``, E129):
+    Die Scope-Warnung folgt dem aktuellen Scope wie nach einem Reparse. Gibt die Zahl der Zeilen
+    zurück."""
+    if scope is None:
+        return 0
+    n = 0
+    rows = conn.execute("SELECT cmd_id, ts_utc_ns, target_scope FROM activity "
+                        "WHERE target_scope != '[]'").fetchall()
+    for cmd_id, ts, raw in rows:
+        try:
+            entries = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(entries, list):
+            continue
+        for e in entries:
+            if not isinstance(e, dict) or not isinstance(e.get("raw"), str):
+                continue
+            try:
+                v = scope.check(e["raw"], ts if isinstance(ts, int) else None)
+                e["verdict"], e["rule"] = v.verdict, v.rule
+            except Exception:  # noqa: BLE001 - fail-closed wie die Projektion
+                e["verdict"], e["rule"] = "unknown", None
+        conn.execute("UPDATE activity SET target_scope = ?, scope_version = ? WHERE cmd_id = ?",
+                     (json.dumps(entries, ensure_ascii=False), getattr(scope, "version", None), cmd_id))
+        n += 1
+    return n

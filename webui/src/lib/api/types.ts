@@ -39,7 +39,9 @@ export type ApiErrorCode =
   | 'unauthorized' | 'forbidden' | 'policy' | 'not_found' | 'method' | 'no_project' | 'project_mismatch'
   | 'conflict' | 'too_large' | 'host' | 'validation' | 'locked' | 'rate_limited' | 'not_implemented'
   | 'unavailable' | 'internal' | 'clipboard_tool' | 'clipboard_session'
-  | 'shot_display' | 'shot_wayland' | 'shot_window' | 'shot_region' | 'shot_failed';
+  | 'shot_display' | 'shot_wayland' | 'shot_window' | 'shot_region' | 'shot_failed'
+  /** E129: neue Einschlüsse ausserhalb der Lab-Allowlist ohne «kein Kundenauftrag» (nur im Terminal) */
+  | 'guardrail';
 
 export interface ApiErrorBody {
   error: {
@@ -155,9 +157,12 @@ export interface ScopeWarning {
   terminal: TermRef;
   text: string | null;
   ctrl: boolean;
-  targets: { value: string; verdict: Verdict; ctrl: boolean }[];
+  /** `proposals` (20.4): Vorschläge zum Aufnehmen, leer ausser bei verdict 'out' */
+  targets: { value: string; verdict: Verdict; ctrl: boolean; proposals?: ScopeOption[] | null }[];
   scope: string[];
   acked: boolean;
+  /** nur in `/next` (20.4): false im Profil customer */
+  change_allowed?: boolean;
 }
 
 export type LlmMode = 'off' | 'local' | 'cloud';
@@ -347,6 +352,8 @@ export interface OosItem {
   punycode: string | null;
   note: 'same_mac' | 'forged_callback' | null;
   related: string | null;
+  /** E129: Vorschläge des Servers, falls mitgeliefert */
+  proposals?: ScopeOption[] | null;
 }
 
 export interface GraphView {
@@ -555,17 +562,28 @@ export type NextItem = NextBase &
     }
   | { kind: 'mass_find'; item_key: string; ts: string; unit: UnitBrief; hosts: number; candidates: number; ctrl?: boolean }
   | {
-      /** E130: nmap ordnet einen Namen einer IP im Scope zu; Vorschlag, den Namen aufzunehmen (nie automatisch) */
-      kind: 'scope_suggestion';
+      /** E130 (web-api.md 20.5): nmap ordnet einen Namen einer IP im Scope zu; nie automatisch */
+      kind: 'scope_name';
       item_key: string;
-      ts: string;
+      /** Schlüssel für «Verwerfen» (d.suggestion.dismiss) */
+      suggestion_key: string;
+      ts: string | null;
       /** Name aus der Ausgabe (Zieldaten) */
       name: string;
       /** IP im Scope, zu der nmap den Namen zeigt */
       ip: string;
-      /** Vorschläge: genauer Name, Domain-Wildcard (nie die IP, die ist schon im Scope) */
-      options: ScopeOption[];
+      host_id: string;
+      source: 'nmap' | 'ptr';
+      source_label: string;
+      /** fester Satz des Servers; die UI setzt ihn selbst aus Teilen zusammen (Zieldaten über Txt) */
+      text: string;
+      /** nur Name ('name'), dazu '*.domain' ('wildcard'), wenn möglich */
+      choices: ScopeOption[];
+      public: boolean;
+      warning: string | null;
+      claim_key: string;
       unit: UnitBrief | null;
+      change_allowed: boolean;
       ctrl?: boolean;
     }
   );
@@ -741,6 +759,15 @@ export type TimelineItem = TimelineBase &
         reason: string | null;
         ref: string | null;
         effect: { rejected: number; weakened: number } | null;
+        /** web-api.md 20.3: Scope-Änderung; `revertible` zeigt «Rückgängig» (op 'revert') */
+        scope_change?: {
+          op: 'add' | 'remove' | 'exclude' | 'revert' | null;
+          entries: string[];
+          version: number | null;
+          revert_of: string | null;
+          reverted_by: string | null;
+          revertible: boolean;
+        } | null;
       }
     | {
         /** Korrektur D15 (18.12): Callback eines Listeners, der den Kontext nicht automatisch setzte */
@@ -868,9 +895,7 @@ export type DecisionKind =
   | 'd.entity.split' | 'd.status.work' | 'd.status.access' | 'd.note.set' | 'd.tag.add' | 'd.tag.remove'
   | 'd.terminal.label' | 'd.keystep.mark' | 'd.revoke' | 'd.unit.distrust' | 'd.suggestion.done'
   | 'd.suggestion.dismiss' | 'd.finding.create' | 'd.finding.update' | 'd.finding.evidence.add'
-  | 'd.finding.evidence.remove' | 'd.finding.delete'
-  /** Entwurf ui (E130): Klärung «In den Scope aufnehmen?» verwerfen */
-  | 'd.scope.dismiss';
+  | 'd.finding.evidence.remove' | 'd.finding.delete';
 
 export interface DecisionResult {
   decision_id: string | null;
@@ -1015,21 +1040,23 @@ export interface EvidenceRefIn {
   lines?: [number, number];
 }
 
-// ------------------------------------------------------------------ Scope erweitern (E129, E130), Entwurf ui
+// ------------------------------------------------------------------ Scope erweitern (E129, E130), web-api.md 20
 /**
- * Entwurf der UI für die Routen aus E129 (Agent «backend» baut sie gleichzeitig; massgeblich ist
- * docs/web-api.md, sobald dort beschrieben). Die UI urteilt nie selbst über den Scope: Vorschläge,
- * öffentliche Endungen und Urteile kommen vom Server (ScopeMatcher), Einträge sind Text.
+ * Routen aus E129 (`src/ariadne/web/api/scope.py`). Die UI urteilt nie selbst über den Scope:
+ * Vorschläge, «öffentliche Endung» und Urteile kommen vom Server (ScopeMatcher), Einträge sind Text.
  */
-export type ScopeEntryKind = 'name' | 'wildcard' | 'ip' | 'cidr' | 'range' | 'url' | 'other';
+export type ScopeEntryKind = 'name' | 'url_host' | 'wildcard' | 'ip' | 'cidr' | 'range' | 'url' | 'other';
 export interface ScopeOption {
   /** genauer Eintrag, so wie er in den Scope kommt (z. B. «recovery.vantis.internal», «*.vantis.internal») */
   entry: string;
-  kind: ScopeEntryKind;
-  /** öffentliche Endung oder öffentliche Adresse: Warnhinweis vor dem Aufnehmen */
+  kind: ScopeEntryKind | string;
+  /** öffentliche Endung: Warnhinweis vor dem Aufnehmen */
   public: boolean;
-  ctrl: boolean;
+  /** ausserhalb der Lab-Allowlist: im Profil lab nur im Terminal mit «kein Kundenauftrag» */
+  outside_lab?: boolean;
+  ctrl?: boolean;
 }
+/** Entwurf ui (nicht in web-api.md 20): Vorschläge zu einem Ziel ohne `proposals`; fehlt die Route, 404 */
 export interface ScopeOptions {
   value: string;
   ctrl: boolean;
@@ -1037,30 +1064,63 @@ export interface ScopeOptions {
   options: ScopeOption[];
 }
 export interface ScopeWindow {
-  days: string | string[] | null;
+  days: string | null;
   from: string | null;
   to: string | null;
   tz: string | null;
 }
+export interface ScopeHistoryItem {
+  decision_id: string;
+  version: number | null;
+  ts: string | null;
+  origin: 'cli' | 'webui';
+  op: 'add' | 'remove' | 'exclude' | 'revert' | string;
+  entries: string[];
+  include_added: string[];
+  include_removed: string[];
+  exclude_added: string[];
+  exclude_removed: string[];
+  revert_of: string | null;
+  reverted_by: string | null;
+}
+/** GET /p/{pid}/scope */
 export interface ScopeView {
+  version: number;
+  profile: Profile;
   include: string[];
   exclude: string[];
   windows: ScopeWindow[];
-  version: number;
+  not_customer: boolean;
   /** false im Profil customer: ändern nur im Terminal (`ariadne scope`) */
-  editable: boolean;
+  change_allowed: boolean;
+  history: ScopeHistoryItem[];
 }
 export type ScopeOp = 'add' | 'remove' | 'exclude';
+/** Eingabe der UI; HttpBackend macht daraus `POST /scope/changes` mit `entries: [entry]`. */
 export interface ScopeChange {
   op: ScopeOp;
   entry: string;
-  /** Anlass: Scope-Warnung (cmd_id), Klärung (item_key) oder Out-of-Scope-Rand (identifier) */
+  /** Anlass in der UI (Scope-Warnung, Klärung, Out-of-Scope-Rand); geht nicht an den Server */
   source?: { cmd_id?: string; item_key?: string; identifier?: string } | null;
 }
+/** Antwort von POST /p/{pid}/scope/changes (201, mit dry_run 200) */
 export interface ScopeChangeResult {
-  /** Entscheid (rückgängig per d.revoke) */
   decision_id: string | null;
+  dry_run?: boolean;
+  seq?: number | null;
   version: number;
+  op?: string | null;
+  entries?: string[];
+  include?: string[];
+  exclude?: string[];
+  include_added?: string[];
+  include_removed?: string[];
+  exclude_added?: string[];
+  exclude_removed?: string[];
+  outside?: string[];
+  revert_of?: string | null;
+  needs_not_customer?: boolean;
+  verdicts?: { entry: string; verdict: Verdict | string }[];
 }
 
 // ------------------------------------------------------------------ Ereignisstrom (14, 18.9)
@@ -1099,6 +1159,8 @@ export interface StreamPayloads {
    * `slug` ist der Kurzname des Projekts (fester Bezeichner, kein Zieldatum).
    */
   session: { change: 'ending'; reason: SessionEndReason; slug: string | null };
+  /** E129: Scope geändert (neue Version); die Neuauswertung meldet danach `changes` */
+  scope: { project_id: string; version: number };
 }
 export type SessionEndReason = 'stop' | 'idle' | 'lock' | 'switch' | 'restart' | 'shutdown' | 'revoked' | 'expired';
 export type StreamEventName = keyof StreamPayloads;

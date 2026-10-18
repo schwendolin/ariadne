@@ -19,6 +19,7 @@ import { FindingsStore } from './findings.svelte';
 import { HostStore } from './host.svelte';
 import { MapStore } from './map.svelte';
 import { NextStore } from './next.svelte';
+import { ScopeStore } from './scope.svelte';
 import { SeenStore } from './seen.svelte';
 import { ShotsStore } from './shots.svelte';
 import { TerminalsStore } from './terminals.svelte';
@@ -46,6 +47,7 @@ export class ProjectStore implements ProjectCtx {
   readonly ai: AiStore;
   readonly shots: ShotsStore;
   readonly exports: ExportStore;
+  readonly scope: ScopeStore;
   private readonly parts: ProjectPart[];
   private changesTimer: ReturnType<typeof setTimeout> | null = null;
   private changesBusy = false;
@@ -69,7 +71,8 @@ export class ProjectStore implements ProjectCtx {
     this.ai = new AiStore(this);
     this.shots = new ShotsStore(this);
     this.exports = new ExportStore(this);
-    this.parts = [this.map, this.next, this.host, this.seen, this.terminals, this.timeline, this.evidence, this.findings, this.ai, this.shots, this.exports];
+    this.scope = new ScopeStore(this, () => this.reloadInfo());
+    this.parts = [this.map, this.next, this.host, this.seen, this.terminals, this.timeline, this.evidence, this.findings, this.ai, this.shots, this.exports, this.scope];
   }
 
   get signal(): AbortSignal {
@@ -88,6 +91,15 @@ export class ProjectStore implements ProjectCtx {
     }
     await Promise.all(this.parts.map((p) => p.load().catch(() => undefined)));
     this.loaded = true;
+  }
+
+  /** Projektangaben neu holen (Scope nach einer Änderung, E129) */
+  async reloadInfo(): Promise<void> {
+    try {
+      this.info = await this.backend.project(this.pid, this.signal);
+    } catch {
+      /* alter Stand bleibt */
+    }
   }
 
   /** Eigene Entscheide dieses Tabs (höchstens 100, 10 Minuten), Korrektur A5. */

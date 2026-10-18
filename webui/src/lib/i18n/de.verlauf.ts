@@ -178,6 +178,7 @@ export const deVerlauf = {
   'tl.distrustedValues': '{n} Wert|{n} Werte',
   'tl.trustAgain': 'Wieder vertrauen',
   'tl.trustAgainFor': 'Befehl {ref} wieder vertrauen',
+  'tl.scopeRevert': 'Rückgängig',
   'tl.undo': 'Rückgängig',
   'tl.undoFor': 'Werte aus Befehl {ref} rückgängig machen',
   'tl.segment': 'Remote-Segment',

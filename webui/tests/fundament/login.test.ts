@@ -31,9 +31,10 @@ describe('Anmeldung', () => {
     expect(container.querySelector('input[type="password"]')).toBeNull();
     expect(container.textContent).toContain('Ariadne fragt hier nie nach Passphrasen.');
     expect(container.textContent?.replace(/\s+/g, ' ')).toContain(
-      'Code holen: auf dem Mac ariadne-mac start oder ssh -t kali-sl code, in der Kali ariadne ui.',
+      'Code im Terminal holen: ariadne ui --code (oder ariadne ui öffnet den Browser direkt) Vom Mac: ariadne-mac start oder ssh -t kali-sl code',
     );
-    expect((screen.getByLabelText('Anmeldecode') as HTMLInputElement).placeholder).toBe('XXXX-XXXX');
+    // Tippcode: 10 Zeichen (sessions.format_typed, «ABCDE-FGHJK»)
+    expect((screen.getByLabelText('Anmeldecode') as HTMLInputElement).placeholder).toBe('XXXXX-XXXXX');
   });
 
   it('Eingabe ungültig: Fehler ohne Anfrage an den Server', async () => {
@@ -87,7 +88,7 @@ describe('Anmeldung', () => {
     expect(app.loginError).toBe('unauthorized');
   });
 
-  it('Sitzung beendet (401 mitten in der Arbeit): Anmeldung ohne Grund, Daten verworfen', async () => {
+  it('Sitzung beendet (401 mitten in der Arbeit): Anmeldung mit allgemeinem Grund, Daten verworfen', async () => {
     const { app, backend } = await makeApp('normal');
     expect(app.phase).toBe('project');
     const project = app.project;
@@ -102,6 +103,8 @@ describe('Anmeldung', () => {
     expect(app.ui.dialog).toBeNull();
     const r = render(LoginView, { props: { app } });
     expect(r.container.querySelector('[role="alert"]')).toBeNull();
+    // Praxistest 1: ohne Hinweis aus dem Strom ein allgemeiner Grund
+    expect(r.container.querySelector('[data-testid="login-ended"]')?.textContent).toBe('Die Sitzung wurde beendet. Neue Anmeldung: ariadne ui');
   });
 
   it('Abmelden über das Menü löscht die Sitzung und zeigt die Anmeldung', async () => {

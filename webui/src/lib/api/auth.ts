@@ -112,3 +112,16 @@ export function normalizeTypedCode(input: string): string | null {
   const code = input.replace(/[\s-]+/g, '');
   return CODE_RE.test(code) ? code : null;
 }
+
+/**
+ * Praxistest 1: Sieht eine Eingabe nach einer Passphrase aus statt nach dem Einmal-Code? Ohne
+ * Bindestrich, mindestens 6 Zeichen und weder ein Tippcode ohne Bindestrich (8 bis 10 Buchstaben
+ * und Ziffern) noch der lange Code aus dem Link (ab 20 Zeichen aus A-Z, a-z, 0-9, _).
+ */
+export function looksLikePassphrase(input: string): boolean {
+  const v = input.trim();
+  if (v.length < 6 || v.includes('-')) return false;
+  if (/^[A-Za-z0-9]{8,10}$/.test(v)) return false;
+  if (/^[A-Za-z0-9_]{20,128}$/.test(v)) return false;
+  return true;
+}

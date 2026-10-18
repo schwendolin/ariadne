@@ -24,6 +24,10 @@ ariadne status
 
 Öffne zwei Terminals: eines in QTerminal, eines in der Webkonsole (Terminal im Kali-Desktop über den Browser). Beide sollen in `ariadne status` erscheinen.
 
+Dashboard: `ariadne ui` öffnet Firefox schon angemeldet. Fragt das Dashboard nach einem **Anmeldecode** (etwa nach `ariadne stop` und neuem `ariadne start`), dann `ariadne ui --code` aufrufen und diesen Code eintippen, **nie die Passphrase**.
+
+Den Scope zeigt `ariadne scope`. `--target` bei `ariadne start` gilt nur beim Anlegen; bei einem vorhandenen Projekt nennt Ariadne den aktuellen Scope und den Befehl `ariadne scope add …`.
+
 Trage dein sudo-Passwort als **eigenes Secret** ein (Eingabe ohne Echo). Nur eingetragene Werte ersetzt Ariadne vor Export und KI; ohne diesen Schritt kann Schritt 11 nichts zeigen:
 
 ```sh
@@ -78,6 +82,16 @@ nmap -sL -n 10.10.10.99      # Listen-Scan: nennt das Ziel, schickt ihm aber nic
 ```
 
 Erwartet: Die Warnung «Ziel ausserhalb des Scopes» steht als **erster Eintrag** in «Als Nächstes» (E120), mit «Quittieren». Quittieren; sie verschwindet.
+
+Scope erweitern (E129): Gehört ein Ziel doch zum Auftrag, nicht quittieren, sondern aufnehmen:
+
+```sh
+ariadne scope add 10.10.10.99     # zeigt den genauen Eintrag, fragt [j/N]
+ariadne scope                     # Version 2, Änderung mit decision_id
+ariadne scope undo                # wieder rückgängig
+```
+
+Erwartet: Nach `j` verschwindet die Warnung zu diesem Befehl (Neuauswertung, wenige Sekunden), in der Zeitachse steht «Scope erweitert (Version 2)». Im Dashboard geht dasselbe über «In den Scope aufnehmen» an der Warnung, mit Bestätigung; Rückgängig über die Zeitachse. Meldet nmap einen Namen zu einer IP im Scope (`Nmap scan report for name.lab (10.10.10.5)`), steht unter «Klären» «name.lab gehört laut nmap zu 10.10.10.5 (im Scope). In den Scope aufnehmen?» mit der Wahl nur Name oder `*.domain`; nie automatisch.
 
 ## 8 Dashboard vom Mac
 
@@ -142,6 +156,7 @@ Pro Punkt: **ok**, **Problem** (was genau, Uhrzeit) oder **nicht geprüft**.
 | 11 | **Screenshots:** Funktioniert `ariadne shot window`, `monitor` und `region --region 0,0,400,300`? Richtiges Fenster? | |
 | 12 | Denkanstoss «Versionen recherchieren» ein Mal pro Host, Liste vollständig, Befehle kopierbar | |
 | 13 | Scope-Warnung als erster Eintrag, Quittieren wirkt, kommt bei neuem Ziel ausserhalb wieder | |
+| 13a | Scope erweitern: `ariadne scope add` und «In den Scope aufnehmen» im Dashboard, Warnung verschwindet, Rückgängig wirkt; Klärung zu nmap-Namen erscheint | |
 | 14 | Pause: nichts aus der Pause in der Zeitachse | |
 | 15 | Export: lesbar, eigenes Secret (sudo) als Sternchen, Eingaben ohne Echo als `••••••••`, Screenshot mit Notiz | |
 | 15a | Optional KI: Ergebnis (Anzahl Denkanstösse, brauchbar?), Kosten laut `ariadne ai status`, Meldung bei Fehlern wörtlich, erledigt/verwerfen wirkt | |

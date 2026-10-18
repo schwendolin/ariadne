@@ -4,6 +4,8 @@
   (Zieldaten, über Txt), Ziel mit Urteil, Zeit. «Quittieren» schreibt `PUT /ui/scope-ack`, danach
   lädt die Spalte `/next` neu (der Eintrag verschwindet); «In der Zeitachse» springt zur Zeile.
   Die Karte unten rechts entfällt; das Kennzeichen in der Kopfzeile führt hierher (`scopeFocus`).
+  E129: «In den Scope aufnehmen …» öffnet den Bestätigungsdialog mit den Vorschlägen des Servers
+  für die Ziele der Warnung; im Profil customer gesperrt mit Hinweis auf `ariadne scope`.
   Besitzer: ui.
 -->
 <script lang="ts">
@@ -45,6 +47,15 @@
     url.go('zeitachse', { zeile: w.cmd_id });
   }
 
+  const editable = $derived(project.scope.editable && w.change_allowed !== false);
+  const addReason = $derived(app.offline ? t('err.network') : !editable ? t('scope.edit.err.policy') : null);
+
+  function addToScope(): void {
+    const values = (w.targets ?? []).filter((tg) => tg.value.length > 0).map((tg) => ({ value: tg.value, ctrl: tg.ctrl, verdict: tg.verdict, proposals: tg.proposals ?? null }));
+    if (values.length === 0) return;
+    app.ui.openDialog({ kind: 'scope-add', values, source: { cmd_id: w.cmd_id } });
+  }
+
   async function ack(): Promise<void> {
     busy = true;
     const ok = await app.ackScopeWarning(w.cmd_id);
@@ -64,6 +75,9 @@
   {/each}
   <div class="actions">
     <button type="button" class="primary" disabled={busy || app.offline} onclick={ack}>{t('scope.ack')}</button>
+    {#if (w.targets ?? []).length > 0}
+      <button type="button" class="secondary" disabled={!!addReason} title={addReason ?? undefined} onclick={addToScope}>{t('scope.add.button')}</button>
+    {/if}
     <button type="button" class="secondary" onclick={toTimeline}>{t('scope.toTimeline')}</button>
   </div>
 </div>
@@ -103,6 +117,7 @@
     display: flex;
     gap: var(--sp-2);
     align-items: center;
+    flex-wrap: wrap;
   }
   .primary,
   .secondary {
@@ -121,7 +136,8 @@
     border-color: var(--fg);
     font-weight: 600;
   }
-  .primary:disabled {
+  .primary:disabled,
+  .secondary:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }

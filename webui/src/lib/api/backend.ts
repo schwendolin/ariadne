@@ -9,6 +9,7 @@
 import type { TokenStore } from './auth';
 import { ApiClient, apiPath } from './client';
 import { SseClient, type ConnectionState } from './sse';
+import { clientRef } from '../stores/ctx';
 import type {
   Accepted,
   AiJob,
@@ -69,7 +70,8 @@ import type {
 
 export interface StreamHandlers {
   onEvent: (ev: StreamEvent) => void;
-  onState?: (state: ConnectionState) => void;
+  /** `cause` bei 'retrying': 'network' (keine Verbindung) oder 'ended' (Strom vom Server beendet) */
+  onState?: (state: ConnectionState, cause?: 'network' | 'ended' | null) => void;
 }
 
 export interface Backend {
@@ -105,8 +107,14 @@ export interface Backend {
   ackScopeWarning(pid: string, cmdId: string): Promise<void>;
   /** Scope erweitern (E129, E130; Entwurf ui, Routen von «backend») */
   scope(pid: string, signal?: AbortSignal): Promise<ScopeView>;
+  /** Entwurf ui: Vorschläge zu einem Ziel ohne mitgelieferte `proposals` (404 bei älterem Server) */
   scopeOptions(pid: string, value: string, signal?: AbortSignal): Promise<ScopeOptions>;
+  /** POST /scope/changes mit `entries: [entry]` (web-api.md 20) */
   changeScope(pid: string, change: ScopeChange): Promise<ScopeChangeResult>;
+  /** Rückgängig: POST /scope/changes mit `op: 'revert'` */
+  revertScope(pid: string, decisionId: string): Promise<ScopeChangeResult>;
+  /** Vorschau im Dialog: dieselbe Anfrage mit `dry_run: true` (nichts wird geschrieben) */
+  previewScope(pid: string, change: ScopeChange): Promise<ScopeChangeResult>;
 
   // Hosts und Services (8)
   hosts(pid: string, signal?: AbortSignal): Promise<HostSummary[]>;
@@ -250,7 +258,13 @@ export class HttpBackend implements Backend {
     return this.api.get<ScopeOptions>(apiPath('p', pid, 'scope', 'options'), { query: { value }, signal });
   }
   changeScope(pid: string, change: ScopeChange) {
-    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope'), change);
+    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { op: change.op, entries: [change.entry], client_ref: clientRef() });
+  }
+  previewScope(pid: string, change: ScopeChange) {
+    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { op: change.op, entries: [change.entry], dry_run: true });
+  }
+  revertScope(pid: string, decisionId: string) {
+    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope', 'changes'), { op: 'revert', decision_id: decisionId, client_ref: clientRef() });
   }
 
   async hosts(pid: string, signal?: AbortSignal) {
@@ -363,7 +377,7 @@ export class HttpBackend implements Backend {
       url: `${this.api.baseUrl}/events`,
       tokens: this.tokens,
       onEvent: handlers.onEvent,
-      onState: (s) => handlers.onState?.(s),
+      onState: (s, info) => handlers.onState?.(s, info.cause ?? null),
       onUnauthorized: () => this.unauthorized.forEach((cb) => cb()),
     });
     void client.start();

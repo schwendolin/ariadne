@@ -29,7 +29,7 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
@@ -521,11 +521,35 @@ class DTag(_M):
     tag: str = Field(max_length=64)
 
 
+ScopeEntry = Annotated[str, Field(min_length=1, max_length=260)]
+ScopeOp = Literal["add", "remove", "exclude", "revert"]
+
+
+class DScopeChange(_M):
+    """Was eine Scope-Änderung bewirkt hat (E129). Ergänzt in der Korrektur nach dem Praxistest, nur
+    additiv: ältere ``d.scope.update`` ohne ``change`` bleiben gültig.
+
+    ``entries`` sind die Einträge, wie der Nutzer sie bestätigt hat (normalisiert wie beim Anlegen).
+    Die vier Listen sind die tatsächliche Änderung gegenüber der Vorversion; Rückgängig wendet sie
+    umgekehrt auf den dann aktuellen Stand an. ``revert_of`` nennt die rückgängig gemachte Änderung."""
+
+    op: ScopeOp
+    entries: tuple[ScopeEntry, ...] = Field(default=(), max_length=20)
+    include_added: tuple[ScopeEntry, ...] = Field(default=(), max_length=20)
+    include_removed: tuple[ScopeEntry, ...] = Field(default=(), max_length=20)
+    exclude_added: tuple[ScopeEntry, ...] = Field(default=(), max_length=20)
+    exclude_removed: tuple[ScopeEntry, ...] = Field(default=(), max_length=20)
+    revert_of: str | None = Field(default=None, min_length=1, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class DScopeUpdate(_M):
-    """Vollständiger Snapshot der Projekteinstellungen als TOML."""
+    """Vollständiger Snapshot der Projekteinstellungen als TOML; ``change`` nur bei Änderungen über
+    ``ariadne scope`` bzw. ``POST /p/{pid}/scope/changes`` (E129)."""
 
     version: int = Field(ge=1)
     toml: str
+    change: DScopeChange | None = None
 
 
 class DAutomodeSet(_M):

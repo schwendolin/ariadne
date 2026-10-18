@@ -183,6 +183,7 @@ NOTIFY_KINDS = {
     "presentation": "on: bool, source",
     "stopping": "Daemon endet",
     "job": "job_id, kind: reparse, status: running | done | failed",
+    "scope": "project_id, version (nach einer Scope-Änderung, E129)",
 }
 
 
@@ -2604,3 +2605,7 @@ _OPS.update(_ai_ops.OPS)
 from ariadne.sources import screenshot_service as _shot_ops  # noqa: E402
 
 _OPS.update(_shot_ops.OPS)
+# Korrektur nach dem Praxistest (E129): Scope anzeigen und ändern (scope.show, scope.change).
+from ariadne.scope import ops as _scope_ops  # noqa: E402
+
+_OPS.update(_scope_ops.OPS)

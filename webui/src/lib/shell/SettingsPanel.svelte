@@ -2,7 +2,10 @@
   Einstellungen als Tafel wie der Beleg (Screen 11, E112): Darstellung (System, Hell, Dunkel),
   Dichte, Lernmodus, KI, Profil, eigene Secrets (nur verdeckt mit Zahl, nie Werte, nie über HTTP),
   Projekt mit Scope. Theme, Dichte und Lernmodus speichert der Server (PUT /ui/prefs); die Anzeige
-  folgt sofort, bei Fehler zurück mit Meldung. Kein Browser-Speicher. Besitzer: ui-fundament.
+  folgt sofort, bei Fehler zurück mit Meldung. Kein Browser-Speicher.
+  Abschnitt Scope (E129): Ziele, Ausschlüsse und Zeitfenster aus `GET /scope`; «Entfernen …» pro
+  Eintrag und «Ausschliessen …» öffnen den Bestätigungsdialog; im Profil customer nur Anzeige mit
+  Hinweis auf `ariadne scope`. Einträge als Text (Txt). Besitzer: ui-fundament, Scope: ui.
 -->
 <script lang="ts">
   import { t } from '../i18n';
@@ -10,6 +13,8 @@
   import Panel from '../ui/Panel.svelte';
   import Segmented from '../ui/Segmented.svelte';
   import Toggle from '../ui/Toggle.svelte';
+  import Txt from '../ui/Txt.svelte';
+  import type { ScopeWindow } from '../api/types';
   import { url } from '../url/state.svelte';
 
   let { app }: { app: AppState } = $props();
@@ -18,6 +23,25 @@
   const info = $derived(app.project?.info ?? null);
   const own = $derived(s?.operator?.own_secrets);
   const disabled = $derived(app.offline);
+  const scopeStore = $derived(app.project?.scope ?? null);
+  const sv = $derived(scopeStore?.view ?? null);
+  const include = $derived(sv?.include ?? info?.scope.include ?? []);
+  const exclude = $derived(sv?.exclude ?? info?.scope.exclude ?? []);
+  const windows = $derived(sv?.windows ?? []);
+  const editable = $derived(!!scopeStore && scopeStore.editable && !!app.project);
+  const editReason = $derived(app.offline ? t('err.network') : null);
+
+  function windowText(w: ScopeWindow): string {
+    return [w.days, w.from && w.to ? `${w.from}–${w.to}` : (w.from ?? w.to), w.tz].filter(Boolean).join(' ');
+  }
+
+  function removeEntry(entry: string, list: 'include' | 'exclude'): void {
+    app.ui.openDialog({ kind: 'scope-edit', op: 'remove', entry, list });
+  }
+
+  function excludeEntry(): void {
+    app.ui.openDialog({ kind: 'scope-edit', op: 'exclude' });
+  }
 
   function aiText(): string {
     if (!s || s.llm.mode === 'off') return t('settings.ai.off');
@@ -83,10 +107,49 @@
     </dd>
     <dt>{t('settings.project')}</dt>
     <dd>
-      {#if info}<span class="mono">{info.slug}</span> · {t('settings.scope', { scope: info.scope.include.join(', ') || '–' })}{:else}–{/if}
+      {#if info}<span class="mono">{info.slug}</span>{:else}–{/if}
       <span class="faint">· {t('settings.project.hint')}</span>
     </dd>
   </dl>
+  {#if app.project}
+    <section class="scope" aria-labelledby="set-scope" data-testid="settings-scope">
+      <h3 id="set-scope">{t('scope.view.title')}</h3>
+      <h4>{t('scope.view.include')}</h4>
+      {#if include.length === 0}<p class="none">{t('scope.view.empty')}</p>{/if}
+      <ul>
+        {#each include as e, i (`${i}:${e}`)}
+          <li>
+            <span class="mono entry"><Txt value={e} mono max={120} /></span>
+            {#if editable}<button type="button" class="small" disabled={!!editReason} title={editReason ?? undefined} onclick={() => removeEntry(e, 'include')}>{t('scope.edit.removeButton')}</button>{/if}
+          </li>
+        {/each}
+      </ul>
+      <h4>{t('scope.view.exclude')}</h4>
+      {#if exclude.length === 0}<p class="none">{t('scope.view.empty')}</p>{/if}
+      <ul>
+        {#each exclude as e, i (`${i}:${e}`)}
+          <li>
+            <span class="mono entry"><Txt value={e} mono max={120} /></span>
+            {#if editable}<button type="button" class="small" disabled={!!editReason} title={editReason ?? undefined} onclick={() => removeEntry(e, 'exclude')}>{t('scope.edit.removeButton')}</button>{/if}
+          </li>
+        {/each}
+      </ul>
+      {#if editable}
+        <button type="button" class="small add" disabled={!!editReason} title={editReason ?? undefined} onclick={excludeEntry}>{t('scope.edit.excludeButton')}</button>
+      {/if}
+      <h4>{t('scope.view.windows')}</h4>
+      {#if windows.length === 0}
+        <p class="none">{t('scope.view.windowsNone')}</p>
+      {:else}
+        <ul>{#each windows as w, i (i)}<li><span class="mono entry"><Txt value={windowText(w)} mono max={120} /></span></li>{/each}</ul>
+      {/if}
+      {#if editable}
+        <p class="faint hint">{t('scope.view.hint')}</p>
+      {:else}
+        <p class="hint">{t('scope.view.hintCustomer')} <code>{t('scope.view.cli')}</code></p>
+      {/if}
+    </section>
+  {/if}
 </Panel>
 
 <style>
@@ -108,6 +171,71 @@
     color: var(--faint);
   }
   .mono {
+    font-family: var(--font-mono);
+  }
+  .scope {
+    margin-top: var(--sp-5);
+    padding-top: var(--sp-3);
+    border-top: var(--lw-1) solid var(--line);
+  }
+  .scope h3 {
+    margin: 0 0 var(--sp-2);
+    font-size: var(--fs-m);
+    font-weight: 600;
+  }
+  .scope h4 {
+    margin: var(--sp-3) 0 var(--sp-1);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 400;
+    color: var(--faint);
+  }
+  .scope ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .scope li {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .entry {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .none {
+    margin: 0;
+    color: var(--muted);
+  }
+  .small {
+    flex: none;
+    padding: 4px 9px;
+    border-radius: var(--r-btn);
+    border: var(--lw-1) solid var(--line-strong);
+    background: transparent;
+    color: var(--fg);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .add {
+    margin-top: var(--sp-2);
+  }
+  .hint {
+    margin: var(--sp-3) 0 0;
+    font-size: var(--fs-xs);
+  }
+  .hint code {
     font-family: var(--font-mono);
   }
 </style>

@@ -73,7 +73,7 @@ import * as e4 from './data/etappe4';
 import * as history from './data/history';
 import { applyHistoryDecision } from './handlers/history';
 import { applyMapDecision } from './handlers/map';
-import { applyScopeChange, revokeScopeDecision, scopeOptions, scopeView } from './handlers/scope';
+import { applyScopeChange, revertScopeDecision, scopeOptions, scopeView } from './handlers/scope';
 import { createState, newDecisionId, scenarioFromLocation, type MockState, type Scenario } from './state';
 
 /**
@@ -322,33 +322,68 @@ export class MockBackend implements Backend {
       const r = applyScopeChange(this.state, change, newDecisionId());
       if (r === 'validation') throw err('validation', 422);
       if (r === 'conflict') throw err('conflict', 409);
+      if (r === 'guardrail') throw new ApiError('guardrail', 403, 'guardrail');
+      this.afterScopeChange(pid);
+      return r;
+    });
+  }
+  previewScope(pid: string, change: ScopeChange): Promise<ScopeChangeResult> {
+    return this.wait(() => {
+      this.check(pid);
+      if (this.state.profile === 'customer') throw err('policy', 403);
+      const r = applyScopeChange(this.state, change, '', true);
+      if (r === 'validation') throw err('validation', 422);
+      if (r === 'conflict') throw err('conflict', 409);
+      if (r === 'guardrail') throw new ApiError('guardrail', 403, 'guardrail');
+      return r;
+    });
+  }
+
+  revertScope(pid: string, decisionId: string): Promise<ScopeChangeResult> {
+    return this.wait(() => {
+      this.check(pid);
+      if (this.state.profile === 'customer' || this.state.presentation) throw err('policy', 403);
+      const r = revertScopeDecision(this.state, decisionId, newDecisionId());
+      if (r === 'not_found') throw err('not_found', 404);
       this.afterScopeChange(pid);
       return r;
     });
   }
 
-  /** Neuauswertung wie der Daemon: `changes`, danach `inbox` (Klärungen aus E130 fallen weg). */
+  /** Wie der Daemon: `scope` sofort, die Neuauswertung meldet danach `changes` und `inbox`. */
   private afterScopeChange(pid: string): void {
     const s = this.state;
+    queueMicrotask(() => this.emit({ name: 'scope', id: null, data: { project_id: pid, version: s.scope.version } }));
     setTimeout(() => {
       this.emit({ name: 'changes', id: null, data: { project_id: pid, generation: s.generation } });
       this.emit({ name: 'inbox', id: null, data: { project_id: pid, open: s.next.open } });
     }, 150);
   }
 
-  /** E130 «Verwerfen» bzw. d.revoke auf eine Scope-Änderung (aus decide) */
+  /** E130 «Verwerfen» (d.suggestion.dismiss mit Schlüssel «scope-name:») und sein d.revoke */
   private scopeDecision(d: DecisionInput, id: string): DecisionResult | null {
-    if (d.kind === 'd.revoke' && typeof d.payload.decision_id === 'string' && revokeScopeDecision(this.state, d.payload.decision_id)) {
-      this.afterScopeChange(base.PID);
-      return { decision_id: id, seq: null, client_ref: null, effect: null };
-    }
-    if (d.kind === 'd.scope.dismiss' && typeof d.payload.item_key === 'string') {
-      const key = d.payload.item_key;
-      const s = this.state;
-      if (!s.next.clarify.some((i) => i.item_key === key)) return { decision_id: null, seq: null, client_ref: null, effect: null };
+    const s = this.state;
+    const key = d.payload.suggestion_key;
+    if (d.kind === 'd.suggestion.dismiss' && typeof key === 'string' && key.startsWith('scope-name:')) {
+      const item = s.next.clarify.find((i) => i.item_key === key);
+      if (!item) return { decision_id: null, seq: null, client_ref: null, effect: null };
+      s.dismissedScope = [...s.dismissedScope, key];
+      s.dismissedScopeItems = { ...s.dismissedScopeItems, [id]: item };
       const clarify = s.next.clarify.filter((i) => i.item_key !== key);
       s.next = { ...s.next, clarify, open: clarify.length };
       queueMicrotask(() => this.emit({ name: 'inbox', id: null, data: { project_id: base.PID, open: s.next.open } }));
+      return { decision_id: id, seq: null, client_ref: null, effect: null };
+    }
+    if (d.kind === 'd.revoke' && typeof d.payload.decision_id === 'string' && s.dismissedScopeItems[d.payload.decision_id]) {
+      const item = s.dismissedScopeItems[d.payload.decision_id];
+      const { [d.payload.decision_id]: _gone, ...rest } = s.dismissedScopeItems;
+      s.dismissedScopeItems = rest;
+      if (item) {
+        s.dismissedScope = s.dismissedScope.filter((k) => k !== item.item_key);
+        const clarify = [item, ...s.next.clarify];
+        s.next = { ...s.next, clarify, open: clarify.length };
+        queueMicrotask(() => this.emit({ name: 'inbox', id: null, data: { project_id: base.PID, open: s.next.open } }));
+      }
       return { decision_id: id, seq: null, client_ref: null, effect: null };
     }
     return null;
@@ -389,7 +424,7 @@ export class MockBackend implements Backend {
       const st = base.status(s.terminals, s.generation, s.presentation, s.origin);
       const sw = s.scopeWarning ?? st.scope_warning;
       // E120: nicht quittierte Scope-Warnung als erster Eintrag der Spalte
-      const warn = !s.scopeAcked && sw ? { ...sw, acked: false } : null;
+      const warn = !s.scopeAcked && sw ? { ...sw, acked: false, change_allowed: s.profile !== 'customer' } : null;
       return clone({ ...s.next, scope_warning: warn });
     });
   }
@@ -746,6 +781,10 @@ export class MockBackend implements Backend {
     } else {
       setTimeout(() => handlers.onState?.('open'), 0);
     }
+    if (this.state.scenario === 'ende' && !this.ending) {
+      this.ending = true;
+      setTimeout(() => this.endSession('stop'), 1500);
+    }
     if (this.state.scenario === 'grow' && !this.grown) {
       this.grown = true;
       setTimeout(() => this.growHost(), 2500);
@@ -754,6 +793,14 @@ export class MockBackend implements Backend {
   }
 
   private grown = false;
+  private ending = false;
+
+  /** Wie der Daemon bei `ariadne stop`: Ereignis `session` vor dem Ende, danach 401. */
+  endSession(reason: 'stop' | 'lock' | 'switch' | 'restart' = 'stop'): void {
+    this.emit({ name: 'session', id: null, data: { change: 'ending', reason, slug: 'ms2' } });
+    this.token = null;
+    for (const cb of this.unauthorized) cb();
+  }
 
   /** Szenario `grow`: ein neuer Host im Scope (192.168.56.130), wie nach einem weiteren nmap. */
   private growHost(): void {

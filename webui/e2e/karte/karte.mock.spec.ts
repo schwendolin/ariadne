@@ -156,7 +156,7 @@ test.describe('Karte', () => {
     const oos = page.getByRole('dialog', { name: 'Out of Scope' });
     await expect(oos).toContainText('fd00:56::101');
     await expect(oos).toContainText('gleiche MAC wie .101');
-    await expect(oos).toContainText('Scope erweitern geht in v0.1 nur im Terminal.');
+    await expect(oos).toContainText('Aufnehmen fragt nach dem genauen Eintrag. Ariadne prüft keine Namen per DNS.');
   });
 
   test('t schaltet zur Host-Tabelle und zurück; j und ↵ öffnen das Detail', async ({ page }) => {

@@ -21,7 +21,7 @@
  * - Lernmodus (Vorlieben, E112): Stufen Frage, Richtung, Vorlage, jede erst auf Klick.
  * - Palette: Quelle «next».
  */
-import type { ChangeSet, ContextResult, DecisionInput, EvidenceRef, NextItem, NextView, StreamEvent, Suggestion, TextPart, TimelineItem } from '../api/types';
+import type { ChangeSet, ContextResult, DecisionInput, EvidenceRef, NextItem, NextView, ScopeOption, StreamEvent, Suggestion, TextPart, TimelineItem } from '../api/types';
 import { t, type MessageKey } from '../i18n';
 import { hostOfService } from '../karte/model';
 import { registerPaletteSource, type PaletteItem } from '../shell/palette';
@@ -52,6 +52,8 @@ export interface DoneEntry {
   decisionId: string | null;
   /** Kontext lässt sich nicht widerrufen, nur neu setzen («Ändern …») */
   ctx: { terminalId: string; fromOff: number } | null;
+  /** E129: Rückgängig über `POST /scope/changes` mit `op: 'revert'` statt d.revoke */
+  scopeRevert?: boolean;
 }
 
 export interface ItemLine {
@@ -74,6 +76,7 @@ interface Pending {
   line: ItemLine;
   decisionId: string | null;
   ctx: DoneEntry['ctx'];
+  scopeRevert?: boolean;
   until: number;
 }
 
@@ -105,6 +108,12 @@ export function ownResolves(o: OwnDecision, item: NextItem): boolean {
       return o.kind === 'ctx' && p.terminal_id === item.terminal_id;
     case 'orphan_decision':
       return o.kind === 'd.revoke' && p.decision_id === item.decision_id;
+    case 'scope_name':
+      // E130: Aufnehmen (Scope-Änderung mit einem der Vorschläge) oder Verwerfen
+      return (
+        (o.kind === 'd.suggestion.dismiss' && p.suggestion_key === item.suggestion_key) ||
+        (o.kind === 'd.scope.add' && (p.item_key === item.item_key || scopeChoices(item).some((x) => x.entry === p.entry)))
+      );
     default:
       return false;
   }
@@ -123,9 +132,16 @@ function foreignResolves(f: TimelineItem, item: NextItem): boolean {
       return f.kind === 'd.entity.merge' || f.kind === 'd.entity.split';
     case 'orphan_decision':
       return f.kind === 'd.revoke';
+    case 'scope_name':
+      return f.kind === 'd.scope.update' || f.kind === 'd.suggestion.dismiss';
     default:
       return false;
   }
+}
+
+/** E130: Vorschläge einer Klärung «In den Scope aufnehmen?» (web-api.md 20.5 `choices`) */
+export function scopeChoices(item: Extract<NextItem, { kind: 'scope_name' }>): ScopeOption[] {
+  return item.choices ?? [];
 }
 
 /** Kurze Zeile eines Eintrags (einzeilig in der Liste, Palette, Erledigt-Zeile). */
@@ -159,6 +175,8 @@ export function itemLine(item: NextItem, short: (s: string) => string = (s) => s
       return { kind, parts: item.ref ? [p(item.ref)] : [] };
     case 'mass_find':
       return { kind, parts: [p(item.unit.title)] };
+    case 'scope_name':
+      return { kind, parts: [p(item.name), { text: ' · ', target: false }, p(item.ip)] };
     default:
       return { kind: t('next.kind.unknown'), parts: [] };
   }
@@ -175,6 +193,8 @@ export function itemHosts(item: NextItem): string[] {
       return [hostOfService(item.conflict.subject) ?? item.conflict.subject];
     case 'decide_value':
       return [hostOfService(item.fact.subject) ?? item.fact.subject];
+    case 'scope_name':
+      return [item.host_id || `ip:default/${item.ip}`];
     case 'ctx_unknown': {
       const c = item.candidate;
       if (!c) return [];
@@ -202,6 +222,8 @@ export function itemEvidence(item: NextItem): EvidenceTarget | null {
     }
     case 'mass_find':
       return { kind: 'unit', unit_id: item.unit.unit_id, lines: null };
+    case 'scope_name':
+      return item.unit ? { kind: 'unit', unit_id: item.unit.unit_id, lines: null } : null;
     default:
       return null;
   }
@@ -501,7 +523,7 @@ export class NextStore implements ProjectPart {
   private toDone(key: string, group: Group, index: number, line: ItemLine): DoneEntry {
     const p = this.pending.get(key);
     if (p && p.until > Date.now()) {
-      return { key, group, index, state: p.state, msg: p.msg, line: p.line, decisionId: p.decisionId, ctx: p.ctx };
+      return { key, group, index, state: p.state, msg: p.msg, line: p.line, decisionId: p.decisionId, ctx: p.ctx, scopeRevert: p.scopeRevert };
     }
     return { key, group, index, state: 'other_tab', msg: null, line, decisionId: null, ctx: null };
   }
@@ -668,6 +690,35 @@ export class NextStore implements ProjectPart {
     });
   }
 
+  /** E130 «Aufnehmen …»: Bestätigungsdialog (E129) mit den Vorschlägen der Klärung, `entry` vorgewählt. */
+  openScopeAdd(item: Extract<NextItem, { kind: 'scope_name' }>, entry: string | null): void {
+    this.ctx.app.ui.openDialog({ kind: 'scope-add', values: [{ value: item.name, ctrl: item.ctrl ?? false, proposals: scopeChoices(item) }], selected: entry ?? undefined, source: { item_key: item.item_key } });
+  }
+
+  /** Nach dem Aufnehmen im Dialog: die Klärung steht als erledigt da, mit Rückgängig (`op: 'revert'`). */
+  scopeAccepted(itemKey: string, entry: string, decisionId: string | null): void {
+    const item = this.clarifyItems.find((i) => i.item_key === itemKey);
+    if (!item) return;
+    this.remember(itemKey, 'clarify', {
+      state: 'done',
+      msg: { key: 'next.d.scopeAdded', params: { entry }, mono: ['entry'] },
+      line: itemLine(item),
+      decisionId,
+      ctx: null,
+      scopeRevert: true,
+    });
+  }
+
+  /** E130 «Verwerfen»: `d.suggestion.dismiss` mit dem Schlüssel der Klärung; der Name bleibt ausserhalb. */
+  scopeDismiss(item: Extract<NextItem, { kind: 'scope_name' }>): Promise<boolean> {
+    return this.decideFor(item.item_key, 'clarify', { kind: 'd.suggestion.dismiss', payload: { suggestion_key: item.suggestion_key || item.item_key } }, {
+      state: 'dismissed',
+      msg: { key: 'next.d.scopeDismissed', params: {}, mono: [] },
+      line: itemLine(item),
+      ctx: null,
+    });
+  }
+
   suggestionDone(s: Suggestion): Promise<boolean> {
     return this.decideFor(s.suggestion_key, 'suggestion', { kind: 'd.suggestion.done', payload: { suggestion_key: s.suggestion_key, basis: s.basis } }, {
       state: 'done',
@@ -705,12 +756,29 @@ export class NextStore implements ProjectPart {
   async undo(entry: DoneEntry): Promise<boolean> {
     if (!entry.decisionId || this.isBusy(entry.key) || this.ctx.app.offline) return false;
     this.setBusy(entry.key);
-    const res = await this.ctx.decide([{ kind: 'd.revoke', payload: { decision_id: entry.decisionId } }], { errorPrefix: 'next.undoFailed' });
+    let ok: boolean;
+    if (entry.scopeRevert) {
+      ok = await this.scopeUndo(entry.decisionId);
+    } else {
+      ok = !!(await this.ctx.decide([{ kind: 'd.revoke', payload: { decision_id: entry.decisionId } }], { errorPrefix: 'next.undoFailed' }));
+    }
     this.clearBusy(entry.key);
-    if (!res) return false;
+    if (!ok) return false;
     this.done = this.done.filter((d) => d.key !== entry.key);
     this.reloadSoon();
     return true;
+  }
+
+  /** Rückgängig einer Scope-Änderung (E129): `op: 'revert'` */
+  private async scopeUndo(decisionId: string): Promise<boolean> {
+    try {
+      const r = await this.ctx.backend.revertScope(this.ctx.pid, decisionId);
+      this.ctx.noteOwn('d.scope.revert', { revert_of: decisionId }, r.decision_id);
+      return true;
+    } catch (e) {
+      if (!isAbort(e)) this.ctx.app.ui.notify('error', errorText(e, 'next.undoFailed'));
+      return false;
+    }
   }
 
   /** u ohne gewählte Erledigt-Zeile: die jüngste mit Entscheid */

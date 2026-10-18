@@ -2,8 +2,9 @@
   Schraffierter Streifen am rechten Kartenrand «Out of Scope · N» (A 7.5, Screen 10). Ein Klick
   öffnet das Popover mit Wert, Urteil, Quelle und Hinweis pro Kennung («ausserhalb · nmap 15:20 ·
   gleiche MAC wie .101»). Feindliche Werte immer als Text (Txt), Punycode zusätzlich, nie als Link
-  oder Bild. Ein Eintrag mit Quelle öffnet die Belegansicht. «Scope erweitern» gibt es in v0.1 nur
-  im Terminal. Besitzer: ui-karte.
+  oder Bild. Ein Eintrag mit Quelle öffnet die Belegansicht. E129: pro Kennung «In den Scope
+  aufnehmen …» (Bestätigungsdialog mit den Vorschlägen des Servers); im Profil customer nur der
+  Hinweis auf `ariadne scope`. Besitzer: ui-karte, E129: ui.
 -->
 <script lang="ts">
   import { DOT } from './sep';
@@ -53,6 +54,13 @@
     return unit ? encodeEvidence({ kind: 'unit', unit_id: unit, lines: null }) : null;
   }
 
+  const editable = $derived(project.scope.editable);
+
+  function addToScope(it: OosItem): void {
+    app.ui.closePopover(ID);
+    app.ui.openDialog({ kind: 'scope-add', values: [{ value: it.label, ctrl: it.ctrl, proposals: it.proposals ?? null }], source: { identifier: it.identifier } });
+  }
+
   function openEvidence(it: OosItem): void {
     const ev = evidence(it);
     if (!ev) return;
@@ -68,22 +76,27 @@
     </button>
     <Popover {open} onclose={() => app.ui.closePopover(ID)} label={t('oos.title')} placement="left" wide>
       <div class="list">
-        {#each oos.items as it (it.identifier)}
+        {#each oos.items as it, idx (it.identifier)}
           {@const ev = evidence(it)}
           {#snippet body()}
-            <span class="value"><Txt value={it.label} mono ctrl={it.ctrl} max={90} />{#if it.punycode}<span class="puny"> <Txt value={it.punycode} mono max={90} /></span>{/if}</span>
+            <span class="value" id="oos-v-{idx}"><Txt value={it.label} mono ctrl={it.ctrl} max={90} />{#if it.punycode}<span class="puny"> <Txt value={it.punycode} mono max={90} /></span>{/if}</span>
             <span class="sub">
               {#each details(it) as d, i (i)}{#if i > 0}<span aria-hidden="true">{DOT}</span>{/if}{d.text}{#if d.value}{d.text ? ' ' : ''}<Txt value={d.value} max={60} />{/if}{/each}
             </span>
           {/snippet}
-          {#if ev}
-            <button type="button" class="item" onclick={() => openEvidence(it)}>{@render body()}</button>
-          {:else}
-            <div class="item">{@render body()}</div>
-          {/if}
+          <div class="row" data-oos-item>
+            {#if ev}
+              <button type="button" class="item" onclick={() => openEvidence(it)}>{@render body()}</button>
+            {:else}
+              <div class="item">{@render body()}</div>
+            {/if}
+            {#if editable}
+              <button type="button" class="add" aria-describedby="oos-v-{idx}" disabled={app.offline} title={app.offline ? t('err.network') : undefined} onclick={() => addToScope(it)}>{t('scope.add.button')}</button>
+            {/if}
+          </div>
         {/each}
         {#if oos.total > oos.items.length}<p class="more">{t('oos.more', { n: oos.total - oos.items.length })}</p>{/if}
-        <p class="hint">{t('oos.hint')}</p>
+        <p class="hint">{editable ? t('oos.hint') : t('oos.hintCustomer')}</p>
       </div>
     </Popover>
   </div>
@@ -133,7 +146,34 @@
     display: flex;
     flex-direction: column;
   }
+  .row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .add {
+    flex: none;
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: var(--r-btn);
+    border: var(--lw-1) solid var(--line-strong);
+    background: transparent;
+    color: var(--fg);
+    font-size: var(--fs-xs);
+    line-height: 1.1;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .add:hover {
+    background: var(--surface-3);
+  }
+  .add:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
   .item {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;

@@ -61,6 +61,7 @@
       if (r.item.kind === 'ctx_suggestion') parts.push(t('next.keys.accept'));
       else if (r.item.kind === 'merge_suggestion') parts.push(t('next.keys.merge'));
       else if (r.item.kind === 'decide_value') parts.push(t('next.keys.confirm'));
+      else if (r.item.kind === 'scope_name') parts.push(t('next.keys.scopeAdd'));
     }
     if ((r?.type === 'clarify' || r?.type === 'suggestion') && hasEvidence(r)) parts.push(t('next.keys.evidence'));
     parts.push(t('next.keys.help'));
@@ -97,6 +98,7 @@
     if (it.kind === 'ctx_suggestion') void next.acceptContext(it);
     else if (it.kind === 'merge_suggestion') void next.merge(it, true);
     else if (it.kind === 'decide_value') void next.decideValue(it, 'confirm');
+    else if (it.kind === 'scope_name' && project.scope.editable && it.change_allowed !== false) next.openScopeAdd(it, null);
     else return false;
     return true;
   }
@@ -111,6 +113,7 @@
     const it = r.item;
     if (it.kind === 'merge_suggestion') void next.merge(it, false);
     else if (it.kind === 'decide_value') void next.decideValue(it, 'reject');
+    else if (it.kind === 'scope_name') void next.scopeDismiss(it);
     else return false;
     return true;
   }

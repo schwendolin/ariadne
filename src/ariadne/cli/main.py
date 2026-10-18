@@ -32,6 +32,7 @@ from ariadne.cli import analysis
 from ariadne.cli import backup as backup_cli
 from ariadne.cli import export as export_cli
 from ariadne.cli import remote as remote_cli
+from ariadne.cli import scope as scope_cli
 from ariadne.cli import shot as shot_cli
 from ariadne.cli import ui as ui_cli
 from ariadne.cli.common import SECRET_PROMPT_S, CliError, _call, _client, _terminal_id, read_secret, s, say
@@ -368,13 +369,28 @@ def cmd_start(paths: Paths, args: argparse.Namespace) -> int:
     else:
         say(f"Projekt {s(res['slug'])} geöffnet ({s(res['profile'])}).")
     if res.get("targets_ignored"):
-        say("Hinweis: Das Projekt existiert schon, --target wurde nicht übernommen.")
+        _targets_hint(paths, args.target or [])
     _say_preroll(res.get("preroll") or {}, args.preroll, asked)
     held = int(res.get("held") or 0)
     switching = f"; {held} wechseln an der nächsten lokalen Eingabeaufforderung" if held else ""
     say(f"Aufnahme läuft ({s(res.get('recording', 0))} Terminals{switching}). Pause: F12 r oder "
         f"ariadne pause. Ende: ariadne stop.")
     return 0
+
+
+def _targets_hint(paths: Paths, targets: list[str]) -> None:
+    """``ariadne start <vorhandenes Projekt> --target X``: aktuellen Scope und den Befehl zeigen, der
+    ihn erweitert (E129), statt nur «nicht übernommen»."""
+    from ariadne.cli.scope import add_hint
+
+    try:
+        include = list((_call(paths, "scope.show", start=False) or {}).get("include") or [])
+    except (CliError, CtlError, DaemonUnavailable):
+        say("Hinweis: Das Projekt existiert schon, --target wurde nicht übernommen. "
+            "Scope erweitern: ariadne scope add <ziel>")
+        return
+    for line in add_hint(targets, [x for x in include if isinstance(x, str)]):
+        say(line)
 
 
 def cmd_stop(paths: Paths, args: argparse.Namespace) -> int:
@@ -670,7 +686,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("start", help="entsperren, Projekt öffnen oder anlegen, Aufnahme läuft")
     sp.add_argument("slug", nargs="?", help="Projekt (ohne: das zuletzt aktive)")
-    sp.add_argument("--target", action="append", help="IP, CIDR oder Name (mehrfach, nur beim Anlegen)")
+    sp.add_argument("--target", action="append",
+                    help="IP, CIDR oder Name (mehrfach, nur beim Anlegen; danach: ariadne scope add)")
     sp.add_argument("--name")
     sp.add_argument("--not-customer", action="store_true", help="bestätigt: kein Kundenauftrag")
     sp.add_argument("--passphrase-fd", type=int, metavar="N", help="Passphrase von Dateideskriptor N lesen")
@@ -773,6 +790,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_cli.register(sub)  # Bau v0.1-Export
     ai_cli.register(sub)  # Bau v0.1-KI
     shot_cli.register(sub)  # Bau v0.1-Screenshots
+    scope_cli.register(sub)  # Korrektur nach dem Praxistest: ariadne scope (E129)
     return p
 
 

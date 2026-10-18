@@ -49,6 +49,8 @@ ALLOWED_OPS = frozenset(
         "unit.distrust",
         "input.reveal",
         "clip.copy",  # Bau v0.1-Oberfläche: Secret in die Zwischenablage der Kali (E111), Wert nie zurück
+        "scope.show",  # E129: Scope anzeigen
+        "scope.change",  # E129: Scope ändern, Herkunft webui; Bestätigung «kein Kundenauftrag» nie
     }
 )
 

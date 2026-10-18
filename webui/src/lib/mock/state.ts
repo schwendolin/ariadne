@@ -13,6 +13,9 @@
  *   (Präsentationsmodus an), scope (Scope-Warnung nicht quittiert), noconfirm (Pause wird nie
  *   bestätigt: «wartet auf Bestätigung»), budget (E117: T2 ohne Budgetangabe, der Server lehnt ab;
  *   T3 mit 5 min Rest), local (Sitzung lokal, Browser in der Kali).
+ *   Praxistest 1 (ui): praxis (Scope-Warnung für recovery.vantis.internal, zwei Klärungen E130),
+ *   customer (dasselbe im Profil customer: nur Anzeige), ende (nach 1,5 s endet die Sitzung mit
+ *   dem Ereignis `session`, Grund stop).
  */
 import type {
   AiJob,
@@ -55,7 +58,7 @@ export const SCENARIOS = [
   // Etappe 4: KI-Zustände, E119 gruppierte Versionen
   'ki', 'kiwarn', 'kiover', 'kigone', 'kirefuse', 'kiinject', 'kirun', 'kioff', 'versions',
   // Praxistest 1: Scope erweitern (E129, E130), Profil customer, Abmeldung mit Grund
-  'praxis', 'customer',
+  'praxis', 'customer', 'ende',
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
@@ -81,7 +84,11 @@ export interface MockState {
   /** Scope-Warnung (Status und Spalte); null: Standard aus base.status */
   scopeWarning: ScopeWarning | null;
   /** Scope des Projekts (E129) und Profil */
-  scope: Omit<ScopeView, 'editable'>;
+  scope: Pick<ScopeView, 'include' | 'exclude' | 'windows' | 'version'>;
+  /** E130: verworfene Klärungen (d.suggestion.dismiss mit Schlüssel «scope-name:») */
+  dismissedScope: string[];
+  /** Entscheid-ID des Verwerfens: verworfene Klärung (für d.revoke) */
+  dismissedScopeItems: Record<string, NextView['clarify'][number]>;
   profile: Profile;
   scopeDecisions: { decision_id: string; change: ScopeChange }[];
   /** Etappe 4: KI-Modus, letzter Auftrag, Screenshots, Exporte, Phasenkorrekturen */
@@ -148,6 +155,8 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     scope: { include: [base.SCOPE], exclude: [], windows: [], version: 1 },
     profile: 'lab',
     scopeDecisions: [],
+    dismissedScope: [],
+    dismissedScopeItems: {},
     aiMode: AI_MODES[scenario] ?? 'off',
     aiJob: null,
     screenshots: e4.screenshots(),
@@ -166,7 +175,7 @@ export function createState(scenario: Scenario = 'normal'): MockState {
     s.scopeWarning = praxisWarning();
     s.next = { ...s.next, clarify: [...praxisClarify(), ...s.next.clarify] };
     s.next = { ...s.next, open: s.next.clarify.length };
-    s.scope = { ...s.scope, exclude: ['192.168.56.1'], windows: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], from: '08:00', to: '18:00', tz: 'Europe/Zurich' }] };
+    s.scope = { ...s.scope, exclude: ['192.168.56.1'], windows: [{ days: 'mon-fri', from: '08:00', to: '18:00', tz: 'Europe/Zurich' }] };
   }
   if (scenario === 'customer') s.profile = 'customer';
   if (scenario === 'local') s.origin = 'local';

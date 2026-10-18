@@ -134,7 +134,22 @@ Die Modell-ID setzt du selbst (aus der Liste deines Anbieters; lokal zuerst `oll
 ariadne start ms2 --target 192.168.56.101 --not-customer
 ariadne status
 ariadne ui                # Dashboard im Browser der Kali (Einmal-Code)
+ariadne ui --code         # nur den kurzen Anmeldecode zeigen (Browser schon offen, Mac)
 ```
+
+**Anmeldecode.** Das Feld «Anmeldecode» im Dashboard will den Code aus `ariadne ui --code` (gilt kurz und nur einmal), **nie die Passphrase**. Nach `ariadne stop` oder `ariadne lock` ist jede Sitzung beendet: zuerst `ariadne start`, dann `ariadne ui` (öffnet den Browser angemeldet) oder `ariadne ui --code` und den Code eintippen.
+
+**Scope.** `--target` gilt nur beim Anlegen. Danach zeigt und ändert `ariadne scope` den Scope, jede Änderung mit Rückfrage `[j/N]`, als Entscheid im Journal und mit Neuauswertung:
+
+```sh
+ariadne scope                               # Einschlüsse, Ausschlüsse, Zeitfenster, letzte Änderungen
+ariadne scope add recovery.vantis.internal  # IP, CIDR, Name oder '*.domain' (Wildcard in Anführungszeichen)
+ariadne scope exclude 10.36.198.1           # ausschliessen (Ausschluss schlägt Einschluss)
+ariadne scope remove 10.36.198.1            # Eintrag wieder entfernen
+ariadne scope undo                          # jüngste Änderung rückgängig (oder: undo <decision_id>)
+```
+
+Im Dashboard geht dasselbe über die Scope-Warnung in «Als Nächstes» («In den Scope aufnehmen» mit Bestätigung) und über die Zeitachse (Rückgängig). Namen erben nie den Scope ihrer IP (E49): Meldet nmap `recovery.vantis.internal (10.36.198.11)`, fragt Ariadne unter «Klären», ob der Name (oder `*.vantis.internal`) in den Scope soll. Ziele ausserhalb der Lab-Allowlist (öffentliche Adressen und Domains) gehen nur im Terminal mit `--not-customer`, wie beim Anlegen.
 
 Im Terminal: `F12 s` nimmt einen Screenshot des aktiven Fensters auf (nur X11, Xfce), `ariadne shot monitor` den ganzen Bildschirm. Bericht: `ariadne export` (Vorlage `cys`, mit `--template htb` die HTB-Vorlage) schreibt nach `~/ariadne/<projekt>/exports/`; dasselbe geht im Dashboard über «Export». Vom Mac aus: [Anleitung Fernzugriff](anleitung-fernzugriff.md). Ende der Session: `ariadne stop`, danach `ariadne backup --to-file PFAD.age` (braucht die Empfänger aus Abschnitt 1).
 

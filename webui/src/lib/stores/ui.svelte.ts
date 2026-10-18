@@ -11,7 +11,19 @@
  * - Puls («+N seit», E106): `pulse(ids)` erhöht `pulseToken`; Komponenten fragen `isPulsing(id)`
  *   und nutzen die Action `pulse` aus util/motion.ts.
  */
-import type { NewSince } from '../api/types';
+import type { NewSince, ScopeChange, ScopeOption } from '../api/types';
+
+/**
+ * «In den Scope aufnehmen …» (E129): Ziele, für die der Server Vorschläge liefert, oder fertige
+ * Vorschläge einer Klärung (E130); `selected` wählt einen Eintrag vor.
+ */
+export interface ScopeAddRequest {
+  kind: 'scope-add';
+  /** Ziele; `proposals` vom Server (am Ziel der Warnung, in der Klärung), sonst fragt der Dialog nach */
+  values: { value: string; ctrl?: boolean; verdict?: string; proposals?: ScopeOption[] | null }[];
+  source: NonNullable<ScopeChange['source']>;
+  selected?: string;
+}
 
 export type DialogRequest =
   | { kind: 'context'; terminalId: string; itemKey?: string; fromOff?: number }
@@ -20,7 +32,9 @@ export type DialogRequest =
   | { kind: 'help' }
   | { kind: 'palette' }
   | { kind: 'scope-warning' }
-  | { kind: 'scope-view' };
+  | { kind: 'scope-view' }
+  | ScopeAddRequest
+  | { kind: 'scope-edit'; op: 'remove' | 'exclude'; entry?: string; list?: 'include' | 'exclude' };
 
 export interface Notice {
   id: number;

@@ -54,6 +54,9 @@ MESSAGES: dict[str, str] = {
         "In der Kali fehlt ein Werkzeug für die Zwischenablage: xclip, xsel oder wl-copy installieren."
     ),
     "clipboard_session": "Keine grafische Sitzung in der Kali gefunden. Am Kali-Desktop anmelden.",
+    "guardrail": (
+        "Ziel ausserhalb der Lab-Allowlist: nur im Terminal mit ariadne scope add <ziel> --not-customer."
+    ),
     "internal": "Interner Fehler.",
     **SHOT_ERRORS,  # shot_display, shot_wayland, shot_window, shot_region, shot_failed (alle 503)
 }
@@ -76,6 +79,7 @@ STATUS: dict[str, int] = {
     "unavailable": 503,
     "clipboard_tool": 503,
     "clipboard_session": 503,
+    "guardrail": 403,
     "internal": 500,
     **dict.fromkeys(SHOT_ERRORS, 503),
 }
@@ -90,6 +94,7 @@ _CTL: dict[str, str] = {
     "policy": "policy",
     "conflict": "conflict",
     "project_changed": "conflict",
+    "guardrail": "guardrail",
     "no_ingest": "unavailable",
     "clipboard_tool": "clipboard_tool",
     "clipboard_session": "clipboard_session",

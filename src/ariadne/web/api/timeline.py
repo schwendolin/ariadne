@@ -87,6 +87,12 @@ _WORK = {
     "out_of_scope": "ausserhalb des Scopes",
 }
 _ACCESS = {"none": "kein Zugriff", "user": "Benutzer", "admin": "Administrator"}
+_SCOPE_OP = {  # E129: Änderungen über ariadne scope bzw. POST /scope/changes
+    "add": "Scope erweitert",
+    "remove": "Aus dem Scope entfernt",
+    "exclude": "Aus dem Scope ausgeschlossen",
+    "revert": "Scope-Änderung rückgängig",
+}
 
 
 def _summary(kind: str, payload: Mapping[str, Any]) -> str:
@@ -99,7 +105,11 @@ def _summary(kind: str, payload: Mapping[str, Any]) -> str:
         return "Zugriff: " + _ACCESS.get(str(payload.get("value")), "geändert")
     if kind == "d.scope.update":
         v = payload.get("version")
-        return f"Scope gesetzt (Version {int(v)})" if isinstance(v, int) else "Scope gesetzt"
+        ch = payload.get("change")
+        word = "Scope gesetzt"
+        if isinstance(ch, Mapping):
+            word = _SCOPE_OP.get(str(ch.get("op")), word)
+        return f"{word} (Version {int(v)})" if isinstance(v, int) else word
     return _SUMMARY.get(kind, "Entscheid")
 
 
@@ -803,7 +813,24 @@ def _decision_refs(conn: Any, page: list[dict[str, Any]], profile: str = "lab") 
         "claims": claims,
         "findings": _finding_refs(conn, page),
         "suggestions": _suggestion_refs(conn, page, profile),
+        "scope_reverted": _scope_reverted(conn, page),
+        "profile": profile,
     }
+
+
+def _scope_reverted(conn: Any, page: list[dict[str, Any]]) -> dict[str, str]:
+    """Scope-Änderungen (E129), die schon rückgängig gemacht sind: ``decision_id`` -> Entscheid, der
+    sie rückgängig machte."""
+    if not any(e["type"] == "decision" and e.get("kind") == "d.scope.update" for e in page):
+        return {}
+    out: dict[str, str] = {}
+    for did, payload in conn.execute(
+        "SELECT id, payload_json FROM decision WHERE kind = 'd.scope.update' ORDER BY seq LIMIT 100000"
+    ):
+        ch = (loads(payload, {}) or {}).get("change")
+        if isinstance(ch, Mapping) and isinstance(ch.get("revert_of"), str):
+            out[ch["revert_of"]] = str(did)
+    return out
 
 
 _ACCESS_DETAIL = {"none": "kein Zugriff", "user": "Benutzer", "admin": "root"}
@@ -847,11 +874,28 @@ def _decision_extra(e: Mapping[str, Any], ctx: Mapping[str, Any], b: Bag) -> dic
         cid = data.get("cmd_id")
         ref = queries.cmd_ref(cid) if isinstance(cid, str) else (effect[2] if effect else None)
     reason = data.get("reason") if isinstance(data.get("reason"), str) else None
+    scope_change = None
+    ch = data.get("change") if kind == "d.scope.update" else None
+    if isinstance(ch, Mapping):
+        entries = [str(x) for x in ch.get("entries") or [] if isinstance(x, str)]
+        detail = ", ".join(entries[:6]) or None
+        reason = ch.get("reason") if isinstance(ch.get("reason"), str) else None
+        by = refs.get("scope_reverted", {}).get(str(e.get("id")))
+        scope_change = {
+            "op": ch.get("op") if ch.get("op") in _SCOPE_OP else None,
+            "entries": [b(x) or "" for x in entries],
+            "version": data.get("version") if isinstance(data.get("version"), int) else None,
+            "revert_of": ch.get("revert_of") if isinstance(ch.get("revert_of"), str) else None,
+            "reverted_by": by,
+            # Rückgängig über POST /p/{pid}/scope/changes {op: 'revert', decision_id} (web-api.md 20)
+            "revertible": by is None and refs.get("profile") != "customer",
+        }
     return {
         "detail": b(detail),
         "reason": b(reason),
         "ref": b(ref),
         "effect": {"rejected": effect[0], "weakened": effect[1]} if effect else None,
+        "scope_change": scope_change,
     }
 
 

@@ -29,6 +29,7 @@ const KEYS: Record<ClientErrorCode, MessageKey> = {
   shot_window: 'err.shot_window',
   shot_region: 'err.shot_region',
   shot_failed: 'err.shot_failed',
+  guardrail: 'err.guardrail',
   network: 'err.network',
   aborted: 'err.aborted',
   timeout: 'err.timeout',
