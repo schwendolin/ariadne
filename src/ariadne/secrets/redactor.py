@@ -26,6 +26,14 @@ Secret-Liste.
 Generische Muster (Private Keys, ``sk-ant-``, ``AKIA``) schwärzt der Redaktor
 nie, denn Secrets vom Ziel sind Funde. :func:`scan_outgoing` meldet sie nur als
 Warnung vor Exporten und KI-Aufrufen.
+
+**Threads (Zusage, Bau v0.1-Server):** Die Ausgangs-API (:meth:`Redactor.scan`,
+:meth:`Redactor.redact_for_exit`, :meth:`Redactor.redact_json`, :meth:`Redactor.redact_text`)
+liest nur die Musterliste und darf aus anderen Threads aufgerufen werden (Thread der
+Auswertung, ``asyncio.to_thread`` der Web-API). :meth:`Redactor.update_secrets` ersetzt die
+Liste als Ganzes mit einer einzigen Zuweisung; ein gleichzeitiger Aufruf sieht die alte oder
+die neue Liste, nie eine halbe. Die Strom-API (``feed``, ``flush``, ``drop``) hält Zustand pro
+Terminal und gehört allein dem Loop des Daemons.
 """
 
 from __future__ import annotations
@@ -185,6 +193,8 @@ class Redactor:
 
     # ------------------------------------------------------------------ #
     def update_secrets(self, secrets: Iterable[tuple[str, str]]) -> None:
+        """Neue Liste eigener Secrets; ersetzt die Musterliste mit einer Zuweisung (Threads: siehe
+        Modulbeschreibung)."""
         pats: dict[bytes, str] = {}
         for label, value in secrets:
             if not value or len(value) < self.min_len:
@@ -193,8 +203,8 @@ class Redactor:
                 if len(v) >= self.min_len:
                     pats.setdefault(v, label)
         # Längere Muster zuerst, damit sie bei Überlappung das Label bestimmen.
-        self._patterns = sorted(pats.items(), key=lambda p: -len(p[0]))
         self.max_len = max((len(p) for p in pats), default=0)
+        self._patterns = sorted(pats.items(), key=lambda p: -len(p[0]))
 
     @property
     def active(self) -> bool:

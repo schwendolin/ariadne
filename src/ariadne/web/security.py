@@ -6,7 +6,13 @@ Prüfreihenfolge (web-api.md 1.1, verbindlich; T3 und T4 hängen daran):
    beim Annehmen (``server.py``, Verbindung ohne Antwort zu); hier nur noch als zweite Schicht.
 2. ``Host`` exakt ``127.0.0.1:PORT``, ``localhost:PORT`` oder ``[::1]:PORT``, sonst 421.
 3. ``Sec-Fetch-Site`` nur ``same-origin`` oder ``none`` (oder fehlend), sonst 403, auch für
-   statische Dateien.
+   statische Dateien. **Einzige Ausnahme (E115):** ein ``GET`` der SPA-Shell (``/``,
+   ``/index.html`` oder eine Route ohne Dateiendung, nie ``/api/`` oder ``/assets/``) als
+   Navigation (``Sec-Fetch-Mode: navigate``, ``Sec-Fetch-Dest: document``) auch von
+   ``cross-site`` oder ``same-site``. So lädt die Startdatei aus ``ariadne ui`` bzw.
+   ``ariadne-mac start`` (``file://``, für den Browser eine fremde Herkunft) die Shell. Liefert
+   die innere App dafür etwas anderes als die Shell, wird daraus 403. Die Shell enthält keine
+   Daten; Rahmen (``frame-ancestors``, ``X-Frame-Options``), COOP und alle API-Regeln bleiben.
 4. ``OPTIONS`` ergibt 405 (kein CORS).
 5. ``Origin`` bei ``POST``, ``PUT``, ``PATCH``, ``DELETE`` Pflicht und genau ``http://<Host>``;
    ein fremder ``Origin`` ergibt auch bei anderen Methoden 403.
@@ -47,6 +53,7 @@ __all__ = [
     "SHELL_MARKER",
     "SESSION_PATH",
     "MAX_BODY",
+    "shell_navigation",
 ]
 
 log = logging.getLogger("ariadne.web")
@@ -81,6 +88,7 @@ _OWNED = frozenset({h for h, _ in _STATIC_HEADERS} | {
 })
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _FETCH_SITE_OK = frozenset({b"same-origin", b"none"})
+_FETCH_SITE_NAV = frozenset({b"cross-site", b"same-site"})  # nur Navigation zur Shell (E115)
 _TOKEN_CHARS = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
 
 # Feste deutsche Texte pro Code (web-api.md 1.5); nie Zieldaten, nie Text aus Ausnahmen.
@@ -142,6 +150,29 @@ def _one(headers: dict[bytes, list[bytes]], name: bytes) -> bytes | None:
     return vals[0] if len(vals) == 1 else b"\0"
 
 
+def shell_navigation(method: str, path: str, headers: dict[bytes, list[bytes]]) -> bool:
+    """Fremde Navigation, die nur die SPA-Shell laden darf (E115, Startdatei über ``file://``).
+
+    ``GET`` mit ``Sec-Fetch-Mode: navigate`` und ``Sec-Fetch-Dest: document`` auf ``/``,
+    ``/index.html`` oder eine Route ohne Dateiendung ausserhalb von ``/api/`` und ``/assets/``.
+    """
+    if method != "GET":
+        return False
+    site = _one(headers, b"sec-fetch-site")
+    if site is None or site.lower() not in _FETCH_SITE_NAV:
+        return False
+    if (_one(headers, b"sec-fetch-mode") or b"").lower() != b"navigate":
+        return False
+    if (_one(headers, b"sec-fetch-dest") or b"").lower() != b"document":
+        return False
+    if path in ("/", "/index.html"):
+        return True
+    if not path.startswith("/") or path == "/api" or path.startswith(("/api/", "/assets/")):
+        return False
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    return bool(last) and "." not in last and "\\" not in path and "\0" not in path
+
+
 def bearer_token(headers: dict[bytes, list[bytes]]) -> str | None:
     raw = _one(headers, b"authorization")
     if raw is None or raw == b"\0":
@@ -161,18 +192,27 @@ class _GuardedSend:
         self.started = False
         self.status = 0
         self._extra = list(extra)
+        # E115: eine fremde Navigation darf nur die Shell bekommen, alles andere wird 403.
+        self.shell_only = False
+        self._swallow = False
 
     async def __call__(self, message: Message) -> None:
+        if self._swallow:
+            return
         if message["type"] == "http.response.start":
+            shell = any(bytes(k).lower() == SHELL_MARKER and bytes(v) == b"shell"
+                        for k, v in message.get("headers") or [])
+            if self.shell_only and not shell:
+                self.shell_only = False
+                await send_error(self, 403, "forbidden")
+                self._swallow = True  # Rest der ursprünglichen Antwort verwerfen
+                return
             self.started = True
             self.status = int(message.get("status", 500))
-            shell = False
             headers: list[tuple[bytes, bytes]] = []
             for k, v in message.get("headers") or []:
                 k = bytes(k).lower()
                 v = bytes(v)
-                if k == SHELL_MARKER:
-                    shell = v == b"shell"
                 if k in _OWNED or k.startswith(b"access-control-"):
                     continue
                 if k == b"content-type" and v.lower() == b"application/json":
@@ -237,11 +277,14 @@ class SecurityMiddleware:
         if host is None or host not in self.hosts:
             await send_error(send, 421, "host")
             return "host"
+        method = str(scope.get("method", "")).upper()
+        path = str(scope.get("path", ""))
         site = _one(headers, b"sec-fetch-site")
         if site is not None and site.lower() not in _FETCH_SITE_OK:
-            await send_error(send, 403, "forbidden")
-            return "fetch-site"
-        method = str(scope.get("method", "")).upper()
+            if not shell_navigation(method, path, headers):
+                await send_error(send, 403, "forbidden")
+                return "fetch-site"
+            send.shell_only = True
         if method == "OPTIONS":
             await send_error(send, 405, "method", extra=[(b"allow", b"GET, HEAD, POST, PUT, DELETE")])
             return "options"
@@ -253,7 +296,6 @@ class SecurityMiddleware:
         body = await self._read_body(headers, receive, send)
         if body is None:
             return "body"
-        path = str(scope.get("path", ""))
         is_api = path == "/api" or path.startswith("/api/")
         if is_api and not (method == "POST" and path == SESSION_PATH):
             info = self.sessions.authenticate(bearer_token(headers) or "", peer)

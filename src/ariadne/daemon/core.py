@@ -568,12 +568,18 @@ class Daemon:
             secrets.extend(self.operator.own_secrets)
         self.redactor.update_secrets(secrets)
 
-    def _lock_operator(self) -> None:
+    def _lock_operator(self, *, notify: bool = True) -> None:
+        """Tresor sperren. War er entsperrt, geht das Ereignis ``locked`` an die Listener (auch bei
+        ``stop``, Leerlauf-Ende und gescheitertem ``start``; der Web-Server beendet dann alle
+        Sitzungen, E92)."""
+        was = self.operator is not None
         if self.operator is not None:
             self.operator.wipe()
         self.operator = None
         self._runtime_secrets = []
         self._update_redactor()
+        if was and notify:
+            self._notify("locked")
 
     def _active_id(self) -> str | None:
         """Aktives Projekt: das offene, sonst das nicht gestoppte aus ``active.json``."""
@@ -1817,10 +1823,10 @@ class Daemon:
 
     def op_lock(self, args: dict[str, Any]) -> dict[str, Any]:
         head = self._close_current("lock")
-        self._lock_operator()
+        self._lock_operator(notify=False)
         self._user_locked = True
         log.info("Operator gesperrt")
-        self._notify("locked")
+        self._notify("locked")  # immer, auch wenn schon gesperrt war
         self._refresh_all()
         return {"closed_project": head is not None}
 

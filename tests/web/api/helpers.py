@@ -187,6 +187,10 @@ async def build_fixture(d: Any, paths: Any, *, inputs: bool = True, extra: bool 
         f"admin:{CRYPT}:18000:0:99999:7:::\r\nsudo {OWN_SECRET}\r\nbanner {HOSTILE}\r\n".encode(),
         cwd=str(ws),
     )
+    # C1-Steuerzeichen (U+009B als UTF-8), einzelnes ESC, Bidi und Zero-Width direkt aus der Ausgabe
+    await term.command(
+        "cat c1.txt", b"c1 \xc2\x9b31mrot \x1bZ esc \xe2\x80\xaeltr \xe2\x80\x8bzw\r\n", cwd=str(ws)
+    )
     await term.command(
         "nc -lvnp 4444",
         b"listening on [any] 4444 ...\r\n"

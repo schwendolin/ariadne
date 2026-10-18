@@ -216,6 +216,10 @@ class WebExtension:
                 log.info("Web-Sitzungen beendet (%s)", kind)
         if kind == "unlocked":
             self._was_unlocked = True
+        elif kind == "locked":
+            # schon erledigt: die 2-s-Prüfung darf Codes und Sitzungen danach nicht noch einmal
+            # verwerfen (sonst gilt ein Code nicht, der kurz nach lock geholt wurde)
+            self._was_unlocked = False
 
     def check_now(self) -> None:
         """Eine Runde der Prüfung (sonst alle 2 s)."""

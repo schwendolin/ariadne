@@ -1,34 +1,77 @@
 """``ariadne remote check`` und ``ariadne remote serve`` (R10, R11, Konzept Fernzugriff 7).
 
-Besitzer: Teil «remote» (Vertrag v0.1-Server). **Stub aus Phase 1** mit festgelegten Argumenten.
+Besitzer: Teil «remote» (Vertrag v0.1-Server 3.6).
+
+* ``remote check [--full]``: Systemprüfung wie ``ariadne doctor``; ``--full`` fragt einmal per
+  ``sudo`` und prüft zusätzlich ``sshd -T`` und den Filter (``nft``). Exit 1 bei einem ``fail``.
+* ``remote serve``: Forced Command für den Mac-Schlüssel in ``authorized_keys``; liest nur
+  ``SSH_ORIGINAL_COMMAND`` (:mod:`ariadne.remote.serve`).
+
+Runtime-Ordner: In einer SSH-Sitzung fehlt ``XDG_RUNTIME_DIR`` je nach PAM-Einstellung; dann
+fänden ``remote serve`` und der Daemon verschiedene ``ctl.sock``. Darum setzt ``remote`` die
+Variable auf ``/run/user/<uid>``, wenn sie fehlt und der Ordner existiert, dem Benutzer gehört und
+0700 hat; sonst bleibt sie leer und ``serve`` meldet das klar (kein Raten).
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import stat
+import subprocess
+from collections.abc import MutableMapping
 from typing import Any
 
-from ariadne.cli.common import s, say
-from ariadne.paths import Paths
+from ariadne.cli.common import say
+from ariadne.paths import Paths, default_paths
 
-__all__ = ["register", "cmd_remote"]
+__all__ = ["register", "cmd_remote", "ensure_runtime_dir"]
+
+
+def ensure_runtime_dir(env: MutableMapping[str, str], *, uid: int | None = None,
+                       run_root: str = "/run/user") -> bool:
+    """Setzt ``XDG_RUNTIME_DIR``, falls es fehlt und ``/run/user/<uid>`` sicher ist.
+
+    Gibt zurück, ob die Variable danach gesetzt ist."""
+    if env.get("XDG_RUNTIME_DIR"):
+        return True
+    uid = os.getuid() if uid is None else uid
+    d = os.path.join(run_root, str(uid))
+    try:
+        st = os.lstat(d)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != uid or st.st_mode & 0o077:
+        return False
+    env["XDG_RUNTIME_DIR"] = d
+    return True
+
+
+def _sudo_once() -> bool:
+    """Fragt einmal nach dem sudo-Passwort (``sudo -v``); danach laufen die Prüfungen mit ``sudo -n``."""
+    try:
+        return subprocess.run(["sudo", "-v"], check=False).returncode == 0
+    except OSError:
+        return False
 
 
 def cmd_remote(paths: Paths, args: argparse.Namespace) -> int:
     if args.rcmd == "serve":
-        from ariadne.remote.serve import main
+        from ariadne.remote import serve
 
-        return main(paths, os.environ)
-    from ariadne.cli.doctor import FAIL, OK
-    from ariadne.remote.check import run_checks
+        ensure_runtime_dir(os.environ)
+        return serve.main(default_paths(), os.environ)
+    from ariadne.remote.check import render, run_checks
 
-    worst = 0
-    for c in run_checks(paths, full=args.full):
-        tag = {OK: "[ok]", FAIL: "[!!]"}.get(c.level, "[--]")
-        say(f"{tag} {s(c.title)}" + (f": {s(c.detail, 300)}" if c.detail else ""))
-        if c.level == FAIL:
-            worst = 1
+    if args.full and os.getuid() != 0:
+        say("remote check --full: sudo fragt einmal nach deinem Passwort (für sshd -T und nft).")
+        if not _sudo_once():
+            say("[!!] sudo verweigert: ohne --full prüfen oder als Administrator anmelden")
+            return 1
+    ensure_runtime_dir(os.environ)
+    lines, worst = render(run_checks(default_paths(), full=args.full))
+    for line in lines:
+        say(line)
     return worst
 
 

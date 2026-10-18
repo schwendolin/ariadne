@@ -522,7 +522,7 @@ def timeline_page(
     bag: Bag,
 ) -> dict[str, Any]:
     entries = _collect(conn, journal, types, terminal)
-    queries._sort_time(entries, queries._boot_ranks(conn))  # dieselbe Ordnung wie ariadne show timeline (E96)
+    queries.sort_time(entries, queries.boot_ranks(conn))  # dieselbe Ordnung wie ariadne show timeline (E96)
     entries.reverse()  # neueste zuerst
     if host is not None:
         ents = _entities(conn)

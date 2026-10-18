@@ -167,3 +167,25 @@ def test_remove_listener_and_reparse_job_events(paths, operator):
     jobs = [d for k, d in seen if k == "job"]
     assert [(j["kind"], j["status"]) for j in jobs] == [("reparse", "running"), ("reparse", "done")]
     assert jobs[0]["job_id"] == jobs[1]["job_id"]
+
+
+def test_locked_event_whenever_an_unlocked_operator_is_locked(paths, operator):
+    """Integration (Bericht «server»): ``stop`` ohne Projekt, Leerlauf-Ende und ein gescheiterter
+    ``start`` sperren den Tresor; der Web-Server muss das als ``locked`` hören (E92)."""
+    from tests.core.conftest import PASSPHRASE
+
+    seen: list[str] = []
+
+    async def scenario(d) -> None:
+        d.add_listener(lambda kind, data: seen.append(kind))
+        await ctl_ok(paths.ctl_sock, "stop")  # kein Projekt offen, aber entsperrt
+        assert seen.count("locked") == 1
+        await ctl_ok(paths.ctl_sock, "stop")  # schon gesperrt: kein zweites Ereignis
+        assert seen.count("locked") == 1
+        bad = await ctl(paths.ctl_sock, "start", passphrase=PASSPHRASE, slug="gibtsnicht")
+        assert bad["error"]["code"] == "project_not_found"
+        assert seen[-2:] == ["unlocked", "locked"]
+        await ctl_ok(paths.ctl_sock, "lock")  # ausdrücklich: immer ein Ereignis
+        assert seen.count("locked") == 3
+
+    run(paths, operator, scenario)

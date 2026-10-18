@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.core.conftest import operator_template  # noqa: F401 - Operator-Tresor für test_dashboard (Weg B)
 from tests.e2e.helpers import Lab
 
 

@@ -156,7 +156,7 @@ def test_sort_without_monotonic_clock_falls_back_to_wall():
     entries = [{"type": "command", "ts": 30, "boot_id": None}, {"type": "command", "ts": 10, "boot_id": None},
                {"type": "keystep", "ts": 20, "boot_id": "b", "mono_ns": None},
                {"type": "command", "ts": 25, "boot_id": "b", "mono_ns": 5}]
-    queries._sort_time(entries, {"b": 0})
+    queries.sort_time(entries, {"b": 0})
     assert [e["ts"] for e in entries] == [10, 30, 20, 25]  # ohne Systemstart zuerst; b: 20-20=0 < 5
 
 

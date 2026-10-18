@@ -146,3 +146,57 @@ def test_api_part_routes_and_schema():
     assert not ALLOWED_OPS & {"unlock", "start", "init", "lock", "stop", "shutdown", "redact", "import",
                               "reparse", "verify", "secrets.add", "project.open", "ui.code"}
     assert callable(web_api.attach_sources)
+
+
+def test_backup_part_interfaces():
+    """Teil «backup» (additiv): echte Umsetzung, Zusatzparameter nur als Schlüsselwörter."""
+    from ariadne.backup import model as backup_model
+
+    assert backup_api.STUB is False
+    sig = inspect.signature(backup_api.backup_to_stream)
+    for name in ("projects", "target", "target_path"):
+        assert sig.parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
+    for code in ("no_recipients", "tty_refused", "project_open", "vault_exists", "project_exists",
+                 "bad_manifest", "version", "hash_mismatch", "io"):
+        assert code in backup_model.CODES
+    assert backup_api.RestoreResult(("a",), True).verified == {}
+    assert callable(backup_api.backup_summary_lines) and callable(backup_api.restore_summary_lines)
+    args = cli_main.build_parser().parse_args(["restore", "--identity", "-", "--passphrase-fd", "3"])
+    assert args.identity == "-" and args.passphrase_fd == 3
+
+
+def test_remote_part_interfaces():
+    """Teil «remote» (additiv): kein Stub mehr; Forced Command, Schnellprüfung und Skripte."""
+    from pathlib import Path
+
+    assert remote_serve.STUB is False and remote_check.STUB is False
+    assert remote_serve.parse_command("code") == "code" and remote_serve.parse_command("code; id") is None
+    assert callable(remote_serve.HOLD) and _params(remote_serve.hold)[:1] == ["ppid"]
+    assert _params(remote_check.quick_ok)[:1] == ["paths"]
+    assert _params(remote_check.quick_checks)[:1] == ["paths"]
+    assert remote_check.SETUP_ROOT_ENV == "ARIADNE_SETUP_ROOT"
+    assert _params(remote_cli.ensure_runtime_dir)[:1] == ["env"]
+    root = Path(__file__).resolve().parents[2]
+    for rel in ("packaging/smartlearn/kali-setup.sh", "packaging/mac/ariadne-mac",
+                "docs/anleitung-fernzugriff.md"):
+        assert (root / rel).is_file(), rel
+    assert cli_main.build_parser().parse_args(["remote", "check", "--full"]).full is True
+
+
+def test_integration_additions():
+    """Nachträge der Integration (contract_requests der Teile, E115): nur additiv."""
+    import inspect
+
+    from ariadne.ingest import queries
+    from ariadne.store.journal import JournalReader, SqlCipherJournal
+    from ariadne.web import security
+
+    assert callable(queries.sort_time) and callable(queries.boot_ranks)
+    for cls in (JournalReader, SqlCipherJournal):
+        assert callable(cls.read_head) and callable(cls.get_by_id)
+    assert list(inspect.signature(security.shell_navigation).parameters) == ["method", "path", "headers"]
+    nav = {b"sec-fetch-site": [b"cross-site"], b"sec-fetch-mode": [b"navigate"],
+           b"sec-fetch-dest": [b"document"]}
+    assert security.shell_navigation("GET", "/", nav)
+    assert not security.shell_navigation("GET", "/api/v1/x", nav)
+    assert not security.shell_navigation("POST", "/", nav)

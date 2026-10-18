@@ -30,6 +30,7 @@
 14. [Ereignisstrom (SSE)](#14-ereignisstrom-sse)
 15. [Später](#15-später)
 16. [Offene Punkte](#16-offene-punkte)
+17. [Präzisierungen aus dem Bau v0.1-Server](#17-präzisierungen-aus-dem-bau-v01-server)
 
 ## 1 Grundregeln
 
@@ -42,7 +43,7 @@ Die Regeln R1 bis R3, R5 bis R8 und R12 aus dem Konzept Fernzugriff (5.4) und Ar
 | Bindung | nur `127.0.0.1` oder `::1`, Standardport 7330 (`[ui] port` in `config.toml`, `0` nur für Tests). Jede andere Adresse lehnt die Konfiguration ab, der HTTP-Teil startet dann nicht (fail-closed), die Aufnahme läuft weiter. Nach dem Start prüft der Server `getsockname()`. Nur HTTP/1.1, kein TLS | R1, E89 |
 | Peer | Jede TCP-Verbindung muss einem Socket desselben Benutzers gehören (UID über `/proc/net/tcp` bzw. `tcp6`), sonst wird sie ohne Antwort geschlossen. Jedes Token ist an einen Prozess gebunden (PID und Startzeit) und gilt nur, solange dieser lebt. **lokal** (Weg E): der Prozess hinter der Verbindung beim Tausch Code gegen Token (Browser in der Kali, gefunden über den Socket in `/proc/<pid>/fd`); jede spätere Verbindung muss zu genau diesem Prozess gehören. **über sshd** (Weg B): der sshd-Prozess der SSH-Verbindung, über die `ariadne remote serve code` den Code geholt hat; diese Verbindung trägt auch den Tunnel. Der sshd-Prozess ist nach dem Rechtewechsel nicht lesbar («nicht dumpable»), darum gilt: Eine Verbindung, deren Prozess lesbar ist, muss der gebundene sein; eine Verbindung ohne lesbaren Prozess wird nur bei einer sshd-Sitzung angenommen | R2 |
 | Host | `Host` exakt `127.0.0.1:PORT`, `localhost:PORT` oder `[::1]:PORT`, sonst 421. Keine Ausnahme für `*.ts.net`, Tunnel-Dienste oder Lab-IPs | R3 |
-| Fetch-Metadaten | `Sec-Fetch-Site` nur `same-origin` oder `none` (oder fehlend, etwa bei `curl`), sonst 403, auch für statische Dateien und `/api/v1/session` | R12 |
+| Fetch-Metadaten | `Sec-Fetch-Site` nur `same-origin` oder `none` (oder fehlend, etwa bei `curl`), sonst 403, auch für statische Dateien und `/api/v1/session`. Einzige Ausnahme (E115, **geändert im Bau v0.1-Server, Integration**): ein `GET` der SPA-Shell (`/`, `/index.html`, Routen ohne Dateiendung, nie `/api/` oder `/assets/`) als Navigation (`Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`) auch von `cross-site` oder `same-site`, damit die Startdatei aus `file://` die Shell laden kann; liefert die App dafür etwas anderes als die Shell, antwortet der Server 403 | R12 |
 | Origin | bei `POST`, `PUT`, `PATCH`, `DELETE` Pflicht und genau der eigene (`http://127.0.0.1:PORT`, bzw. der Wert passend zum `Host`), sonst 403 | R12 |
 | Methoden | `OPTIONS` ergibt 405; kein CORS, nie `Access-Control-Allow-*` | R12 |
 | Anmeldung | `Authorization: Bearer <token>` auf jeder Route unter `/api/v1` ausser `POST /api/v1/session`. Keine Cookies, darum kein CSRF. Ein Token in der URL (`?token=`) wird ignoriert (401). Tokenvergleich über den SHA-256 mit `hmac.compare_digest` | R6, R8 |
@@ -867,6 +868,33 @@ Jede Route mit Marke «501» existiert in diesem Bau, durchläuft dieselbe Middl
 8. **Peer-Bindung bei Weg B**: Der sshd-Prozess der Sitzung ist für den eigenen Benutzer nicht lesbar (nach dem Rechtewechsel nicht «dumpable»), seine Sockets lassen sich ihm also nicht zuordnen. Gebunden wird darum an die SSH-Verbindung, die den Code geholt hat (PID über `ctl.sock` und die Eltern von `remote serve`), und jede Verbindung mit lesbarem Prozess muss genau dieser sein. Ein anderer, ebenfalls nicht lesbarer Prozess desselben Benutzers könnte ein gestohlenes Token benutzen, solange der Tunnel steht; ein solcher Prozess kann aber ohnehin `ctl.sock` erreichen und Codes holen (gleiche UID, Architektur 9.1 A4).
 6. **Positionen bei Merge und Split**: Wer verschiebt gespeicherte Positionen, wenn sich die stärkste Kennung eines Hosts ändert? v0.1: die UI legt einen unbekannten Knoten neu.
 7. **IP-Adressen in der URL** (Briefing 13.3): `?host=ip:default/…` steht im Browserverlauf. v0.1 erlaubt es; neutrale IDs wären eine spätere Änderung.
+9. **Entscheide der Design-Session (E105 bis E114, nach Baubeginn).** Nicht in dieser API: E106 «Neu seit» auf dem Server (Vorschlag `GET`/`PUT /p/{pid}/ui/seen` in `state.db`, siehe Punkt 3), E112 Vorlieben auf dem Server (Vorschlag `GET`/`PUT /ui/prefs` für Theme, Dichte, Lernmodus), E113 Findings schon in v0.1 (hier noch `501 bis v0.2`, Abschnitt 15) und E111 «in die Kali kopieren» (501 mit den Credentials). Kommt mit dem UI-Bau nach Design v0.1.
+
+## 17 Präzisierungen aus dem Bau v0.1-Server
+
+> **geändert im Bau v0.1-Server** (Teil «api», 2026-10-17). Die Umsetzung hat folgende Stellen festgelegt, die oben offen oder mehrdeutig waren. Nichts davon lockert eine Regel aus 1.1 oder 1.3.
+
+| Stelle | Festlegung |
+|---|---|
+| Ausgang (1.3) | Jede JSON-Antwort geht zuletzt durch `Redactor.redact_json` und danach durch eine zweite Schicht, die jeden String (auch Schlüssel) sichtbar macht; zusätzlich zu `term_safe` werden U+2028 und U+2029 als `<U+2028>`/`<U+2029>` gezeigt. Gekürzt wird nur, wo es steht (Eingaben: 2000 Zeichen). |
+| Zeilen einer Einheit (11) | `n`, `from` und die Bereiche `lines` in `SourceView` zählen nach der Position in der Einheit (`unit_line.pos`, 0-basiert, mit Prompt-Echo). Fundstellen der Parser werden darauf umgerechnet. `masked[].kind`: `secret` (bekannter Secret-Wert oder im Präsentationsmodus ein von einem Parser gemeldeter Secret-Bereich), `own_secret` (eigenes Secret), `concealed` (SGR-verdeckter Text ohne `reveal_hidden`). |
+| `reveal_hidden` (11) | wirkt nur im Profil lab und nie im Präsentationsmodus; sonst bleibt verdeckter Text verdeckt (kein Fehler). |
+| `log.txt` (11) | Dateiname `unit-<12 Hex-Zeichen>.txt` (Hash der `unit_id`), höchstens 200 000 Zeilen, danach ein Vermerk. |
+| Suche (13) | `line` ist die Position wie bei `/lines`; der Text ist so verdeckt wie dort. |
+| Warteliste (13) | Antwort zusätzlich mit `truncated`. |
+| Host-Tabelle (8) | `/hosts` zeigt wie die Karte nur Hosts im Scope (auch Nebel); das Detail gibt es für jeden bekannten Host, auch über eine andere Kennung des Hosts. `HostDetail` zusätzlich mit `facts_truncated` (höchstens 2000 Werte); `conflicts` ist im Detail die Liste. Namen in Punycode (`xn--`) zeigt `label` dekodiert, `punycode` die ASCII-Form. |
+| Services (8) | `/services` zeigt nur Services im Scope; `class` ist eine der Klassen aus `ServiceNode`, sonst 422. Verlauf: abgelöste Werte von `service.state`, `version`, `product`, `name` mit `until` = zuletzt gesehen. |
+| Karte (7) | `oos` enthält Hosts mit Urteil ungleich `in` und IP-Erwähnungen ausserhalb des Scopes (ohne eigene Adressen), nach Zahl der Erwähnungen. Segmente: Netze aus `scope.include` (`origin: scope`), sonst das beobachtete /24 bzw. /64. `summary.services` ist die Summe der Services der Hosts im Scope. |
+| Änderungen (7) | `reset: true`, wenn `since` grösser als die aktuelle Generation ist (neue `derived.db` nach Reparse) oder älter als die aufbewahrten 1000 Generationen. |
+| Positionen (7) | `PUT` ersetzt alle gespeicherten Positionen des Projekts. |
+| Status (4) | `ingest.last_error` ist ein fester Text («Auswertung fehlgeschlagen»), nie eine Ausnahme. `llm.budget.month_limit_usd` aus den Projekteinstellungen, `month_used_usd` in v0.1 immer 0. |
+| Terminals (5) | `remote_segment` nur, wenn das jüngste offene Segment in einer Remote-Stufe liegt. `last_command.ended_at` ist `null`, solange der Befehl läuft. |
+| Kontext (5) | `pop` auf Kali: 422. `accept` für einen Vorschlag dieses Terminals, der nicht mehr offen ist: 409; ein unbekannter Eintrag: 404. Warnungen nennen `host` als eingegebenen Text (IP oder Name). |
+| Zeitachse (10) | `id`: `unit_id` bei Einheiten, `k:<seq>` Schlüsselschritt, `c:<seq>` Kontext-Entscheid, `a:<tid>@<off>` Auto-Kontext, `decision_id` bei Entscheiden, `g:<seq>` Lücke, `p:<seq>` Projekt, `i:<seq>` Eingabe. Eine Pause steht als `gap` mit `reason: pause` ab Beginn der Pause bis `until`. `summary` der Entscheide ist ein fester Text ohne Werte. Die Zeitachse trägt die jüngsten 5000 Einträge aus Einheiten und Schritten. |
+| Entscheide (12) | `d.claim.confirm` und `d.claim.edit` auf eine eigene Adresse: 409. `d.revoke` auf `d.scope.update` oder `d.lab.not_customer`: 403 `policy`; auf einen schon aufgehobenen Entscheid: 409. `d.keystep.mark` mit `terminal_id` oder `stream_off`: 422. `d.automode.set`: 403 im Profil lab. Bei `d.unit.distrust` ist `seq` `null`. |
+| Aufdecken (13.3) | Für Eingaben ist `ctrl` wahr, wenn der Text sichtbar gemachte Steuerzeichen enthält. |
+| Fetch-Metadaten (1.1) | Navigation zur Shell auch von fremder Herkunft (E115, Integration); alles andere unverändert. |
+| UI-Bau | Schreibende Anfragen mit `fetch` im Modus `cors` (Standard): Nur dann schickt der Browser trotz `Referrer-Policy: no-referrer` den echten `Origin` statt `null`. Den Strom mit `fetch` lesen (Bearer, `Last-Event-ID`). Positionen von Host-Karten über CSSOM setzen, nicht über `style`-Attribute (Shell-CSP). |
 
 ## Anhang: Lücken aus Briefing B.4 und wo sie jetzt stehen
 

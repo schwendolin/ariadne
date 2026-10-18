@@ -2,7 +2,7 @@
 
 Flugschreiber und Kartograf für Pentests unter Linux. Ariadne nimmt Terminals, Dateien und Screenshots auf, liest daraus Hosts, Services und Zugänge aus und malt Schritt für Schritt eine Karte der Zielumgebung. Zu jedem Fakt zeigt es die Quelle. Ariadne beobachtet und gibt Denkanstösse, greift aber nie selbst an.
 
-Status: v0.1-Backend (Stand 2026-10-15). Aufnahme, verschlüsseltes Journal und Auswertung mit Karte über die CLI laufen; Web-API, Regeln, KI und Export folgen. Nicht für Kundendaten.
+Status: v0.1 im Bau (Stand 2026-10-17). Aufnahme, verschlüsseltes Journal und Auswertung mit Karte laufen über die CLI; dazu Web-Server mit API v2, Sicherung und Fernzugriff vom Mac. Die Oberfläche im Browser ist noch der erste Entwurf (das Design v0.1 folgt), Regeln, KI und Export folgen. Nicht für Kundendaten.
 
 ## Im Alltag
 
@@ -46,12 +46,43 @@ Am Ende:
 ariadne stop    # Projekt beenden und sperren
 ```
 
-Nach 12 Stunden ohne Ausgabe in irgendeinem Terminal beendet Ariadne das Projekt von selbst. `ariadne lock` sperrt nur, das Projekt bleibt aktiv. Eigene Secrets (`ariadne secrets add`) stehen verschlüsselt im Journal und werden vor KI, Export und Bericht ersetzt.
+Nach 12 Stunden ohne Ausgabe in irgendeinem Terminal beendet Ariadne das Projekt von selbst. `ariadne lock` sperrt nur, das Projekt bleibt aktiv; `ariadne unlock` entsperrt und öffnet es wieder, die Aufnahme läuft sofort weiter. Eigene Secrets (`ariadne secrets add`) stehen verschlüsselt im Journal und werden vor KI, Export und Bericht ersetzt. Passwörter, die du ohne Echo tippst (sudo, ssh, su), speichert Ariadne vollständig, zeigt sie aber verdeckt (`ariadne show inputs`).
+
+## Dashboard
+
+Der Daemon liefert das Dashboard nur auf `127.0.0.1:7330` aus. Anmelden geht nur mit einem Einmal-Code aus der CLI, nie mit der Passphrase:
+
+```sh
+ariadne ui              # Browser der Kali öffnen (Startdatei mit Code, nach 10 s gelöscht)
+ariadne ui --code       # kurzen Code zum Eintippen zeigen
+ariadne ui --sessions   # angemeldete Sitzungen mit Herkunft (lokal oder über sshd)
+ariadne ui --revoke     # alle abmelden
+```
+
+Eine Anmeldung gilt höchstens 12 Stunden und endet mit `lock`, `stop`, einem Neustart des Daemons und dem Tunnel. Einstellungen in `~/.config/ariadne/config.toml` unter `[ui]` (nur Loopback). Die Schnittstelle beschreibt [docs/web-api.md](docs/web-api.md).
+
+## Sicherung
+
+Die Schule kann die VM jederzeit zurücksetzen. Darum nach jeder Session sichern, verschlüsselt mit age an Empfänger ausserhalb der VM (`~/.config/ariadne/backup-recipients.txt`, eine Zeile `age1…` pro Empfänger):
+
+```sh
+ariadne stop                                  # danach zeigt Ariadne, ob eine Sicherung fehlt
+ariadne backup --to-file ~/Abgabe/sicherung.age
+ariadne restore --from-file sicherung.age --identity -   # in einer frischen Kali ohne ariadne init
+```
+
+Gesichert werden der Operator-Tresor, die Konfiguration und die Projekte, nur geschlossene. `restore` prüft Manifest, Version und alle Hashes, bevor es etwas schreibt, und danach jede Kette.
+
+## Fernzugriff vom Mac
+
+Mit Tailscale und SSH erscheint das Dashboard im Browser des Macs, die Passphrase tippst du im Mac-Terminal (`ariadne-mac unlock`), und `ariadne-mac stop` holt die Sicherung auf den Mac. Der SSH-Schlüssel des Macs öffnet nur den Tunnel zu Port 7330 und sieben feste Befehle, nie eine Shell. Einrichten mit `packaging/smartlearn/kali-setup.sh` in der Kali und `packaging/mac/ariadne-mac` auf dem Mac, prüfen mit `ariadne remote check --full`. Schritt für Schritt: [docs/anleitung-fernzugriff.md](docs/anleitung-fernzugriff.md).
 
 ## Dokumente
 
 - [Vision](VISION.md): Zielbild, Grundsätze, Roadmap, offene Punkte
 - [Lösungsarchitektur](docs/architektur.md): Teilsysteme, Datenmodell, Sicherheitsarchitektur, Roadmap im Detail
 - [Entwicklung](docs/entwicklung.md): Umgebung, Tests, Landkarte der Module, bekannte Grenzen
+- [Web-API](docs/web-api.md): HTTP-Schnittstelle des Dashboards (v2)
+- [Anleitung Fernzugriff](docs/anleitung-fernzugriff.md) und [Konzept Fernzugriff](docs/konzept-fernzugriff.md): Dashboard auf dem Mac, Sicherung, Sicherheitskonzept
 - [Entscheidungsprotokoll](docs/entscheide.md): was entschieden wurde, warum und von wem
 - [Fragenkatalog](docs/fragenkatalog.md): Brainstorming mit Antwortoptionen und Empfehlungen

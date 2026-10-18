@@ -211,6 +211,53 @@ def test_t3_fetch_metadata_origin_and_options(paths, operator):
     run_web(paths, operator, scenario)
 
 
+def test_t3_cross_site_navigation_loads_only_the_shell(paths, operator):
+    """E115: Die Startdatei (``file://``) navigiert für den Browser von fremder Herkunft auf die
+    Shell. Nur ``GET`` der Shell als Navigation (``navigate``, ``document``) geht durch; Assets,
+    API, Sitzung, andere Methoden und andere Arten der Anfrage bleiben 403."""
+
+    nav = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+
+    async def scenario(web: Web) -> None:
+        token = await web.login()
+        for site in ("cross-site", "same-site"):
+            for path in ("/", "/index.html", "/karte", "/p/abc/zeitachse/"):
+                r = await web.req("GET", path, headers={**nav, "Sec-Fetch-Site": site})
+                assert r.status_code == 200, (site, path)
+                assert r.headers["content-security-policy"] == SHELL_CSP
+                assert r.headers["x-frame-options"] == "DENY"
+                assert r.text.lstrip().lower().startswith("<!doctype html")
+        refused = [
+            ("GET", f"/assets/{ASSET}", nav),
+            ("GET", "/favicon.svg", nav),  # Datei ohne Shell: die Antwort wird zu 403
+            ("GET", "/nicht-da.png", nav),
+            ("GET", "/api/v1/test/whoami", nav),
+            ("GET", "/api/v1/session", nav),
+            ("HEAD", "/", nav),
+            ("POST", "/", nav),
+            ("GET", "/", {**nav, "Sec-Fetch-Mode": "no-cors"}),
+            ("GET", "/", {**nav, "Sec-Fetch-Dest": "iframe"}),
+            ("GET", "/", {**nav, "Sec-Fetch-Dest": "script"}),
+            ("GET", "/", {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}),
+            ("GET", "/", {**nav, "Sec-Fetch-Site": "irgendwas"}),
+        ]
+        for method, path, headers in refused:
+            r = await web.req(method, path, token=token, headers=headers,
+                              origin=None if method == "GET" else web.base)
+            assert r.status_code == 403, (method, path, headers)
+            if method != "HEAD":
+                assert r.json()["error"]["code"] == "forbidden"
+            assert r.headers["content-security-policy"] == OTHER_CSP
+        # die Shell holt danach alles same-origin: das geht wie immer
+        same = {"Sec-Fetch-Site": "same-origin"}
+        assert (await web.req("GET", "/api/v1/test/whoami", token=token, headers=same)).status_code == 200
+        # eine fremde Navigation mit fremdem Origin bleibt verboten
+        r = await web.req("GET", "/", headers=nav, origin="http://evil.example")
+        assert r.status_code == 403
+
+    run_web(paths, operator, scenario)
+
+
 # --------------------------------------------------------------------------- #
 # T4 Code-Sperre
 # --------------------------------------------------------------------------- #

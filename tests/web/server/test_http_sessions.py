@@ -193,8 +193,8 @@ def test_t7_switch_keeps_session_idle_ends_it(paths, operator):
 
 
 def test_t7_lock_without_event_is_caught_by_the_watch(paths, operator):
-    """``stop`` ohne offenes Projekt sperrt den Tresor ohne Projekt-Ereignis: die Prüfung alle 2 s
-    beendet die Sitzungen trotzdem."""
+    """``stop`` ohne offenes Projekt sperrt den Tresor ohne Projekt-Ereignis (seit der Integration
+    sendet der Daemon dafür ``locked``); die Prüfung alle 2 s fängt es zusätzlich ab."""
 
     async def scenario(web: Web) -> None:
         token = await web.login()
@@ -204,6 +204,27 @@ def test_t7_lock_without_event_is_caught_by_the_watch(paths, operator):
         assert await stream.ends_within(3.0)
         await stream.close()
         assert (await web.req("GET", "/api/v1/test/whoami", token=token)).status_code == 401
+
+    run_web(paths, operator, scenario)
+
+
+def test_code_fetched_right_after_lock_stays_valid(paths, operator):
+    """Integration (E2E Weg B): Nach ``lock`` holt der Mac sofort einen neuen Code. Die 2-s-Prüfung
+    darf ihn nicht noch einmal verwerfen, weil sie den Wechsel zu «gesperrt» schon kennt."""
+
+    async def scenario(web: Web) -> None:
+        sock = paths.ctl_sock
+        await ctl_ok(sock, "start", slug="lame", targets=["10.10.10.3"])
+        token = await web.login()
+        await ctl_ok(sock, "lock")
+        assert (await web.req("GET", "/api/v1/test/whoami", token=token)).status_code == 401
+        code = await web.code()
+        web.ext.check_now()  # die nächste Runde der Prüfung nach dem lock
+        r = await web.req("POST", "/api/v1/session", json_body={"code": code})
+        assert r.status_code == 200, r.text
+        tok2 = r.json()["token"]
+        web.ext.check_now()
+        assert (await web.req("GET", "/api/v1/test/whoami", token=tok2)).status_code == 200
 
     run_web(paths, operator, scenario)
 

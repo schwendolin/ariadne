@@ -219,3 +219,19 @@ def test_revoke_and_listing_never_contain_tokens():
     assert store.revoke("gibtsnicht") == 0
     assert store.revoke() == 1 and len(ended) == 2
     assert store.authenticate(tokens[1], _peer(7)) is None
+
+
+def test_revoke_counts_only_sessions_that_still_live():
+    """Bericht «remote»: Nach dem Ende eines Tunnels meldete ``revoke`` zwei Sitzungen, obwohl nur
+    eine lebte. Beendete Sitzungen räumt ``revoke`` vorher ab und zählt sie nicht."""
+    store, _, procs = _store()
+    ended: list[str] = []
+    store.add_revoke_listener(ended.append)
+    procs.add(11)
+    procs.add(12)
+    _, a = store.exchange(store.issue_code(typed=False, via="local")[0], _peer(11))
+    _, b = store.exchange(store.issue_code(typed=False, via="local")[0], _peer(12))
+    del procs.live[11]  # Prozess der ersten Sitzung ist weg, die 2-s-Prüfung lief noch nicht
+    assert store.revoke() == 1
+    assert sorted(ended) == sorted([a.session_id, b.session_id]) and len(store) == 0
+    assert store.revoke(a.session_id) == 0

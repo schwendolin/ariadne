@@ -202,12 +202,10 @@ def _check_refs(conn: Any, journal: Any, items: list[tuple[str, dict[str, Any]]]
             ):
                 raise ApiError("conflict")
         elif kind == "d.revoke":
-            target = journal.conn.execute(
-                "SELECT kind, layer FROM event WHERE id = ?", (h["decision_id"],)
-            ).fetchone()
-            if target is None or target[1] != "decision":
+            target = journal.get_by_id(str(h["decision_id"]))
+            if target is None or target.layer != "decision":
                 raise ApiError("conflict")
-            if target[0] in CRITICAL:
+            if target.kind in CRITICAL:
                 raise ApiError("policy")
             if revoked is None:
                 revoked = {str(r.header.get("decision_id")) for r in journal.iter_events(kinds=["d.revoke"])}

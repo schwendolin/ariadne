@@ -295,6 +295,17 @@ class SqlCipherJournal:
         row = self.conn.execute(f"SELECT {_COLS} FROM event WHERE seq = ?", (seq,)).fetchone()  # noqa: S608
         return self._record(row) if row else None
 
+    def get_by_id(self, event_id: str) -> EventRecord | None:
+        """Event nach seiner UUID (``EventRecord.id``), z. B. der Entscheid hinter ``d.revoke``."""
+        row = self.conn.execute(f"SELECT {_COLS} FROM event WHERE id = ?", (event_id,)).fetchone()  # noqa: S608
+        return self._record(row) if row else None
+
+    def read_head(self) -> tuple[int, bytes]:
+        """Kettenkopf aus der Datei (``seq`` und Hash des letzten Events, leer: ``(0, b"")``).
+        Anders als :meth:`head` ohne Zwischenspeicher, darum auch für :class:`JournalReader`."""
+        row = self.conn.execute("SELECT seq, hash FROM event ORDER BY seq DESC LIMIT 1").fetchone()
+        return (int(row[0]), bytes(row[1])) if row else (0, b"")
+
     def head(self) -> tuple[int, bytes]:
         return self._head
 
@@ -460,6 +471,8 @@ class JournalReader:
     _record = SqlCipherJournal._record
     iter_events = SqlCipherJournal.iter_events
     get = SqlCipherJournal.get
+    get_by_id = SqlCipherJournal.get_by_id
+    read_head = SqlCipherJournal.read_head
     stream_end = SqlCipherJournal.stream_end
     stream_slice = SqlCipherJournal.stream_slice
 

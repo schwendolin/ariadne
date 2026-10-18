@@ -1,0 +1,388 @@
+#!/bin/zsh
+# ariadne-mac: das Ariadne-Dashboard der Kali auf dem Mac (Weg B, Konzept Fernzugriff 4.2, 4.4, 6,
+# R5, R11, R13, E93, E94).
+#
+#   ariadne-mac check            Mac prüfen (FileVault, Schlüssel, Hostkey, Port 7330, Sicherung)
+#   ariadne-mac start            Tunnel auf, Code holen, Dashboard im Standardbrowser öffnen
+#   ariadne-mac stop             Sitzungen widerrufen, sperren, Sicherung holen, Tunnel zu
+#   ariadne-mac unlock           Passphrase im Mac-Terminal eingeben (ssh -t kali-sl unlock)
+#   ariadne-mac backup           verschlüsselte Sicherung der Kali in den Sicherungsordner
+#   ariadne-mac restore DATEI    Sicherung in eine frische Kali zurückspielen
+#
+# Sicherheit: ssh immer nur mit -F ~/.ssh/ariadne.conf, ControlMaster=no und ControlPath=none
+# (keine globalen Einstellungen, kein Hintergrundtunnel nach stop), nie -g. Der Code steht nie
+# in argv: Er kommt über dieselbe SSH-Verbindung, die den Tunnel trägt (ssh -n -L … kali-sl code),
+# landet in einer Datei mit 0600 in $TMPDIR (sofort gelöscht) und erreicht den Browser nur im
+# Fragment einer Startdatei (0600, nach 10 s gelöscht). Endet die Verbindung, endet die Anmeldung.
+#
+# Einstellungen (Umgebung): ARIADNE_MAC_HOST (kali-sl), ARIADNE_MAC_SSH_CONFIG
+# (~/.ssh/ariadne.conf), ARIADNE_MAC_BACKUP_DIR (~/Ariadne-Backups), ARIADNE_MAC_KEY
+# (~/.config/ariadne-backup/mac.key.age), ARIADNE_MAC_STATE_DIR, ARIADNE_MAC_PORT (7330, wie
+# [ui] port der Kali; der Mac nimmt denselben Port, sonst lehnt die Kali den Host ab). Für Tests:
+# ARIADNE_MAC_SHIM_DIR kommt vorne in den PATH (Attrappen für open, fdesetup, lsof, ssh, sleep),
+# ARIADNE_MAC_LOCAL_PORT setzt einen anderen Port auf dem Mac (Mac und Kali auf einem Rechner).
+
+set -eu
+setopt pipe_fail no_nomatch
+
+HOST=${ARIADNE_MAC_HOST:-kali-sl}
+SSH_CONF=${ARIADNE_MAC_SSH_CONFIG:-$HOME/.ssh/ariadne.conf}
+BACKUP_DIR=${ARIADNE_MAC_BACKUP_DIR:-$HOME/Ariadne-Backups}
+MAC_KEY=${ARIADNE_MAC_KEY:-$HOME/.config/ariadne-backup/mac.key.age}
+STATE_DIR=${ARIADNE_MAC_STATE_DIR:-$HOME/Library/Application Support/ariadne-mac}
+PORT=${ARIADNE_MAC_PORT:-7330}
+LPORT=${ARIADNE_MAC_LOCAL_PORT:-$PORT}
+TMPDIR=${TMPDIR:-/tmp}
+TMPDIR=${TMPDIR%/}
+if [[ -n ${ARIADNE_MAC_SHIM_DIR:-} ]]; then
+    path=("$ARIADNE_MAC_SHIM_DIR" $path)
+fi
+SSH_BASE=(ssh -F "$SSH_CONF" -o ControlMaster=no -o ControlPath=none)
+for p in $PORT $LPORT; do
+    if [[ $p != <1024-65535> ]]; then
+        print -r -- "Fehler: Port $p ungültig (ARIADNE_MAC_PORT: 1024 bis 65535)" >&2
+        exit 1
+    fi
+done
+PID_FILE="$STATE_DIR/tunnel.pid"
+LOG_FILE="$STATE_DIR/tunnel.log"
+CODE_RE='^[A-Za-z0-9_-]{16,64}$'
+
+say() { print -r -- "$*" }
+warn() { print -r -- "Warnung: $*" >&2 }
+die() { print -r -- "Fehler: $*" >&2; exit 1 }
+
+# --------------------------------------------------------------------------- #
+# macOS-Befehle, gekapselt (Tests ersetzen sie über ARIADNE_MAC_SHIM_DIR)
+# --------------------------------------------------------------------------- #
+
+mac_open() { command open "$@" }
+mac_fdesetup() { command fdesetup status }
+mac_lsof() { command lsof "$@" }
+mac_sleep() { command sleep "$@" }
+
+kssh() { command "${SSH_BASE[@]}" "$@" }
+
+# --------------------------------------------------------------------------- #
+# Prüfungen (R13)
+# --------------------------------------------------------------------------- #
+
+typeset -i FAILS=0
+ok() { say "[ok] $*" }
+bad() { say "[!!] $*"; FAILS+=1 }
+note() { say "[--] $*" }
+
+expand_home() {
+    local p=$1
+    if [[ $p == "~/"* ]]; then
+        p="$HOME/${p#\~/}"
+    elif [[ $p == "~" ]]; then
+        p=$HOME
+    fi
+    print -r -- "$p"
+}
+
+check_filevault() {
+    local out
+    out=$(mac_fdesetup 2>&1) || true
+    if [[ $out == *"FileVault is On."* ]]; then
+        ok "FileVault an"
+    else
+        bad "FileVault aus: Lab-Daten lägen im Klartext auf dem Mac (Systemeinstellungen, FileVault)"
+    fi
+}
+
+typeset -A SSHCFG
+read_ssh_config() {
+    local out line key val
+    SSHCFG=()
+    if [[ ! -f $SSH_CONF ]]; then
+        bad "SSH-Konfiguration fehlt: $SSH_CONF (Anleitung, Schritt Mac)"
+        return 0
+    fi
+    if ! out=$(command ssh -G -F "$SSH_CONF" "$HOST" 2>/dev/null); then
+        bad "SSH-Konfiguration nicht lesbar: ssh -G -F $SSH_CONF $HOST"
+        return 0
+    fi
+    for line in ${(f)out}; do
+        key=${line%% *}
+        val=${line#* }
+        [[ -n ${SSHCFG[$key]:-} ]] || SSHCFG[$key]=$val
+    done
+}
+
+check_ssh_config() {
+    read_ssh_config
+    (( ${#SSHCFG} )) || return 0
+    if [[ ${SSHCFG[stricthostkeychecking]:-} == true ]]; then
+        ok "StrictHostKeyChecking yes"
+    else
+        bad "StrictHostKeyChecking ist nicht yes (ariadne.conf: StrictHostKeyChecking yes)"
+    fi
+    if [[ ${SSHCFG[forwardagent]:-no} != no ]]; then
+        bad "ForwardAgent an: die Kali könnte deinen Agent benutzen (ForwardAgent no)"
+    fi
+    if grep -Eiq '^[[:space:]]*UseKeychain[[:space:]]+yes' "$SSH_CONF" 2>/dev/null; then
+        note "UseKeychain yes: jedes Programm kann den Schlüssel ohne Passphrase nutzen (entfernen)"
+    fi
+    local alias=${SSHCFG[hostkeyalias]:-${SSHCFG[hostname]:-$HOST}}
+    local known_files=(${=SSHCFG[userknownhostsfile]:-$HOME/.ssh/known_hosts})
+    local kf found=0
+    for kf in $known_files; do
+        kf=$(expand_home "$kf")
+        if [[ -f $kf ]] && command ssh-keygen -F "$alias" -f "$kf" >/dev/null 2>&1; then
+            found=1
+        fi
+    done
+    if (( found )); then
+        ok "Hostkey der Kali bekannt ($alias)"
+    else
+        bad "Hostkey der Kali unbekannt ($alias): einmal ${SSH_BASE[*]} -o StrictHostKeyChecking=ask $HOST check und den Fingerprint mit der Konsole vergleichen"
+    fi
+    local idf=${SSHCFG[identityfile]:-}
+    idf=$(expand_home "${idf%% *}")
+    if [[ -z $idf || ! -f $idf ]]; then
+        bad "Schlüssel fehlt: IdentityFile in ariadne.conf (ssh-keygen -t ed25519 -a 100 -f ~/.ssh/id_ed25519_kali_sl)"
+    elif command ssh-keygen -y -P '' -f "$idf" >/dev/null 2>&1; then
+        bad "Schlüssel ohne Passphrase: ssh-keygen -p -f $idf"
+    else
+        ok "Schlüssel mit Passphrase"
+    fi
+}
+
+tunnel_pid() {
+    local pid
+    [[ -f $PID_FILE ]] || return 1
+    pid=$(<"$PID_FILE")
+    [[ $pid == <-> ]] || return 1
+    local state cmd
+    state=$(command ps -p "$pid" -o stat= 2>/dev/null) || return 1
+    [[ $state == Z* ]] && return 1
+    cmd=$(command ps -p "$pid" -o command= 2>/dev/null) || return 1
+    [[ $cmd == *ssh* && $cmd == *"127.0.0.1:$LPORT:127.0.0.1:$PORT"* ]] || return 1
+    print -r -- "$pid"
+}
+
+listeners() {
+    mac_lsof -nP -iTCP:$LPORT -sTCP:LISTEN -t 2>/dev/null | sort -u || true
+}
+
+check_port() {
+    local who
+    who=$(listeners)
+    if [[ -z $who ]]; then
+        ok "Port $LPORT frei"
+    elif [[ $who == "$(tunnel_pid || true)" ]]; then
+        note "Port $LPORT: Tunnel läuft schon (PID $who)"
+    else
+        bad "Port $LPORT belegt (PID ${(f)who}): ein anderes Programm könnte das Dashboard vortäuschen"
+    fi
+}
+
+backup_dir_ok() {
+    local dir=${BACKUP_DIR:A} forbidden
+    for forbidden in "$HOME/Library/Mobile Documents" "$HOME/Library/CloudStorage" "$HOME/Desktop" "$HOME/Documents"; do
+        forbidden=${forbidden:A}
+        if [[ $dir == "$forbidden" || $dir == "$forbidden"/* ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+check_backup() {
+    if backup_dir_ok; then
+        ok "Sicherungsordner $BACKUP_DIR"
+    else
+        bad "Sicherungsordner $BACKUP_DIR liegt in iCloud, Schreibtisch, Dokumente oder CloudStorage: anderen Ordner wählen (ARIADNE_MAC_BACKUP_DIR)"
+    fi
+    if [[ ! -f $MAC_KEY ]]; then
+        note "Sicherungsschlüssel fehlt: $MAC_KEY (Anleitung, Sicherung einrichten)"
+        return 0
+    fi
+    local head
+    head=$(command head -c 21 "$MAC_KEY" 2>/dev/null || true)
+    if [[ $head == "age-encryption.org/v1" ]]; then
+        ok "Sicherungsschlüssel mit Passphrase verschlüsselt"
+    else
+        bad "Sicherungsschlüssel liegt im Klartext: age -p neu verschlüsseln (Anleitung)"
+    fi
+}
+
+preflight_start() {
+    FAILS=0
+    check_filevault
+    check_ssh_config
+    check_port
+    (( FAILS == 0 )) || die "$FAILS Prüfungen fehlgeschlagen, kein Tunnel (ariadne-mac check)"
+}
+
+# --------------------------------------------------------------------------- #
+# Befehle
+# --------------------------------------------------------------------------- #
+
+cmd_check() {
+    FAILS=0
+    check_filevault
+    check_ssh_config
+    check_port
+    check_backup
+    if (( FAILS )); then
+        say "$FAILS Prüfungen fehlgeschlagen."
+        return 1
+    fi
+    say "Mac in Ordnung. Prüfung der Kali:"
+    kssh -o ClearAllForwardings=yes "$HOST" check
+}
+
+stop_tunnel() {
+    local pid i
+    pid=$(tunnel_pid) || { rm -f "$PID_FILE"; return 0 }
+    kill -TERM "$pid" 2>/dev/null || true
+    for i in {1..30}; do
+        tunnel_pid >/dev/null || break
+        mac_sleep 0.1
+    done
+    if tunnel_pid >/dev/null; then
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+    say "Tunnel geschlossen."
+}
+
+start_html() {
+    print -r -- '<!doctype html>'
+    print -r -- '<html lang="de-CH"><head><meta charset="utf-8">'
+    print -r -- '<meta name="referrer" content="no-referrer">'
+    print -r -- "<meta http-equiv=\"refresh\" content=\"0;url=$1\">"
+    print -r -- '<title>Ariadne</title></head>'
+    print -r -- "<body><p>Weiter zu <a href=\"$1\" rel=\"noreferrer\">Ariadne</a>.</p></body></html>"
+}
+
+cmd_start() {
+    local pid
+    if pid=$(tunnel_pid); then
+        die "Tunnel läuft schon (PID $pid). Neu anmelden: ariadne-mac stop, dann ariadne-mac start"
+    fi
+    preflight_start
+    umask 077
+    mkdir -p "$STATE_DIR"
+    local out
+    out=$(mktemp "$TMPDIR/ariadne-code.XXXXXX")
+    # Eine Verbindung trägt Code und Tunnel: Endet sie, endet die Anmeldung (R6).
+    ( trap '' HUP; exec "${SSH_BASE[@]}" -n -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 \
+        -L "127.0.0.1:$LPORT:127.0.0.1:$PORT" "$HOST" code >"$out" 2>>"$LOG_FILE" </dev/null ) &!
+    pid=$!
+    print -r -- "$pid" > "$PID_FILE"
+    local code="" i
+    for i in {1..75}; do
+        if IFS= read -r code < "$out" 2>/dev/null; then
+            break
+        fi
+        code=""
+        kill -0 "$pid" 2>/dev/null || break
+        mac_sleep 0.2
+    done
+    rm -f "$out"
+    if [[ ! $code =~ $CODE_RE ]]; then
+        stop_tunnel >/dev/null
+        command tail -n 5 "$LOG_FILE" >&2 2>/dev/null || true
+        die "kein Code von der Kali (Tunnel, Hostkey, ssh $HOST check?)"
+    fi
+    local who
+    who=$(listeners)
+    if [[ $who != "$pid" ]]; then
+        stop_tunnel >/dev/null
+        die "Port $LPORT gehört nicht dem Tunnel (PID ${(f)who:-keiner}): abgebrochen, Code verworfen"
+    fi
+    local sdir start url="http://127.0.0.1:$LPORT/#c=$code"
+    sdir=$(mktemp -d "$TMPDIR/ariadne-start.XXXXXX")
+    start="$sdir/ariadne.html"
+    start_html "$url" > "$start"
+    chmod 600 "$start"
+    if ! mac_open "$start"; then
+        rm -rf "$sdir"
+        stop_tunnel >/dev/null
+        die "Browser liess sich nicht öffnen (open)"
+    fi
+    # Die Startdatei trägt den Code: nach 10 s weg, auch wenn der Browser sie nie geladen hat.
+    ( mac_sleep 10; rm -rf "$sdir" ) >/dev/null 2>&1 </dev/null &!
+    say "Dashboard im Standardbrowser geöffnet (Code nur im Fragment, 60 s gültig, einmal)."
+    say "Tunnel läuft (PID $pid). Ende der Session: ariadne-mac stop"
+}
+
+cmd_backup() {
+    backup_dir_ok || die "Sicherungsordner $BACKUP_DIR liegt in iCloud, Schreibtisch, Dokumente oder CloudStorage (R13)"
+    umask 077
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR"
+    local f="$BACKUP_DIR/$HOST-$(date -u +%Y%m%dT%H%M%SZ).age"
+    [[ ! -e $f ]] || die "$f gibt es schon"
+    say "Sicherung nach $f ..."
+    if ! ( setopt noclobber; kssh -o ClearAllForwardings=yes "$HOST" backup > "$f" ); then
+        rm -f "$f"
+        die "Sicherung fehlgeschlagen (siehe Meldung der Kali); unvollständige Datei gelöscht"
+    fi
+    if [[ $(command head -c 21 "$f" 2>/dev/null) != "age-encryption.org/v1" ]]; then
+        rm -f "$f"
+        die "Sicherung ist keine age-Datei; gelöscht"
+    fi
+    say "Sicherung fertig: $f ($(command wc -c < "$f" | tr -d ' ') Bytes)"
+}
+
+cmd_stop() {
+    local rc=0 no_backup=0
+    [[ ${1:-} == --no-backup ]] && no_backup=1
+    kssh -o ClearAllForwardings=yes "$HOST" revoke || { warn "Widerrufen fehlgeschlagen"; rc=1 }
+    kssh -o ClearAllForwardings=yes "$HOST" lock || { warn "Sperren fehlgeschlagen"; rc=1 }
+    if (( ! no_backup )); then
+        ( cmd_backup ) || rc=1
+    fi
+    stop_tunnel
+    return $rc
+}
+
+cmd_unlock() {
+    exec "${SSH_BASE[@]}" -t -o ClearAllForwardings=yes "$HOST" unlock
+}
+
+cmd_restore() {
+    local file=${1:-} yes=${2:-}
+    [[ -n $file ]] || die "Aufruf: ariadne-mac restore DATEI.age [--yes]"
+    [[ -f $file ]] || die "Datei fehlt: $file"
+    [[ -f $MAC_KEY ]] || die "Sicherungsschlüssel fehlt: $MAC_KEY"
+    [[ $(command head -c 21 "$MAC_KEY" 2>/dev/null) == "age-encryption.org/v1" ]] \
+        || die "Sicherungsschlüssel liegt im Klartext (R13): erst mit age -p verschlüsseln"
+    say "Wichtig: Der Hostkey der neuen Kali muss geprüft sein (ssh-keygen -R, dann einmal mit"
+    say "StrictHostKeyChecking=ask und Fingerprint-Vergleich). Sonst geht deine Sicherung im Klartext"
+    say "an den, der sich mit diesem Hostkey meldet."
+    if [[ $yes != --yes ]]; then
+        local answer=""
+        print -n -- "Hostkey geprüft, zurückspielen? [j/N] "
+        read -r answer || answer=""
+        [[ $answer == (j|J|ja|Ja|y|yes) ]] || die "abgebrochen"
+    fi
+    command age -d -i "$MAC_KEY" "$file" | kssh -o ClearAllForwardings=yes "$HOST" restore
+    say "Weiter: ariadne-mac unlock, dann in der Kali ariadne project open SLUG und ariadne verify"
+}
+
+usage() {
+    say "Aufruf: ariadne-mac check|start|stop [--no-backup]|unlock|backup|restore DATEI [--yes]"
+}
+
+main() {
+    local cmd=${1:-}
+    (( $# )) && shift
+    case $cmd in
+        check) cmd_check ;;
+        start) cmd_start ;;
+        stop) cmd_stop "$@" ;;
+        unlock) cmd_unlock ;;
+        backup) cmd_backup ;;
+        restore) cmd_restore "$@" ;;
+        -h|--help|help) usage ;;
+        *) usage >&2; return 2 ;;
+    esac
+}
+
+main "$@"

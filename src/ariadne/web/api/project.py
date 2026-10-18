@@ -61,8 +61,8 @@ def _project_derived(conn: Any, journal: Any) -> dict[str, Any]:
     for rec in journal.iter_events(kinds=["system.project_created"]):
         created = rec.ts_utc_ns
         break
-    row = journal.conn.execute("SELECT seq, hash FROM event ORDER BY seq DESC LIMIT 1").fetchone()
-    head_seq, head_hash = (int(row[0]), bytes(row[1]).hex()) if row else (0, "")
+    seq, digest = journal.read_head()
+    head_seq, head_hash = seq, digest.hex()
     version = 0
     not_customer = False
     for kind, payload in conn.execute(

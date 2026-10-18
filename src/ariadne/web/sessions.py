@@ -313,7 +313,12 @@ class SessionStore:
         return ended
 
     def revoke(self, session_id: str | None = None) -> int:
-        """Widerruft eine Sitzung oder (ohne ID) alle; gibt die Zahl zurück."""
+        """Widerruft eine Sitzung oder (ohne ID) alle; gibt die Zahl der noch gültigen zurück.
+
+        Sitzungen, die schon geendet haben (Prozess weg, abgelaufen), räumt :meth:`check` vorher
+        still ab; sie zählen nicht mit (``ssh kali-sl revoke`` nach einem Tunnelende).
+        """
+        self.check()
         if session_id is None:
             ids = list(self._sessions)
         else:

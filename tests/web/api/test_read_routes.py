@@ -7,7 +7,7 @@ from __future__ import annotations
 import urllib.parse
 
 from ariadne.web.api.text import MASK
-from tests.web.api.helpers import BASE, CRYPT, HOSTILE, OWN_SECRET, REMOTE_PW, TARGET, run_api
+from tests.web.api.helpers import BASE, CRYPT, HOSTILE, OWN_SECRET, REMOTE_PW, TARGET, clean, run_api
 
 HOST = f"ip:default/{TARGET}"
 HOST_Q = urllib.parse.quote(HOST, safe="")
@@ -260,6 +260,12 @@ def test_timeline_inputs_evidence_search(paths, operator):
             and MASK in log.text
             and "<U+202E>" in log.text
         )
+
+        # Steuerzeichen direkt aus der Ausgabe: sichtbar, ctrl gesetzt
+        c1 = next(i for i in items if i["type"] == "command" and i["cmd"]["text"] == "cat c1.txt")
+        ln = (await c.get(f"{P}/units/{c1['unit_id']}/lines")).json()["lines"][-1]
+        assert ln["ctrl"] is True and "<U+202E>ltr" in ln["text"] and "<U+200B>zw" in ln["text"]
+        assert clean(ln["text"]) and ln["text"].startswith("c1 ")
 
         # Volltextsuche: Zeile wie in /lines
         res = (await c.get(f"{P}/search", params={"q": "banner"})).json()

@@ -1,6 +1,6 @@
 # Entwicklung
 
-> Stand v0.1-Backend (2026-10-14, nach den Korrekturen aus drei Reviews), Erfassung, Bedienung und Auswertung nach den Entscheiden vom 2026-10-15 (E22, E23, E26, E28, E42, E45, E72, E88, E95, E96; Vertrag v0.1-Bedienung), integriert und Ende zu Ende getestet am 2026-10-15. Bau v0.1-Server, Phase 1 (2026-10-15, nach einem Neustart geprüft am 2026-10-17): E101 bis E104, API v2 (`docs/web-api.md`), Erweiterungspunkte im Daemon und Grundgerüste für Web-Server, API, Sicherung und Fernzugriff. Ergänzt die [Lösungsarchitektur](architektur.md) um das, was man zum Arbeiten am Code braucht: Umgebung, Tests, Landkarte der Module und die bekannten Grenzen.
+> Stand v0.1-Backend (2026-10-14, nach den Korrekturen aus drei Reviews), Erfassung, Bedienung und Auswertung nach den Entscheiden vom 2026-10-15 (E22, E23, E26, E28, E42, E45, E72, E88, E95, E96; Vertrag v0.1-Bedienung), integriert und Ende zu Ende getestet am 2026-10-15. Bau v0.1-Server (Vertrag v0.1-Server): Phase 1 am 2026-10-15 (E101 bis E104, API v2 in `docs/web-api.md`, Erweiterungspunkte im Daemon), Web-Server, API, Sicherung und Fernzugriff von vier Teilen gebaut, integriert und Ende zu Ende getestet am 2026-10-17 (E115). Ergänzt die [Lösungsarchitektur](architektur.md) um das, was man zum Arbeiten am Code braucht: Umgebung, Tests, Landkarte der Module und die bekannten Grenzen.
 
 ## Umgebung
 
@@ -15,6 +15,7 @@ pip install -e '.[dev]'
 
 - `pip install -e` ist nötig: Der Parser-Worker startet mit `python -I -B -m ariadne.ingest.worker` und findet das Paket nur über den venv, nicht über `PYTHONPATH`.
 - `sqlcipher3` bringt eigene Wheels mit FTS5 mit. Das ähnlich benannte `sqlcipher3-binary` ist nicht gemeint.
+- Für die Tests mit Tunnel (Marker `remote`) braucht es `openssh-server` (`sshd`, `ssh`, `ssh-keygen`, `ssh-agent`) und `lsof`; die Tests überspringen sich, wenn `sshd` fehlt. Läuft die Suite als root (Container), starten sshd, Daemon und Ordner unter einem unprivilegierten Benutzer mit Login-Shell (`ARIADNE_TEST_SSH_USER`, sonst der erste mit UID ab 1000), denn ohne Privilegien-Benutzer `sshd` startet ein sshd als root nicht. `age` und `shellcheck` sind optional (`shellcheck` prüft `kali-setup.sh`, wenn vorhanden).
 - Für einen Probelauf in einem Wegwerf-HOME: `HOME=/tmp/x ariadne setup --no-systemd`, danach `ariadne init`, neues Terminal öffnen, `ariadne start lame --target 10.10.10.3`. Ab dann nimmt jedes Terminal auf, bis `ariadne stop`. Nie mit dem echten HOME testen, solange man nicht genau das will.
 
 ## Tests
@@ -32,14 +33,21 @@ Alle Tests laufen ohne Netz, nur in `tmp_path` und mit isolierten `HOME`/`XDG_*`
 | `tests/projection/` | Claims, Zustände, Identität, Konflikte, Inbox, Status, Metasploitable2-Durchlauf; Drei-Spuren-Regel (`test_ausw_lanes.py`), Evidenzgruppen und Arten, eigene Adressen und `undo`, Kontext aus dem Callback, goldene Ziele MS2 und Lame (`test_ausw_golden.py`) | |
 | `tests/integration/` | Daemon mit eingebauter Auswertung: Fake-Shim über echte Sockets, echte Parser in Workern, Begleitdateien, `net.route`, Ansichten, Entscheide, Import, Reparse, Redaktion | |
 | `tests/e2e/` | Flugschreiber komplett (`helpers.py`: isoliertes Lab, Fake-`nmap`, -`nc`, -`ip`, Titel per OSC 2): `test_flight_recorder.py` (setup, init, `F12 h`, CLI-Ansichten, Journal, Canary, Vorlauf über einen Absturz, Pause und Rebind), `test_daily_use.py` (Alltag: `start --passphrase-fd`, zwei parallele Terminals, nmap auf das Fixture-Netz, Karte `auto`, Inbox leer, keine Kali-Adresse als Host, Titel `(auto)` aus dem Callback, verschränkte Zeitstempel, `F12 r` nur in einem Terminal, `ariadne undo`, `ariadne stop`; Vorlauf zweier Terminals mit der Frage und der Passphrase im aufgezeichneten Terminal) | `e2e`, `pty` |
-| `tests/web/server/`, `tests/web/api/`, `tests/backup/`, `tests/remote/` | Bau v0.1-Server (Vertrag v0.1-Server, Tests T1 bis T16 aus dem Konzept Fernzugriff); Tests mit echtem Server auf einem freien Loopback-Port tragen `web`, Tests mit `sshd` tragen `remote` (ohne `sshd` übersprungen). Daemon-Prozesse der Tests laufen mit `ARIADNE_WEB=0` | `web`, `remote` |
+| `tests/e2e/test_dashboard.py` | Dashboard als Nutzer: Weg E (setup, init, start, nmap, `read -s` und `getpass` im aufgezeichneten Terminal, `ariadne ui --no-open`, Navigation von der Startdatei, Anmeldung, Status, Karte, Zeitachse mit verdeckten Eingaben, Aufdecken, SSE nach einem Entscheid, `lock` beendet Sitzung und Strom, `unlock` öffnet das Projekt wieder, `stop` mit Hinweis, `backup --to-file`) und Weg B (sshd mit dem Drop-in aus `kali-setup.sh`, `ariadne-mac start` und `stop` unter zsh mit echtem `ssh`, `ssh-agent` und `lsof`, Anmeldung «über sshd», Sicherung auf den «Mac», `remote serve unlock` im PTY) | `e2e`, `web`, `pty`, `remote` |
+| `tests/web/server/` | Server-Kern (T1 bis T7, T8 serverseitig): Konfiguration, `/proc`-Parser, Codes und Sitzungen mit austauschbarer Uhr, Middleware und Header gegen einen echten Server, Statik, SSE-Bus, `ariadne ui`. `helpers.py`: `run_web` (Daemon im Testprozess mit echtem Server auf Port 0), `Web.req`/`Web.raw`, `Stream` (SSE), `ClientProc` (Anfragen aus einem fremden Prozess), `FakeSshd` (`sh` als `sshd`), Test-API statt der echten (`use_test_api`) | `web` |
+| `tests/web/api/` | API v2 (T8 Canary, T9 bis T11): jede Route mit MS2-Fixture und echtem Daemon, feindliche Werte, Präsentationsmodus über zwei Ströme, Entscheide, Ereignisquellen. `helpers.py`: `FakeBus`, `make_app` (Test-App mit Sitzungs-Middleware), `run_api`, `build_fixture`; `test_fullstack.py` gegen den echten Server | `web` |
+| `tests/backup/` | Sicherung und Wiederherstellung (T16): Rundweg in ein leeres HOME, beschädigte Ströme, Pfade, Version, Rechte, WAL nach SIGKILL, Registry, Hinweis nach `stop`, CLI mit Kettenprüfung | |
+| `tests/remote/` | Fernzugriff: `test_serve.py` (T12), `test_check.py` (T14, Fixture-Wurzel und Runner mit festen Antworten), `test_kali_setup.py` (Wegwerf-Wurzel `ARIADNE_SETUP_ROOT`, zweimal ohne Unterschied, echtes `sshd -t` und `nft -c`), `test_mac_helper.py` (T15, zsh mit Attrappen über `ARIADNE_MAC_SHIM_DIR`), `test_tunnel_e2e.py` (T13, echter sshd im Ordner `/tmp/ariadne-t13-*`) | `remote`, `web` |
+| `tests/unit/test_contract_v01_server.py`, `tests/unit/test_anleitung_fernzugriff.py` | Namen und Signaturen der Teile; jeder Befehl und jede zitierte Meldung der Anleitung gegen den Code | |
 
 Befehle:
 
 ```sh
-python -m pytest                                   # alles (etwa 3 min, 1129 Tests)
+python -m pytest                                   # alles (etwa 5,5 min, rund 1520 Tests)
 python -m pytest -m "not pty and not e2e"          # ohne echte Shells (schnell)
 python -m pytest -m remote                          # nur Tunnel-Tests mit sshd
+python -m pytest -m web                             # alles mit echtem Web-Server (freier Loopback-Port)
+python -m pytest tests/web tests/backup tests/remote tests/e2e/test_dashboard.py   # Bau v0.1-Server
 python -m pytest tests/e2e -m e2e                  # nur der Flugschreiber
 python -m pytest tests/golden --update-golden      # Golden-Erwartungen neu schreiben, zeigt vorher den Diff
 ARIADNE_TEST_EXTRA_SHELLS=/pfad/zu/bash-5.3 python -m pytest tests/shim   # weitere Shells
@@ -48,6 +56,7 @@ ruff check src tests                               # Lint (Zeilenlänge 110, E F
 
 Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.mktemp`, AF_UNIX-Grenze), echte Shells nur mit `@pytest.mark.pty`, Zieldaten in Tests immer feindlich denken (Escape-Sequenzen, Bidi-Zeichen, gefälschte Marker). Nachgestellte Golden-Fälle sind in `meta.toml` als `source = "nachgestellt"` markiert und werden durch echte Lab-Aufnahmen ersetzt, sobald es sie gibt.
 
+- **Kein Port 7330 in Tests.** `tests/conftest.py` setzt `ARIADNE_WEB=0` für alle Daemon-Prozesse; Tests mit Web-Server nehmen `[ui] port = 0` bzw. einen freien Port und entfernen die Variable nur für ihren Daemon (`tests/e2e/test_dashboard.py`, T13).
 - **Ressourcen schliessen.** `pyproject.toml` macht `ResourceWarning` und nicht abfangbare Ausnahmen zu Fehlern. Dateien, Sockets, Transports und `StreamWriter` schliessen die Tests selbst; `sqlite3`-Verbindungen schliesst eine Fixture in `tests/conftest.py` am Ende jedes Tests.
 - **Reihenfolge nicht annehmen.** Titel und Prompt können in beliebiger Reihenfolge ankommen. PTY-Tests prüfen Titel mit `expect_seen` (sucht auch im schon Gelesenen).
 - **In einem aufgezeichneten Terminal** laufen die PTY-Tests (eigene PTYs, eigener Shim). Bei aktivem Projekt landet aber die pytest-Ausgabe in der Aufnahme: Tests besser mit `ariadne pause` (oder `F12 r`) oder mit `ARIADNE_DISABLE=1` in einem nicht aufgezeichneten Terminal starten.
@@ -116,7 +125,23 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 
 **CLI**: `cli/main.py` (Erfassung und Bedienung), `cli/analysis.py` (Befehle der Auswertung: `show`, `search`, `confirm`, `reject`, `undo`, `reparse`), `cli/common.py` (Daemon-Zugang, `read_secret` mit Zeitgrenze), `cli/views.py` (Textansichten), `cli/setup.py` (Installer), `cli/doctor.py`.
 
-**Im Bau v0.1-Server** (Phase 1 hat Stubs mit festen Signaturen angelegt, Vertrag v0.1-Server): `web/` (Server-Kern, Sicherheit, Sitzungen, SSE; `web/api/` Routen der API v2; die gebaute SPA unter `web/static/` bleibt), `backup/` (Sicherung und Wiederherstellung), `remote/` (`remote check`, `remote serve`), CLI `cli/ui.py`, `cli/backup.py`, `cli/remote.py`. Jedes Stub-Modul trägt `STUB = True`, bis sein Teil steht.
+**Web-Server** (`src/ariadne/web/`, Bau v0.1-Server, Architektur 7.2)
+
+| Datei | Aufgabe |
+|---|---|
+| `web/config.py` | `[ui]` aus `config.toml`: nur `127.0.0.1` oder `::1`, Port 1024 bis 65535 (`0` für Tests), `session_hours`, `enabled` |
+| `web/peer.py` | `/proc/net/tcp(6)` und `/proc/<pid>/fd`: UID, Inode, haltende Prozesse, Startzeit, `comm`; sshd-Vorfahren (`sshd_ancestor`). Alle Funktionen mit `proc_root` für Fixtures |
+| `web/sessions.py` | Codes, Tokens (nur SHA-256), Bindung lokal bzw. über sshd, Ablauf (austauschbare Uhr `Clock` mit `wall_ns`/`boot_ns`), Fehlversuchssperre, Widerruf |
+| `web/security.py` | äusserste Middleware: Peer, Host, Fetch-Metadaten mit der Ausnahme E115 (`shell_navigation`), OPTIONS, Origin, 1 MiB, Bearer; Header auf jeder Antwort; feste Fehlertexte `ERROR_TEXT` |
+| `web/sse.py`, `web/static.py`, `web/app.py` | Ereignisbus (Bündelung, Ring, Herzschlag, Schliessen pro Sitzung); Statik mit SPA-Fallback; Verteiler `/api` an FastAPI (Sitzung, Ereignisstrom, `api.register`), sonst Statik |
+| `web/server.py`, `web/integration.py`, `web/ctx.py` | eigener Socket und uvicorn im Loop (`PeerGate` mit austauschbarem Resolver, `WebServer`); Erweiterung des Daemons mit den ctl-Operationen `ui.*` und der 2-s-Prüfung (`WebExtension` mit `peer_resolver`, `clock`, `check_interval` für Tests); gemeinsame Typen |
+| `web/api/` | API v2 (Architektur 7.3): `common.Api` als einziger Zugang zum Daemon, `errors`, `text`, `views`, `models`; Routen in `status`, `terminals`, `project`, `graph`, `hosts`, `next`, `timeline`, `evidence`, `decisions`, `search`, `secrets`, `later` (501), Ereignisquellen in `events` |
+
+**Sicherung** (`src/ariadne/backup/`, Architektur 8.9): `model` (Ergebnisse, Fehlercodes `CODES`), `config` (Empfänger), `manifest`, `collect` (Dateien, Sperren), `writer` (Tar-Strom, Pull-Verschlüsselung mit eigenem Schreiber, weil `pyrage.encrypt_io` Schreibfehler nicht zuverlässig meldet), `reader` (Prüfen, temporäre Ordner, Rollback, `DecryptingReader` für `--identity`), `registry`, `reminder`, `api` (`backup_to_stream`, `restore_from_stream`, Zusammenfassungen ohne Zieldaten).
+
+**Fernzugriff** (`src/ariadne/remote/`, Architektur 8.11): `serve.py` (Forced Command, `HOLD` austauschbar), `check.py` (`run_checks`, `quick_ok`, `quick_checks`, `render`, `System` mit Wurzel, `/proc` und Runner), `parse.py` (`sshd -T`, `authorized_keys`, `tailscale debug prefs`). Dazu `packaging/smartlearn/kali-setup.sh` (POSIX sh, Wegwerf-Wurzel `ARIADNE_SETUP_ROOT` für Tests) und `packaging/mac/ariadne-mac` (zsh; `ARIADNE_MAC_SHIM_DIR`, `ARIADNE_MAC_PORT`, für Tests `ARIADNE_MAC_LOCAL_PORT`).
+
+**CLI des Baus v0.1-Server**: `cli/ui.py` (`ariadne ui`), `cli/backup.py` (`ariadne backup`, `ariadne restore`), `cli/remote.py` (`ariadne remote check`, `ariadne remote serve`, `ensure_runtime_dir`).
 
 **Leer (spätere Versionen)**: `ai/` und `export/` (nur der Hinweis, dass jeder Ausgang `Redactor.redact_for_exit` nutzen muss), `rules/`.
 
@@ -145,10 +170,18 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 | `ariadne import PFAD [--host H]` | Datei ausdrücklich übernehmen (auch ausserhalb des Arbeitsbereichs, nie über Symlinks, nie aus der Sperrliste) |
 | `ariadne reparse` | `derived.db` neu bauen, atomar tauschen, Unterschiede und verwaiste Entscheide zeigen |
 | `ariadne daemon stop` | Daemon beenden (offenes Projekt wird geschlossen) |
+| `ariadne ui [--code \| --sessions \| --revoke [ID]] [--no-open]` | Dashboard öffnen (Startdatei mit Einmal-Code), Tippcode, Sitzungen mit Herkunft, widerrufen |
+| `ariadne backup [--to-file PFAD] [--project SLUG]`, `ariadne restore [--from-file PFAD] [--identity DATEI\|-] [--no-verify]` | verschlüsselte Sicherung an die Empfänger, Wiederherstellen in eine frische Installation mit Kettenprüfung |
+| `ariadne remote check [--full]`, `ariadne remote serve` | Fernzugriff prüfen; Forced Command des Mac-Schlüssels (nur über `authorized_keys`) |
 
 ## Bekannte Grenzen des v0.1-Backends
 
-- **Web-API im Bau, kein Export.** Die Svelte-Oberfläche liegt gebaut unter `web/static/` (Mock-Modus); die API v2 ist spezifiziert (`docs/web-api.md`), Server und Routen entstehen im Bau v0.1-Server. Regeln, KI-Denkanstösse, Screenshots und Markdown-Export sind noch nicht gebaut.
+- **Oberfläche noch der erste Entwurf, kein Export.** Web-Server, Sicherheitsmodell und API v2 sind gebaut; der Build unter `web/static/` stammt aber noch aus `webui/` nach dem Entwurf v1 der API und zeigt darum nicht alles richtig an. Die Oberfläche nach Design v0.1 (E105 bis E114) folgt; `webui/` ändert in diesem Bau niemand. Regeln, KI-Denkanstösse, Screenshots, Findings und Markdown-Export sind noch nicht gebaut (die Routen antworten 501).
+- **Kein echter Browser in den Tests.** Playwright fehlt: T8 bis T11 sind nur serverseitig geprüft (`sessionStorage`, Tabs, `displaySafe`, ESLint offen). Ob Svelte 5 und Cytoscape ohne `'unsafe-inline'` für Styles auskommen, ist offen. Was ein Browser bei der Navigation von der `file://`-Startdatei schickt (`Sec-Fetch-Site: cross-site`, E115), ist angenommen, nicht in Firefox, Safari oder Chrome gemessen.
+- **Peer-Bindung.** Lokal (Weg E) gilt das Token nur aus dem Prozess, der den Code getauscht hat; stellt Firefox Anfragen aus wechselnden Prozessen, endet die Sitzung (lieber neu anmelden). Halten mehrere Prozesse den Socket, bindet der Tausch an die kleinste PID. Über sshd wird eine Verbindung ohne lesbaren Prozess angenommen, solange der gebundene sshd lebt (web-api.md 16, Punkt 8). Nach Ablauf von 12 h antwortet REST sofort mit 401, ein offener Strom schliesst bei der nächsten Prüfung (höchstens 2 s). Der Body (höchstens 1 MiB) wird vor der Token-Prüfung gelesen. Ohne IPv6 im Container ist `bind = "::1"` nur in Unit-Tests geprüft.
+- **API.** Antworten sind noch keine Pydantic-Modelle (das OpenAPI-Schema beschreibt nur die Anfragen). Die Zeitachse trägt die jüngsten 5000 Einträge und baut die Liste pro Anfrage neu; mit `types=input` wertet sie bis 1000 Eingaben mit Echo-Vergleich aus. `lab_guard.public_targets` prüft gegen die Standard-Allowlist, nicht gegen eine Erweiterung in `config.toml`. Das Profil customer lässt sich in v0.1 nicht anlegen, «Bestätigen» ist darum nur mit lab geprüft.
+- **Sicherung.** Nur geschlossene Projekte (vorher `lock` oder `stop`); während der Sicherung meldet ein gleichzeitiges `start` «Projekt ist bereits geöffnet». Die Kettenprüfung nach `restore` öffnet jedes Projekt kurz (dabei verwirft der Daemon einen vorhandenen Vorlauf) und schreibt Ereignisse für Öffnen und Schliessen. Restore geht nur in eine Installation ohne Operator-Tresor, nicht ein einzelnes Projekt in eine bestehende. Nur X25519-Empfänger und -Identitäten (keine Plugins, keine SSH-Schlüssel). Die Registry liegt im `state_dir` und reist nicht mit.
+- **Fernzugriff.** Im Container läuft sshd unprivilegiert und kann kein PTY übergeben: `ssh -t kali-sl unlock` und der Tippcode über einen echten sshd sind nicht Ende zu Ende geprüft (das PTY kommt in den Tests aus pexpect). `kali-setup.sh` ist nur in der Wegwerf-Wurzel geprüft (kein systemd, kein `runuser`, kein echtes `systemctl`); die erzeugten Dateien bestehen echtes `sshd -t` und `nft -c`. `ariadne-mac` ist nur unter Linux mit zsh geprüft (macOS `open`, `lsof`, `ps`, `mktemp` ungeprüft). `quick_ok` verlangt genau einen Schlüssel in `authorized_keys`. `remote check` beachtet `ARIADNE_SETUP_ROOT` auch im Betrieb (sshd gibt nur Variablen aus `AcceptEnv` weiter; `--full` warnt bei mehr als `LANG`/`LC_*`). Kein automatischer Neuaufbau des Tunnels (launchd-Agent, v0.2).
 - **Kein Watcher.** Dateien kommen nur als Begleitdateien eines Befehls (`companions`) oder per `ariadne import` ins Projekt. Was ein Tool ohne passende argv-Regel schreibt, bleibt unbemerkt; es gibt keinen Abgleich beim Öffnen.
 - **Warteliste nur zum Lesen.** `ariadne show pending` zeigt Begleitdateien ausserhalb des Arbeitsbereichs und abgelehnte Dateien; übernehmen geht per `ariadne import`, ein Abhaken gibt es nicht.
 - **Auswertung blockiert beim Schliessen kurz.** Projekt schliessen oder wechseln bricht den laufenden Durchgang vor der nächsten Einheit ab, wartet aber auf den gerade laufenden Worker (höchstens 60 s, meist unter 100 ms).
@@ -187,7 +220,7 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 - **Secret-Abfragen der CLI** enden nach 10 Minuten (`SECRET_PROMPT_S`), bevor die Anmeldung des Terminals (`pause_terminal`, 11 min) abläuft. Danach `ariadne start` neu aufrufen.
 - **`project close`** beendet das Projekt wie `stop` (`stopped: true`, `system.project_end` mit Grund `stop`), sperrt aber nicht; gebundene Terminals gehen in `held`.
 - **Leerlauf** zählt jeden Ausgaberahmen, auch im Vorlauf. Ein Programm mit Dauerausgabe (`watch`, `top`) hält das Projekt beliebig lange offen.
-- **Grosse Module.** `daemon/core.py` (rund 1950 Zeilen) und `ingest/proj_build.py` (rund 1400 Zeilen) sind nach dem Umbau gross; das Aufteilen ist offen.
+- **Grosse Module.** `daemon/core.py` (rund 2350 Zeilen) und `ingest/proj_build.py` (rund 1450 Zeilen) sind nach dem Umbau gross; das Aufteilen ist offen.
 - Alle Messwerte stammen aus dem Container, nicht aus der Kali-VM; QTerminal ist ungeprüft.
 
 ## Offene Abweichungen von der Architektur
@@ -201,5 +234,9 @@ Regeln für neue Tests: deterministisch, kurze Socket-Pfade (`tmp_path_factory.m
 - **3.8, Haltefrist:** Eine Folge, die länger als 8 KiB oder 100 ms offen bleibt, geht nicht mehr als normale Bytes weiter (fail-closed, siehe Grenzen). Abgebrochene Strings gefilterter Arten werden verworfen. Die Architektur sollte das so festhalten.
 - **5.8, IDNA:** Statt IDNA2003 überall gilt für Namen mit UTS-46-Deviation-Zeichen fail-closed `unknown`.
 - **8.5, Schwärzen:** Eigene Secrets unter 4 Zeichen lehnt `secrets add` ab (die Architektur nennt keine Mindestlänge).
+- **7.2 und R12, Fetch-Metadaten (E115):** Eine Navigation zur SPA-Shell darf auch `cross-site` oder `same-site` sein (Startdatei aus `file://`); alles andere bleibt bei `same-origin` oder `none`.
+- **4.4 und R10, Weg B ohne `ListenAddress`:** `kali-setup.sh` beschränkt sshd über den Filter auf `tailscale0` und `AllowUsers USER@100.64.0.0/10`, nicht über die Tailscale-Adresse (sshd startet beim Booten vor tailscaled).
+- **4.2, R9, T10, T15, Insel-Profil:** entfällt seit E93; der Mac-Helfer öffnet den normalen Standardbrowser.
+- **Vertrag v0.1-Server 3.2, `daemon.project.info.name`:** `ProjectInfo` hat kein Feld `name`; die API liest den Namen aus den Projekteinstellungen (`[project] name`).
 - **`docs/web-api.md`** ist seit dem 2026-10-15 die API v2 (Pause pro Terminal, Arbeitsliste, Eingaben, Sitzungen mit Peer-Bindung); der Pfad bleibt `/api/v1`.
 - **8.6, Daemon-Start:** Die systemd-Unit startet mit `python -I -m ariadne.daemon` und `WorkingDirectory=/`, ebenso `--detach` (`-I`), damit kein Modul aus dem Arbeitsordner (z. B. Loot im Home) in den Prozess mit allen Schlüsseln lädt.

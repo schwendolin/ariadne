@@ -307,6 +307,10 @@ def test_journal_reader_sees_commits_readonly(sql_store):
         j.append("d.note.set", {"subject": "ip:default/10.0.0.1", "text": "n"})
         assert [r.kind for r in reader.iter_events(1)] == ["d.note.set"]
         assert reader.get(1).body == b"abc" and reader.stream_end("t1") == 3
+        # Kettenkopf und Event nach ID ohne SQL im Aufrufer (Bericht «api»)
+        assert reader.read_head() == j.head() == j.read_head()
+        note = reader.get(2)
+        assert reader.get_by_id(note.id).kind == "d.note.set" and reader.get_by_id("nicht-da") is None
         with pytest.raises(Exception):  # nur lesend
             reader.conn.execute("DELETE FROM meta")
     finally:

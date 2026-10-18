@@ -38,6 +38,8 @@ __all__ = [
     "timeline",
     "keysteps",
     "search",
+    "sort_time",
+    "boot_ranks",
     "resolve_confirm",
     "resolve_claim",
     "resolve_cmd",
@@ -441,7 +443,8 @@ def keysteps(conn: Any) -> list[dict[str, Any]]:
              "stream_off": r[10], "seq": r[11]} for r in rows]
 
 
-def _boot_ranks(conn: Any) -> dict[str, int]:
+def boot_ranks(conn: Any) -> dict[str, int]:
+    """Rang jedes Systemstarts (``boot_id``) nach seinem ersten Event; für :func:`sort_time`."""
     try:
         rows = conn.execute("SELECT boot_id FROM boot ORDER BY first_seq").fetchall()
         return {str(b): i for i, (b,) in enumerate(rows)}
@@ -449,7 +452,7 @@ def _boot_ranks(conn: Any) -> dict[str, int]:
         return {}
 
 
-def _sort_time(entries: list[dict[str, Any]], ranks: dict[str, int]) -> None:
+def sort_time(entries: list[dict[str, Any]], ranks: dict[str, int]) -> None:
     """Sortiert nach (Rang des Systemstarts, monotone Uhr, Terminal, Offset, seq) (E96).
 
     Ohne ``mono_ns`` wird die Wanduhr über den mittleren Abstand Wanduhr - monotone Uhr
@@ -524,7 +527,7 @@ def timeline(conn: Any, limit: int = 200) -> list[dict[str, Any]]:
         entries.append({"type": "keystep", "title": k["step"], "context": k["host"] or "-", "ts": k["ts"],
                         "note": k["note"], "terminal_id": k["terminal_id"], "mono_ns": k["mono_ns"],
                         "boot_id": k["boot_id"], "start_off": k["stream_off"], "seq": k["seq"]})
-    _sort_time(entries, _boot_ranks(conn))
+    sort_time(entries, boot_ranks(conn))
     return entries[-limit:]
 
 
