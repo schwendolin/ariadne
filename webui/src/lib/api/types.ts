@@ -554,6 +554,20 @@ export type NextItem = NextBase &
       ctrl?: boolean;
     }
   | { kind: 'mass_find'; item_key: string; ts: string; unit: UnitBrief; hosts: number; candidates: number; ctrl?: boolean }
+  | {
+      /** E130: nmap ordnet einen Namen einer IP im Scope zu; Vorschlag, den Namen aufzunehmen (nie automatisch) */
+      kind: 'scope_suggestion';
+      item_key: string;
+      ts: string;
+      /** Name aus der Ausgabe (Zieldaten) */
+      name: string;
+      /** IP im Scope, zu der nmap den Namen zeigt */
+      ip: string;
+      /** Vorschläge: genauer Name, Domain-Wildcard (nie die IP, die ist schon im Scope) */
+      options: ScopeOption[];
+      unit: UnitBrief | null;
+      ctrl?: boolean;
+    }
   );
 
 export type NextItemKind = NextItem['kind'];
@@ -999,13 +1013,68 @@ export interface EvidenceRefIn {
   lines?: [number, number];
 }
 
+// ------------------------------------------------------------------ Scope erweitern (E129, E130), Entwurf ui
+/**
+ * Entwurf der UI für die Routen aus E129 (Agent «backend» baut sie gleichzeitig; massgeblich ist
+ * docs/web-api.md, sobald dort beschrieben). Die UI urteilt nie selbst über den Scope: Vorschläge,
+ * öffentliche Endungen und Urteile kommen vom Server (ScopeMatcher), Einträge sind Text.
+ */
+export type ScopeEntryKind = 'name' | 'wildcard' | 'ip' | 'cidr' | 'range' | 'url' | 'other';
+export interface ScopeOption {
+  /** genauer Eintrag, so wie er in den Scope kommt (z. B. «recovery.vantis.internal», «*.vantis.internal») */
+  entry: string;
+  kind: ScopeEntryKind;
+  /** öffentliche Endung oder öffentliche Adresse: Warnhinweis vor dem Aufnehmen */
+  public: boolean;
+  ctrl: boolean;
+}
+export interface ScopeOptions {
+  value: string;
+  ctrl: boolean;
+  verdict: Verdict;
+  options: ScopeOption[];
+}
+export interface ScopeWindow {
+  days: string | string[] | null;
+  from: string | null;
+  to: string | null;
+  tz: string | null;
+}
+export interface ScopeView {
+  include: string[];
+  exclude: string[];
+  windows: ScopeWindow[];
+  version: number;
+  /** false im Profil customer: ändern nur im Terminal (`ariadne scope`) */
+  editable: boolean;
+}
+export type ScopeOp = 'add' | 'remove' | 'exclude';
+export interface ScopeChange {
+  op: ScopeOp;
+  entry: string;
+  /** Anlass: Scope-Warnung (cmd_id), Klärung (item_key) oder Out-of-Scope-Rand (identifier) */
+  source?: { cmd_id?: string; item_key?: string; identifier?: string } | null;
+}
+export interface ScopeChangeResult {
+  /** Entscheid (rückgängig per d.revoke) */
+  decision_id: string | null;
+  version: number;
+}
+
 // ------------------------------------------------------------------ Ereignisstrom (14, 18.9)
 export interface StreamPayloads {
   changes: { project_id: string; generation: number; entities?: Partial<Record<ChangeEntity, number>> };
   terminal: { terminal_id: string; change: 'opened' | 'closed' | 'state' | 'context' | 'command' };
   inbox: { project_id: string; open: number };
   suggestion: { project_id: string; open: number };
-  project: { project_id: string | null; change: 'opened' | 'closed' | 'locked' | 'unlocked'; locked: boolean };
+  project: {
+    project_id: string | null;
+    change: 'opened' | 'closed' | 'locked' | 'unlocked';
+    locked: boolean;
+    /** Entwurf ui: Grund beim Schliessen (`stop`, `idle`, `switch` …) und Kurzname, falls der Server sie nennt */
+    reason?: SessionEndReason | null;
+    slug?: string | null;
+  };
   reset: { reason: 'reparse' | 'buffer' | 'restart' };
   presentation: { on: boolean };
   progress: {
@@ -1023,7 +1092,13 @@ export interface StreamPayloads {
   };
   screenshot: { project_id: string; id: string; trigger: ShotTrigger };
   prefs: Record<string, never>;
+  /**
+   * Entwurf ui (Praxistest 1): Die Sitzung endet gleich (vor dem Schliessen des Stroms), mit Grund.
+   * `slug` ist der Kurzname des Projekts (fester Bezeichner, kein Zieldatum).
+   */
+  session: { change: 'ending'; reason: SessionEndReason; slug: string | null };
 }
+export type SessionEndReason = 'stop' | 'idle' | 'lock' | 'switch' | 'restart' | 'shutdown' | 'revoked' | 'expired';
 export type StreamEventName = keyof StreamPayloads;
 export type StreamEvent = { [K in StreamEventName]: { name: K; id: string | null; data: StreamPayloads[K] } }[StreamEventName];
 

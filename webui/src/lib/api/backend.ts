@@ -51,6 +51,10 @@ import type {
   SeenView,
   ServiceClass,
   ServiceView,
+  ScopeChange,
+  ScopeChangeResult,
+  ScopeOptions,
+  ScopeView,
   SessionResponse,
   SessionView,
   Status,
@@ -99,6 +103,10 @@ export interface Backend {
   /** PUT /ui/seen mit keepalive (beim Unsichtbarwerden des Tabs) */
   markSeen(pid: string): Promise<void>;
   ackScopeWarning(pid: string, cmdId: string): Promise<void>;
+  /** Scope erweitern (E129, E130; Entwurf ui, Routen von «backend») */
+  scope(pid: string, signal?: AbortSignal): Promise<ScopeView>;
+  scopeOptions(pid: string, value: string, signal?: AbortSignal): Promise<ScopeOptions>;
+  changeScope(pid: string, change: ScopeChange): Promise<ScopeChangeResult>;
 
   // Hosts und Services (8)
   hosts(pid: string, signal?: AbortSignal): Promise<HostSummary[]>;
@@ -234,6 +242,15 @@ export class HttpBackend implements Backend {
   }
   async ackScopeWarning(pid: string, cmdId: string) {
     await this.api.put<Accepted>(apiPath('p', pid, 'ui', 'scope-ack'), { cmd_id: cmdId });
+  }
+  scope(pid: string, signal?: AbortSignal) {
+    return this.api.get<ScopeView>(apiPath('p', pid, 'scope'), { signal });
+  }
+  scopeOptions(pid: string, value: string, signal?: AbortSignal) {
+    return this.api.get<ScopeOptions>(apiPath('p', pid, 'scope', 'options'), { query: { value }, signal });
+  }
+  changeScope(pid: string, change: ScopeChange) {
+    return this.api.post<ScopeChangeResult>(apiPath('p', pid, 'scope'), change);
   }
 
   async hosts(pid: string, signal?: AbortSignal) {
