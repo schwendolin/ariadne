@@ -81,7 +81,7 @@
   .md :global(pre) {
     background: var(--surface-2);
     padding: 8px;
-    border-radius: var(--radius);
+    border-radius: var(--r-btn);
     overflow: auto;
   }
   .md :global(img) {

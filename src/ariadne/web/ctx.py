@@ -30,7 +30,8 @@ SessionOrigin = Literal["local", "sshd"]
 
 # Ereignisse des Stroms (web-api.md Abschnitt 14). Daten sind nie Zieldaten oder Secrets. Endet eine
 # Sitzung, schliesst der Server den Strom ohne eigenes Ereignis (die nächste Anfrage ergibt 401).
-SSE_EVENTS = ("changes", "terminal", "inbox", "suggestion", "project", "reset", "presentation", "progress")
+SSE_EVENTS = ("changes", "terminal", "inbox", "suggestion", "project", "reset", "presentation", "progress",
+              "prefs")  # «prefs» additiv im Bau v0.1-Oberfläche (web-api.md 18.2, 18.9)
 
 
 @dataclass(frozen=True)

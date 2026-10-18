@@ -25,6 +25,7 @@ Das erste Byte hat implizit ``(0, 0)``. Siehe :func:`body_time`.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -544,8 +545,15 @@ class DRevoke(_M):
 
 
 class DSuggestion(_M):
-    suggestion_key: str
-    reason: str | None = None
+    """Denkanstoss erledigt (``d.suggestion.done``) oder verworfen (``d.suggestion.dismiss``).
+
+    ``basis`` ist der Fingerabdruck des Anlasses zum Zeitpunkt des Entscheids (web-api.md 18.6):
+    «erledigt» gilt nur, solange der Anlass gleich bleibt; «verworfen» gilt immer. Ergänzt im Bau
+    v0.1-Oberfläche (additiv, ältere Einträge ohne ``basis`` bleiben gültig)."""
+
+    suggestion_key: str = Field(min_length=1, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+    basis: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class DLabNotCustomer(_M):
@@ -561,6 +569,92 @@ class DUnitDistrust(_M):
     weiteren Quellen verlieren diese Quellen. Übersteht Reparse, aufhebbar mit ``d.revoke``."""
 
     cmd_id: str = Field(min_length=3, max_length=200)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+# Findings (E113, web-api.md 18.5). Ergänzt im Bau v0.1-Oberfläche, nur additiv.
+Severity = Literal["critical", "high", "medium", "low", "info"]
+FindingStatus = Literal["draft", "final"]
+_ATTACK_RE = re.compile(r"^T\d{4}(\.\d{3})?$")
+_CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
+
+
+class DFindingRef(_M):
+    """ATT&CK-Technik oder CVE als Text; ``supported``: vom Menschen als belegt markiert."""
+
+    id: str = Field(min_length=1, max_length=32)
+    supported: bool = False
+
+
+class DEvidenceRef(_M):
+    """Beleg eines Findings: Claim und/oder Einheit mit Zeilenbereich (inklusiv, 0-basiert)."""
+
+    claim_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    unit_id: str | None = Field(default=None, min_length=1, max_length=300)
+    lines: tuple[int, int] | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> DEvidenceRef:
+        if self.claim_key is None and self.unit_id is None:
+            raise ValueError("claim_key oder unit_id nötig")
+        if self.lines is not None and not (0 <= self.lines[0] <= self.lines[1]):
+            raise ValueError("lines: 0 <= start <= ende")
+        return self
+
+
+def _check_refs(refs: Sequence[DFindingRef], rx: re.Pattern[str], what: str) -> None:
+    for r in refs:
+        if not rx.match(r.id):
+            raise ValueError(f"{what}: ungültige Kennung")
+
+
+class _FindingFields(_M):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    severity: Severity | None = None
+    status: FindingStatus | None = None
+    affected: tuple[str, ...] | None = Field(default=None, max_length=50)
+    description: str | None = Field(default=None, max_length=20_000)
+    remediation: str | None = Field(default=None, max_length=20_000)
+    attack: tuple[DFindingRef, ...] | None = Field(default=None, max_length=20)
+    cves: tuple[DFindingRef, ...] | None = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def _check_fields(self) -> _FindingFields:
+        if self.title is not None and ("\n" in self.title or "\r" in self.title):
+            raise ValueError("title ohne Zeilenumbruch")
+        for a in self.affected or ():
+            if not a or len(a) > 600:
+                raise ValueError("affected: ungültige Kennung")
+        _check_refs(self.attack or (), _ATTACK_RE, "attack")
+        _check_refs(self.cves or (), _CVE_RE, "cves")
+        return self
+
+
+class DFindingCreate(_FindingFields):
+    """Neues Finding; ``finding_id`` ist die ``decision_id`` dieses Entscheids."""
+
+    title: str = Field(min_length=1, max_length=200)  # type: ignore[assignment]
+    evidence: tuple[DEvidenceRef, ...] = Field(default=(), max_length=100)
+    created_from: DEvidenceRef | None = None
+
+
+class DFindingUpdate(_FindingFields):
+    """Genannte Felder ersetzen, nicht genannte bleiben."""
+
+    finding_id: str = Field(min_length=1, max_length=64)
+
+
+class DFindingEvidenceAdd(DEvidenceRef):
+    finding_id: str = Field(min_length=1, max_length=64)
+
+
+class DFindingEvidenceRemove(_M):
+    finding_id: str = Field(min_length=1, max_length=64)
+    evidence_id: str = Field(min_length=1, max_length=64)
+
+
+class DFindingDelete(_M):
+    finding_id: str = Field(min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -645,6 +739,11 @@ KINDS: dict[str, KindSpec] = {
         _k("d.lab.not_customer", "decision", DLabNotCustomer),
         _k("d.unit.distrust", "decision", DUnitDistrust),
         _k("d.finding", "decision", DGeneric),
+        _k("d.finding.create", "decision", DFindingCreate),
+        _k("d.finding.update", "decision", DFindingUpdate),
+        _k("d.finding.evidence.add", "decision", DFindingEvidenceAdd),
+        _k("d.finding.evidence.remove", "decision", DFindingEvidenceRemove),
+        _k("d.finding.delete", "decision", DFindingDelete),
         _k("d.artifact", "decision", DGeneric),
         _k("d.hypothesis", "decision", DGeneric),
         _k("d.goal.status", "decision", DGeneric),

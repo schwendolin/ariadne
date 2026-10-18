@@ -1,0 +1,2246 @@
+[
+ {
+  "ai": null,
+  "basis": "efca833d33f0962f",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "a85d52e95a126cc797db67fdf8dadac9b8c51e97a193928d48c7e457f520fbd5",
+    "label": "nmap -sV · 14:02 · Zeile 6",
+    "lines": [
+     5,
+     5
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-AUTH-ANON",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "FTP-Dienst ohne geprüfte anonyme Anmeldung",
+  "rule_id": "R-ANON-ZUGRIFF",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/21",
+  "stages": {
+   "direction": "Viele FTP-Server erlauben Gast- oder anonyme Logins.",
+   "question": "Welche Daten gibt dieser Dienst ohne Anmeldung preis?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:3af127d9b22d9f24f06360be",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 21 --script ftp-anon 192.168.56.105",
+    "label": "nmap-Skript ftp-anon",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "21"
+     },
+     {
+      "target": false,
+      "text": " --script ftp-anon "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-ftp-anon",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "21"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "ftp 192.168.56.105 21",
+    "label": "ftp-Client, Benutzer anonymous",
+    "parts": [
+     {
+      "target": false,
+      "text": "ftp "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "21"
+     }
+    ],
+    "rendered": true,
+    "template_id": "ftp-client",
+    "tool": "ftp",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "ftp"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "21"
+     }
+    ]
+   }
+  ],
+  "title": "Unauthentisierten Zugriff auf 192.168.56.105:21 prüfen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Unauthentisierten Zugriff auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:21"
+   },
+   {
+    "target": false,
+    "text": " prüfen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "e515ea2597e58b65",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "c61570123b7d83c08c557b88cc50426abe634c4106091a1293eecefc4c1f29c7",
+    "label": "nmap -sV · 14:02 · Zeile 8",
+    "lines": [
+     7,
+     7
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-AUTH-ANON",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "FTP-Dienst ohne geprüfte anonyme Anmeldung",
+  "rule_id": "R-ANON-ZUGRIFF",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/2121",
+  "stages": {
+   "direction": "Viele ProFTPD-Installationen erlauben Gast- oder anonyme Logins.",
+   "question": "Welche Daten gibt dieser Dienst ohne Anmeldung preis?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:21d96423d5b777c56c08f3ae",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 2121 --script ftp-anon 192.168.56.105",
+    "label": "nmap-Skript ftp-anon",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "2121"
+     },
+     {
+      "target": false,
+      "text": " --script ftp-anon "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-ftp-anon",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "2121"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "ftp 192.168.56.105 2121",
+    "label": "ftp-Client, Benutzer anonymous",
+    "parts": [
+     {
+      "target": false,
+      "text": "ftp "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "2121"
+     }
+    ],
+    "rendered": true,
+    "template_id": "ftp-client",
+    "tool": "ftp",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "ftp"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "2121"
+     }
+    ]
+   }
+  ],
+  "title": "Unauthentisierten Zugriff auf 192.168.56.105:2121 prüfen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Unauthentisierten Zugriff auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:2121"
+   },
+   {
+    "target": false,
+    "text": " prüfen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "e551a48cc7f8f9c1",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "c4809e7cafd60b7da80caebdde1948c219089f2eec22d3abd8cd90a12235f3e3",
+    "label": "nmap -sV · 14:02 · Zeile 12",
+    "lines": [
+     11,
+     11
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-AUTH-ANON",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "FTP-Dienst ohne geprüfte anonyme Anmeldung",
+  "rule_id": "R-ANON-ZUGRIFF",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/10021",
+  "stages": {
+   "direction": "Viele FTP-Server erlauben Gast- oder anonyme Logins.",
+   "question": "Welche Daten gibt dieser Dienst ohne Anmeldung preis?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:c6c77f2d9ec05bc2f38093f5",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 10021 --script ftp-anon 192.168.56.105",
+    "label": "nmap-Skript ftp-anon",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "10021"
+     },
+     {
+      "target": false,
+      "text": " --script ftp-anon "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-ftp-anon",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "10021"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "ftp 192.168.56.105 10021",
+    "label": "ftp-Client, Benutzer anonymous",
+    "parts": [
+     {
+      "target": false,
+      "text": "ftp "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "10021"
+     }
+    ],
+    "rendered": true,
+    "template_id": "ftp-client",
+    "tool": "ftp",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "ftp"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "10021"
+     }
+    ]
+   }
+  ],
+  "title": "Unauthentisierten Zugriff auf 192.168.56.105:10021 prüfen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Unauthentisierten Zugriff auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:10021"
+   },
+   {
+    "target": false,
+    "text": " prüfen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "3df91ce2d5ec03c8",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "97dabe208e45f9043ffb444308fed6f2a1cdcedfebc15a9bb06a98d9f630d9f9",
+    "label": "nmap -sV · 14:02 · Zeile 6",
+    "lines": [
+     5,
+     5
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [
+   "injection_suspect"
+  ],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: vsftpd'; !sh -c 'id 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/21",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:7d311727c7e8b7dcb174bc93",
+  "templates": [
+   {
+    "blocked_reason": "shell_meta",
+    "command": null,
+    "label": "searchsploit",
+    "parts": [],
+    "rendered": false,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": false,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "vsftpd'; !sh -c 'id"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: vsftpd'; !sh -c 'id 2.3.4 (192.168.56.105:21)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "vsftpd'; !sh -c 'id 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:21"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "a7cf8383daa47e2b",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "1b812cf0f00b60acb355e258d1685d386564fd9e4a70dc669b6a37eb978ed275",
+    "label": "nmap -sV · 14:02 · Zeile 7",
+    "lines": [
+     6,
+     6
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [
+   "injection_suspect"
+  ],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: Apache`echo PWNED` 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/80",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:19271c4fe0abd06d2f1cf6d9",
+  "templates": [
+   {
+    "blocked_reason": "shell_meta",
+    "command": null,
+    "label": "searchsploit",
+    "parts": [],
+    "rendered": false,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": false,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "Apache`echo PWNED`"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: Apache`echo PWNED` 2.3.4 (192.168.56.105:80)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "Apache`echo PWNED` 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:80"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "eafcd834ef06b439",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "6cbd4c0c79144add5a900464c248fc27f243c85e6028fb34a1c6d23ced08f6a8",
+    "label": "nmap -sV · 14:02 · Zeile 8",
+    "lines": [
+     7,
+     7
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [
+   "injection_suspect"
+  ],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: ProFTPD $(echo PWNED) 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/2121",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:65138b683e765a4b00d8e796",
+  "templates": [
+   {
+    "blocked_reason": "shell_meta",
+    "command": null,
+    "label": "searchsploit",
+    "parts": [],
+    "rendered": false,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": false,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "ProFTPD $(echo PWNED)"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: ProFTPD $(echo PWNED) 2.3.4 (192.168.56.105:2121)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "ProFTPD $(echo PWNED) 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:2121"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "d885270ea3a67b85",
+  "ctrl": true,
+  "ctrl_reason": true,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "b17ee0632a34a5fe6a49fd42216a99525ea7b9c3508a7de6a14ab7fe11884868",
+    "label": "nmap -sV · 14:02 · Zeile 9",
+    "lines": [
+     8,
+     8
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [
+   "injection_suspect"
+  ],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: MySQL<LF>INJECTED 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/3306",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:e41158a763ed2e55393e27ff",
+  "templates": [
+   {
+    "blocked_reason": "newline",
+    "command": null,
+    "label": "searchsploit",
+    "parts": [],
+    "rendered": false,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": true,
+      "label": "Produkt",
+      "safe": false,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "MySQL<LF>INJECTED"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: MySQL<LF>INJECTED 2.3.4 (192.168.56.105:3306)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "MySQL<LF>INJECTED 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:3306"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "2f3429d3f241abff",
+  "ctrl": true,
+  "ctrl_reason": true,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "4abf9f643bca6961d39e46e8a7de967bb0080634c7757eb98d84764f82173149",
+    "label": "nmap -sV · 14:02 · Zeile 10",
+    "lines": [
+     9,
+     9
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [
+   "injection_suspect"
+  ],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: nginx<ESC>[2J 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/8080",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:eaf42688804d3d22e692daa4",
+  "templates": [
+   {
+    "blocked_reason": "control",
+    "command": null,
+    "label": "searchsploit",
+    "parts": [],
+    "rendered": false,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": true,
+      "label": "Produkt",
+      "safe": false,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "nginx<ESC>[2J"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: nginx<ESC>[2J 2.3.4 (192.168.56.105:8080)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "nginx<ESC>[2J 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:8080"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "55bbe385c6d48bbe",
+  "ctrl": true,
+  "ctrl_reason": true,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "382f47f0dd40eefea8ee8fdca09d32fb08bda2e6624de2ab5c80b95448d1874a",
+    "label": "nmap -sV · 14:02 · Zeile 11",
+    "lines": [
+     10,
+     10
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [
+   "injection_suspect"
+  ],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: Apache Tomcat<U+202E>/Coyote 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/8180",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:152df5cced95a5ba30bd85bc",
+  "templates": [
+   {
+    "blocked_reason": "control",
+    "command": null,
+    "label": "searchsploit",
+    "parts": [],
+    "rendered": false,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": true,
+      "label": "Produkt",
+      "safe": false,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "Apache Tomcat<U+202E>/Coyote"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: Apache Tomcat<U+202E>/Coyote 2.3.4 (192.168.56.105:8180)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "Apache Tomcat<U+202E>/Coyote 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:8180"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "858d01f7adf8ddca",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "67a29653cbe31571d9fe53aa0fb5625ad38def85b0cacff3a60a44bde3de245a",
+    "label": "nmap -sV · 14:02 · Zeile 12",
+    "lines": [
+     11,
+     11
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: vsftрd 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/10021",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:49eb755e3c634f83fd15d6ad",
+  "templates": [
+   {
+    "blocked_reason": "non_ascii",
+    "command": null,
+    "label": "searchsploit",
+    "parts": [],
+    "rendered": false,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": false,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "vsftрd"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: vsftрd 2.3.4 (192.168.56.105:10021)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "vsftрd 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:10021"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "afd43438a34cccd7",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "3c913761b208dec3360d91ad4947a0cac7175f812284d2e97c4f3eb94a0bde5a",
+    "label": "nmap -sV · 14:02 · Zeile 7",
+    "lines": [
+     6,
+     6
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-WEB-INHALT",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
+  "rule_id": "R-WEB-INHALT",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/80",
+  "stages": {
+   "direction": "Verzeichnisse und Dateien raten, Kopfzeilen und Technik bestimmen; Admin-Bereiche und Sicherungskopien sind häufige Funde.",
+   "question": "Was liefert dieser Webdienst ausser der Startseite?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:03e1415bc35a25af65034527",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "curl -i http://192.168.56.105:80/",
+    "label": "curl: Antwort mit Kopfzeilen",
+    "parts": [
+     {
+      "target": false,
+      "text": "curl -i "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:80/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "curl-head",
+    "tool": "curl",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "curl"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:80/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "whatweb http://192.168.56.105:80/",
+    "label": "whatweb: Technik erkennen",
+    "parts": [
+     {
+      "target": false,
+      "text": "whatweb "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:80/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "whatweb",
+    "tool": "whatweb",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "whatweb"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:80/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "gobuster dir -u http://192.168.56.105:80/ -w /usr/share/wordlists/dirb/common.txt",
+    "label": "gobuster: Verzeichnisse raten",
+    "parts": [
+     {
+      "target": false,
+      "text": "gobuster dir -u "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:80/"
+     },
+     {
+      "target": false,
+      "text": " -w /usr/share/wordlists/dirb/common.txt"
+     }
+    ],
+    "rendered": true,
+    "template_id": "gobuster-dir",
+    "tool": "gobuster",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "gobuster"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:80/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nikto -h http://192.168.56.105:80/",
+    "label": "nikto: bekannte Probleme",
+    "parts": [
+     {
+      "target": false,
+      "text": "nikto -h "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:80/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nikto",
+    "tool": "nikto",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nikto"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:80/"
+     }
+    ]
+   }
+  ],
+  "title": "Webinhalt auf 192.168.56.105:80 untersuchen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Webinhalt auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:80"
+   },
+   {
+    "target": false,
+    "text": " untersuchen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "afd43438a34cccd7",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "809a8846ec981e5d950158eee1121e703bd31f5a2c3ae2f278390799bbaf05ea",
+    "label": "nmap -sV · 14:02 · Zeile 10",
+    "lines": [
+     9,
+     9
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-WEB-INHALT",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
+  "rule_id": "R-WEB-INHALT",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/8080",
+  "stages": {
+   "direction": "Verzeichnisse und Dateien raten, Kopfzeilen und Technik bestimmen; Admin-Bereiche und Sicherungskopien sind häufige Funde.",
+   "question": "Was liefert dieser Webdienst ausser der Startseite?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:87e8623973877ca7dbb0ca42",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "curl -i http://192.168.56.105:8080/",
+    "label": "curl: Antwort mit Kopfzeilen",
+    "parts": [
+     {
+      "target": false,
+      "text": "curl -i "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8080/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "curl-head",
+    "tool": "curl",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "curl"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8080/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "whatweb http://192.168.56.105:8080/",
+    "label": "whatweb: Technik erkennen",
+    "parts": [
+     {
+      "target": false,
+      "text": "whatweb "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8080/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "whatweb",
+    "tool": "whatweb",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "whatweb"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8080/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "gobuster dir -u http://192.168.56.105:8080/ -w /usr/share/wordlists/dirb/common.txt",
+    "label": "gobuster: Verzeichnisse raten",
+    "parts": [
+     {
+      "target": false,
+      "text": "gobuster dir -u "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8080/"
+     },
+     {
+      "target": false,
+      "text": " -w /usr/share/wordlists/dirb/common.txt"
+     }
+    ],
+    "rendered": true,
+    "template_id": "gobuster-dir",
+    "tool": "gobuster",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "gobuster"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8080/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nikto -h http://192.168.56.105:8080/",
+    "label": "nikto: bekannte Probleme",
+    "parts": [
+     {
+      "target": false,
+      "text": "nikto -h "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8080/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nikto",
+    "tool": "nikto",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nikto"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8080/"
+     }
+    ]
+   }
+  ],
+  "title": "Webinhalt auf 192.168.56.105:8080 untersuchen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Webinhalt auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:8080"
+   },
+   {
+    "target": false,
+    "text": " untersuchen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "afd43438a34cccd7",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "21362829f0cd2cb69ac5e1d10a2ffa6510b63960ce7811362a0f16256d8bf915",
+    "label": "nmap -sV · 14:02 · Zeile 11",
+    "lines": [
+     10,
+     10
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-WEB-INHALT",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
+  "rule_id": "R-WEB-INHALT",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/8180",
+  "stages": {
+   "direction": "Verzeichnisse und Dateien raten, Kopfzeilen und Technik bestimmen; Admin-Bereiche und Sicherungskopien sind häufige Funde.",
+   "question": "Was liefert dieser Webdienst ausser der Startseite?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:a4ea719c4a4b0032041b76fe",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "curl -i http://192.168.56.105:8180/",
+    "label": "curl: Antwort mit Kopfzeilen",
+    "parts": [
+     {
+      "target": false,
+      "text": "curl -i "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8180/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "curl-head",
+    "tool": "curl",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "curl"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8180/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "whatweb http://192.168.56.105:8180/",
+    "label": "whatweb: Technik erkennen",
+    "parts": [
+     {
+      "target": false,
+      "text": "whatweb "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8180/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "whatweb",
+    "tool": "whatweb",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "whatweb"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8180/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "gobuster dir -u http://192.168.56.105:8180/ -w /usr/share/wordlists/dirb/common.txt",
+    "label": "gobuster: Verzeichnisse raten",
+    "parts": [
+     {
+      "target": false,
+      "text": "gobuster dir -u "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8180/"
+     },
+     {
+      "target": false,
+      "text": " -w /usr/share/wordlists/dirb/common.txt"
+     }
+    ],
+    "rendered": true,
+    "template_id": "gobuster-dir",
+    "tool": "gobuster",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "gobuster"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8180/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nikto -h http://192.168.56.105:8180/",
+    "label": "nikto: bekannte Probleme",
+    "parts": [
+     {
+      "target": false,
+      "text": "nikto -h "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.105:8180/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nikto",
+    "tool": "nikto",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nikto"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.105:8180/"
+     }
+    ]
+   }
+  ],
+  "title": "Webinhalt auf 192.168.56.105:8180 untersuchen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Webinhalt auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:8180"
+   },
+   {
+    "target": false,
+    "text": " untersuchen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "a6735fb8463dbfa8",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "1e30f385f35c4f715e01864e48a888c91e64b1388ea16da0cd07ab88fcb639b9",
+    "label": "nmap -sV · 14:02 · Zeile 11",
+    "lines": [
+     10,
+     10
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-CRED-DEFAULT",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "Der Tomcat-Manager wird oft mit Standardkonten betrieben",
+  "rule_id": "R-STANDARD-CREDS",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/8180",
+  "stages": {
+   "direction": "Die Dokumentation des Produkts nennt die Standardkonten. Bei Anmeldeversuchen an Kontosperren denken.",
+   "question": "Welche Standardkonten liefert der Hersteller aus, und sind sie noch aktiv?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:7cbc58e7c79c6729415a8973",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 8180 --script http-default-accounts 192.168.56.105",
+    "label": "nmap-Skript http-default-accounts",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "8180"
+     },
+     {
+      "target": false,
+      "text": " --script http-default-accounts "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-http-default-accounts",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "8180"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     }
+    ]
+   }
+  ],
+  "title": "Gibt es auf 192.168.56.105:8180 Standardkonten?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Gibt es auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:8180"
+   },
+   {
+    "target": false,
+    "text": " Standardkonten?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "5a45ef9546a5cff8",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "aa0342f41912cdd5e0b3a7918f2e6ad5590c7204769812d9aa561511f4b0a516",
+    "label": "nmap -sV · 14:02 · Zeile 9",
+    "lines": [
+     8,
+     8
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-DB-ZUGRIFF",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "MySQL-Dienst ohne Anmeldeversuch",
+  "rule_id": "R-DB-ZUGRIFF",
+  "service_id": "svc:ip:default/192.168.56.105|tcp/3306",
+  "stages": {
+   "direction": "Lab-Datenbanken erlauben oft root oder postgres ohne Passwort. Bei Erfolg liegen Konten und Hashes in den Systemtabellen.",
+   "question": "Nimmt die Datenbank Verbindungen von aussen an, etwa mit einem Standardkonto ohne Passwort?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:3ef940692036bd1643dc2f41",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "mysql -h 192.168.56.105 -P 3306 -u root --skip-ssl",
+    "label": "mysql-Client als root ohne Passwort",
+    "parts": [
+     {
+      "target": false,
+      "text": "mysql -h "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     },
+     {
+      "target": false,
+      "text": " -P "
+     },
+     {
+      "target": true,
+      "text": "3306"
+     },
+     {
+      "target": false,
+      "text": " -u root --skip-ssl"
+     }
+    ],
+    "rendered": true,
+    "template_id": "mysql-root-nopass",
+    "tool": "mysql",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "mysql"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "3306"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 3306 --script mysql-empty-password 192.168.56.105",
+    "label": "nmap-Skript mysql-empty-password",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "3306"
+     },
+     {
+      "target": false,
+      "text": " --script mysql-empty-password "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-mysql-empty-password",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "3306"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     }
+    ]
+   }
+  ],
+  "title": "Lässt die Datenbank auf 192.168.56.105:3306 eine Anmeldung zu?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Lässt die Datenbank auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105:3306"
+   },
+   {
+    "target": false,
+    "text": " eine Anmeldung zu?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "3b3d97cda0a1a647",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "98ef1265ce4706a26018ed199fb3f666a14d740d3192bd68d0cf622c862b9c9c",
+    "label": "nmap -sV · 14:02 · Zeile 3",
+    "lines": [
+     2,
+     2
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-PORTS-TCP",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Bisher nur die häufigsten TCP-Ports gescannt",
+  "rule_id": "R-FULL-PORTSCAN",
+  "service_id": null,
+  "stages": {
+   "direction": "Ein Scan über alle 65535 TCP-Ports findet Dienste auf ungewöhnlichen Ports, etwa Hintertüren oder Verwaltungsoberflächen.",
+   "question": "Laufen auf diesem Host Dienste ausserhalb der häufigsten 1000 Ports?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:7e923ae56c3ab97380d13e3d",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p- -T4 192.168.56.105",
+    "label": "nmap: alle TCP-Ports",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p- -T4 "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-full-tcp",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     }
+    ]
+   }
+  ],
+  "title": "Alle TCP-Ports von 192.168.56.105 scannen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Alle TCP-Ports von "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105"
+   },
+   {
+    "target": false,
+    "text": " scannen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "c2031137f9cc58bb",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "98ef1265ce4706a26018ed199fb3f666a14d740d3192bd68d0cf622c862b9c9c",
+    "label": "nmap -sV · 14:02 · Zeile 3",
+    "lines": [
+     2,
+     2
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-PORTS-UDP",
+  "host_id": "ip:default/192.168.56.105",
+  "host_label": "192.168.56.105",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Noch kein UDP-Scan für diesen Host",
+  "rule_id": "R-UDP-SCAN",
+  "service_id": null,
+  "stages": {
+   "direction": "Ein UDP-Scan der häufigsten Ports dauert länger als TCP, findet aber oft SNMP oder TFTP.",
+   "question": "Welche Dienste laufen über UDP, etwa SNMP, TFTP oder DNS?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:486766800f8ccf878123d5ee",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "sudo nmap -sU --top-ports 100 192.168.56.105",
+    "label": "nmap: häufigste UDP-Ports (braucht root)",
+    "parts": [
+     {
+      "target": false,
+      "text": "sudo nmap -sU --top-ports 100 "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.105"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-udp-top",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.105"
+     }
+    ]
+   }
+  ],
+  "title": "UDP-Ports von 192.168.56.105 scannen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "UDP-Ports von "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.105"
+   },
+   {
+    "target": false,
+    "text": " scannen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:11.000000Z"
+ }
+]

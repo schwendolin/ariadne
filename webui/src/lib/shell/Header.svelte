@@ -1,127 +1,196 @@
 <!--
-  Kopfzeile: Projekt mit Profilfarbe, REC-Knopf mit Laufzeit, Sperrzustand, KI-Modus,
-  Verbindung, Präsentationsmodus und Theme (Architektur 7.4).
+  Kopfzeile (SCREENS 5, AriadneKopfzeile.dc.html, E107): 52 px. Links Logo-Zeichen, Slug (Mono),
+  Aufnahme-Knopf mit Popover, Ausnahme-Badges, Herkunft der Sitzung (immer). Mitte Reiter. Rechts
+  Suche (⌘K) und Menü (⋯). Varianten (data-variant, auch für Tests):
+    normal, waiting, pause, held   Projekt offen: Aufnahme-Knopf und Ausnahmen
+    locked                         «Gesperrt · im Terminal ariadne start», «Aufnahme puffert …»
+    noproject                      Slug «kein Projekt», «Vorlauf: 3 Terminals, 15 Minuten …»
+    offline                        «Keine Verbindung · Stand 16:54 · verbindet neu …» statt Aufnahme
+  Präsentation ist ein Kennzeichen in jeder Variante. Keine Zahlen von Klärungen oder
+  Denkanstössen (E87, E107). Unter 1280 px kompakt (nur CSS): kurze Aufnahme, Suche nur als ⌘K;
+  die Herkunft bleibt immer sichtbar. Besitzer: ui-fundament.
 -->
 <script lang="ts">
   import { t } from '../i18n';
+  import { modLabel } from '../keys/keymap';
   import type { AppState } from '../stores/app.svelte';
-  import Badge from '../ui/Badge.svelte';
-  import Txt from '../ui/Txt.svelte';
-  import { applyTheme, initTheme, type ThemeChoice } from '../util/theme';
-  import RecButton from './RecButton.svelte';
+  import LogoMark from '../ui/LogoMark.svelte';
+  import { minutesText } from '../util/format';
+  import { hhmm } from '../util/time';
+  import HeaderBadges from './HeaderBadges.svelte';
+  import MainMenu from './MainMenu.svelte';
+  import RecordingButton from './RecordingButton.svelte';
+  import Tabs from './Tabs.svelte';
 
   let { app }: { app: AppState } = $props();
 
-  let theme = $state<ThemeChoice>(initTheme());
   const s = $derived(app.status);
-  const project = $derived(s?.project ?? null);
-  const llm = $derived(s?.llm ?? null);
-  const budget = $derived(
-    llm?.budget ? t('llm.budget', { used: llm.budget.month_used_usd.toFixed(2), limit: llm.budget.month_limit_usd.toFixed(0) }) : '',
+  const phase = $derived(app.phase);
+  const slug = $derived(s?.project?.slug ?? (phase === 'locked' ? (s?.active?.slug ?? null) : null));
+  const origin = $derived(s?.session?.origin === 'local' ? t('header.origin.local') : t('header.origin.sshd'));
+  const offlineSince = $derived(app.lastGoodAt ? hhmm(new Date(app.lastGoodAt)) : '–');
+  const preroll = $derived(
+    s && s.preroll.terminals > 0
+      ? t('header.preroll', { n: s.preroll.terminals, minutes: minutesText(s.preroll.seconds) })
+      : t('header.prerollNone'),
   );
-  const connTone = $derived(app.connection === 'open' ? 'ok' : app.connection === 'retrying' ? 'warn' : 'muted');
+  const variant = $derived(
+    app.offline
+      ? 'offline'
+      : phase === 'locked'
+        ? 'locked'
+        : phase === 'no_project'
+          ? 'noproject'
+          : Object.values(app.pendingPause).length > 0
+            ? 'waiting'
+            : s?.terminals.some((x) => x.state === 'held')
+              ? 'held'
+              : s?.terminals.some((x) => x.state === 'paused')
+                ? 'pause'
+                : 'normal',
+  );
+  const palette = modLabel('K');
 </script>
 
-<header class="top">
-  <div class="brand" aria-hidden="true">
-    <svg viewBox="0 0 32 32" width="22" height="22"><path d="M6 24 C10 8, 16 26, 20 12 S 26 8, 27 7" class="thread" /><circle cx="6" cy="24" r="2.5" class="end" /><circle cx="27" cy="7" r="2.5" class="end" /></svg>
-    <span>Ariadne</span>
-  </div>
-
-  {#if project}
-    <div class="project">
-      <span class="profile {project.profile}" title={t('header.profile')}>{t(`profile.${project.profile}`)}</span>
-      <strong><Txt value={project.name} max={40} /></strong>
-      <span class="muted small mono">{project.slug}</span>
-    </div>
-  {:else}
-    <span class="muted">{t('header.noProject')}</span>
-  {/if}
-
-  <RecButton {app} />
-
-  {#if s}
-    <Badge tone={s.locked ? 'danger' : 'muted'}>{s.locked ? t('lock.locked') : t('lock.unlocked')}</Badge>
-    {#if llm}
-      <Badge tone={llm.mode === 'off' ? 'muted' : llm.available ? 'ai' : 'warn'} title={[llm.model ?? '', budget, llm.available ? '' : t('llm.unavailable')].filter(Boolean).join(' · ')}>
-        {t(`llm.${llm.mode}`)}
-      </Badge>
+<header class="header" data-variant={variant} data-presentation={app.presentation ? 'on' : undefined}>
+  <div class="left">
+    <LogoMark size={20} />
+    <span class="divider" aria-hidden="true"></span>
+    <span class="slug" class:none={!slug}>{slug ?? t('header.noProject')}</span>
+    {#if app.offline}
+      <span class="badge attention" role="status">{t('header.offline', { time: offlineSince })}</span>
+    {:else if phase === 'locked'}
+      <span class="badge attention">{t('header.locked')} <code>ariadne start</code></span>
+      <span class="muted">{t('header.lockedBuffer')}</span>
+    {:else if phase === 'no_project'}
+      <span class="muted">{preroll}</span>
+    {:else if phase === 'project'}
+      <RecordingButton {app} />
+      <HeaderBadges {app} />
     {/if}
-  {/if}
-  <Badge tone={connTone}>{t(`conn.${app.connection}`)}</Badge>
-  {#if app.backend.kind === 'mock'}<Badge tone="info" title={t('mock.hint')}>{t('mock.badge')}</Badge>{/if}
-
-  <div class="spacer"></div>
-
-  <button
-    type="button"
-    class="small"
-    class:active={s?.presentation}
-    aria-pressed={s?.presentation ?? false}
-    disabled={!s}
-    title={s?.presentation ? t('presentation.toggleOff') : t('presentation.toggleOn')}
-    onclick={() => app.togglePresentation()}
-  >
-    {t('presentation.label')}
-  </button>
-  <label class="row small theme">
-    <span class="sr-only">{t('theme.label')}</span>
-    <select bind:value={theme} onchange={() => applyTheme(theme)} aria-label={t('theme.label')}>
-      <option value="system">{t('theme.system')}</option>
-      <option value="light">{t('theme.light')}</option>
-      <option value="dark">{t('theme.dark')}</option>
-    </select>
-  </label>
+    {#if app.presentation && (app.offline || phase !== 'project')}
+      <span class="badge solid">{t('header.presentation')}</span>
+    {/if}
+    <span class="origin">{origin}</span>
+  </div>
+  <Tabs disabled={phase !== 'project'} />
+  <div class="right">
+    <button type="button" class="search" onclick={() => app.ui.openDialog({ kind: 'palette' })} aria-label={t('palette.title')} aria-keyshortcuts="Control+K Meta+K">
+      <span class="long">{t('header.search')}</span><kbd>{palette}</kbd>
+    </button>
+    <MainMenu {app} />
+  </div>
 </header>
 
 <style>
-  .top {
+  .header {
+    height: var(--header-h);
+    flex: none;
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 8px 14px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    gap: var(--sp-4);
+    padding: 0 var(--sp-4);
+    background: var(--bg);
+    border-bottom: var(--lw-1) solid var(--line);
+    position: relative;
+    z-index: 20;
+    font-size: var(--fs-m);
+    color: var(--fg);
   }
-  .brand {
+  .left {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .divider {
+    flex: none;
+    width: 1px;
+    height: 18px;
+    background: var(--line);
+  }
+  .slug {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  .badge {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-weight: 800;
-    letter-spacing: 0.02em;
+    gap: var(--sp-2);
+    padding: 5px 10px;
+    border-radius: var(--r-btn);
+    border: var(--lw-1) solid var(--line);
+    white-space: nowrap;
   }
-  .brand .thread {
-    fill: none;
-    stroke: var(--map-thread);
-    stroke-width: 3;
-    stroke-linecap: round;
+  .badge code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-s);
   }
-  .brand .end {
-    fill: var(--text);
+  .attention {
+    border-color: var(--attention);
+    color: var(--attention);
   }
-  .project {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 8px;
+  .solid {
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
+    font-weight: 600;
   }
-  .profile {
-    padding: 0 8px;
-    border-radius: 4px;
-    color: var(--profile-text);
-    font-size: 0.78rem;
-    font-weight: 700;
-    text-transform: uppercase;
+  .muted,
+  .origin {
+    color: var(--muted);
+    white-space: nowrap;
   }
-  .profile.lab {
-    background: var(--profile-lab);
+  .muted {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
-  .profile.customer {
-    background: var(--profile-customer);
+  .origin {
+    flex: none;
   }
-  button.active {
-    background: var(--badge-info-bg);
-    border-color: var(--badge-info-text);
-    color: var(--badge-info-text);
+  .right {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+  .search {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-6);
+    min-width: 180px;
+    padding: 5px 6px 5px 10px;
+    border-radius: var(--r-btn);
+    border: var(--lw-1) solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .search:hover {
+    border-color: var(--line-hover);
+  }
+  kbd {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    padding: 2px 5px;
+    border-radius: var(--r-badge);
+    background: var(--surface-3);
+    color: var(--muted);
+  }
+  @media (max-width: 1279px) {
+    .search {
+      min-width: 0;
+      padding: 5px 6px;
+    }
+    .search .long {
+      display: none;
+    }
   }
 </style>

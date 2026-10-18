@@ -1,101 +1,117 @@
 <!--
-  App-Gerüst: Kopfzeile, Banner, Navigation, Ansichten, Host-Schublade, Belegansicht.
-  Alle Ansichten hängen am Store des aktiven Projekts und werden bei einem
-  Projektwechsel neu aufgebaut ({#key}).
+  App-Gerüst (SCREENS «Grundlayout», 9, 10, 11). Besitzer: ui-fundament.
+
+  - Zustände: Laden, Anmeldung, kein Projekt, gesperrt, Projekt; keine Verbindung als
+    gedämpfte Ansicht mit gesperrten Aktionen (Klasse `offline-dim`, AppState.offline).
+  - Kopfzeile immer (ausser bei der Anmeldung); Reiter Karte, Terminals, Zeitachse, Findings.
+  - Höchstens ein Dialog (UiStore.dialog), höchstens eine Tafel (URL `beleg` oder `tafel`); die
+    Scope-Warnung ist eine nicht modale Meldung (UiStore.scopeCard).
+  - Globale Kürzel: ⌘K Palette, ? Hilfe, 1 bis 4 Reiter, ⇧P Präsentationsmodus (nur mit Fokus
+    ausserhalb von Eingabefeldern), Esc schliesst Tafel bzw. Detail (in den Komponenten).
+  - Palette: Quelle «actions» (Reiter, Präsentation, Darstellung, Einstellungen, Scope, Hilfe,
+    Abmelden); der Rohlog läuft in der Palette selbst (GET /search auf Wunsch).
+  - Favicon mit Punkt und Tab-Titel «ms2 · 2 zu klären».
+  - Bei Projektwechsel baut `{#key}` alle Ansichten neu auf (E70).
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import EvidencePanel from './lib/evidence/EvidencePanel.svelte';
+  import ExportDialog from './lib/dialogs/ExportDialog.svelte';
+  import ScreenshotDialog from './lib/dialogs/ScreenshotDialog.svelte';
+  import FindingsView from './lib/findings/FindingsView.svelte';
   import { t } from './lib/i18n';
-  import { router } from './lib/router.svelte';
+  import KarteView from './lib/karte/KarteView.svelte';
+  import CommandPalette from './lib/shell/CommandPalette.svelte';
   import Header from './lib/shell/Header.svelte';
-  import Lagebild from './lib/shell/Lagebild.svelte';
+  import HelpDialog from './lib/shell/HelpDialog.svelte';
   import LoginView from './lib/shell/LoginView.svelte';
-  import Nav from './lib/shell/Nav.svelte';
+  import { installGlobal } from './lib/shell/global';
+  import ScopeViewDialog from './lib/shell/ScopeViewDialog.svelte';
+  import ScopeWarningDialog from './lib/shell/ScopeWarningDialog.svelte';
+  import SettingsPanel from './lib/shell/SettingsPanel.svelte';
+  import StateView from './lib/shell/StateView.svelte';
   import type { AppState } from './lib/stores/app.svelte';
-  import { codeText } from './lib/util/errors';
-  import EvidenceView from './lib/views/EvidenceView.svelte';
-  import FindingsView from './lib/views/FindingsView.svelte';
-  import HostDrawer from './lib/views/HostDrawer.svelte';
-  import InboxView from './lib/views/InboxView.svelte';
-  import MapView from './lib/views/MapView.svelte';
-  import SuggestionsView from './lib/views/SuggestionsView.svelte';
-  import TerminalsView from './lib/views/TerminalsView.svelte';
-  import TimelineView from './lib/views/TimelineView.svelte';
+  import ContextDialog from './lib/terminals/ContextDialog.svelte';
+  import TerminalsView from './lib/terminals/TerminalsView.svelte';
+  import TimelineView from './lib/timeline/TimelineView.svelte';
+  import Notices from './lib/ui/Notices.svelte';
+  import { url } from './lib/url/state.svelte';
+  import { applyTabState } from './lib/util/favicon';
 
   let { app }: { app: AppState } = $props();
 
-  const route = $derived(router.route);
-  const hostParam = $derived(router.param('host'));
-  const factParam = $derived(router.param('fact'));
-  const status = $derived(app.status);
+  const phase = $derived(app.phase);
+  const project = $derived(app.project);
+  const route = $derived(url.route);
+  const dialog = $derived(app.ui.dialog);
+  const evidence = $derived(url.evidence());
+  const settingsOpen = $derived(url.get('tafel') === 'einstellungen');
+
+  $effect(() => {
+    applyTabState(document, project?.slug ?? null, project?.next.open ?? 0);
+  });
+
+  onMount(() => installGlobal(app));
 </script>
 
-{#if app.auth === 'init'}
-  <p class="boot muted">{t('app.loading')}</p>
-{:else if app.auth === 'login'}
+{#if phase === 'boot'}
+  <p class="boot">{t('app.loading')}</p>
+{:else if phase === 'login'}
   <LoginView {app} />
 {:else}
   <div class="shell">
     <a class="skip" href="#main">{t('app.skip')}</a>
     <Header {app} />
-
-    {#if status?.locked}
-      <div class="banner danger" role="alert">
-        {t('lock.banner')}
-        {#if status.rec.mode === 'waiting'}<br />{t('lock.waiting')}{/if}
-      </div>
-    {/if}
-    {#if status?.presentation}
-      <div class="banner info" role="status">{t('presentation.banner')}</div>
-    {/if}
-    {#if app.error}
-      <div class="banner danger" role="alert">{codeText(app.error)}</div>
-    {/if}
-
-    <div class="subbar">
-      <Nav project={app.project} />
-      <div class="spacer"></div>
-      {#if app.project}<Lagebild project={app.project} />{/if}
-    </div>
-
-    <main id="main" tabindex="-1">
-      {#if !app.project}
-        <div class="view">
-          <h1>{t('noProject.title')}</h1>
-          <p class="muted">{t('noProject.text')}</p>
-        </div>
-      {:else}
-        {#key app.project.pid}
+    <main id="main" tabindex="-1" class:offline-dim={app.offline} inert={app.offline ? true : undefined}>
+      {#if phase === 'project' && project}
+        {#key project.pid}
           {#if route === 'karte'}
-            <MapView project={app.project} />
-          {:else if route === 'inbox'}
-            <InboxView project={app.project} />
+            <KarteView {app} {project} />
           {:else if route === 'terminals'}
-            <TerminalsView project={app.project} />
+            <TerminalsView {app} {project} />
           {:else if route === 'zeitachse'}
-            <TimelineView project={app.project} />
-          {:else if route === 'denkanstoesse'}
-            <SuggestionsView project={app.project} {status} jobs={app.jobs} />
+            <TimelineView {app} {project} />
           {:else if route === 'findings'}
-            <FindingsView project={app.project} />
+            <FindingsView {app} {project} />
           {/if}
-          {#if hostParam}
-            <HostDrawer project={app.project} hostId={hostParam} />
+          {#if evidence}
+            <EvidencePanel {app} {project} target={evidence} />
           {/if}
         {/key}
+      {:else}
+        <StateView {app} />
+      {/if}
+      {#if settingsOpen}
+        <SettingsPanel {app} />
       {/if}
     </main>
-
-    {#if factParam && app.project}
-      {#key app.project.pid + factParam}
-        <EvidenceView project={app.project} factId={factParam} presentation={status?.presentation ?? false} />
-      {/key}
-    {/if}
   </div>
 {/if}
 
+{#if app.ui.scopeCard && phase === 'project'}
+  <ScopeWarningDialog {app} onclose={() => (app.ui.scopeCard = false)} />
+{/if}
+
+{#if dialog?.kind === 'palette'}
+  <CommandPalette {app} onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'help'}
+  <HelpDialog onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'scope-view'}
+  <ScopeViewDialog {app} onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'export'}
+  <ExportDialog onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'screenshot'}
+  <ScreenshotDialog onclose={() => app.ui.closeDialog()} />
+{:else if dialog?.kind === 'context' && project}
+  <ContextDialog {app} {project} terminalId={dialog.terminalId} itemKey={dialog.itemKey} fromOff={dialog.fromOff} onclose={() => app.ui.closeDialog()} />
+{/if}
+
+<Notices ui={app.ui} />
+
 <style>
   .boot {
-    padding: 24px;
+    padding: var(--sp-6);
+    color: var(--muted);
   }
   .shell {
     display: flex;
@@ -112,27 +128,6 @@
     z-index: 100;
     padding: 6px 10px;
     background: var(--surface);
-  }
-  .banner {
-    padding: 6px 14px;
-    font-weight: 600;
-  }
-  .banner.danger {
-    background: var(--banner-danger-bg);
-    color: var(--banner-danger-text);
-  }
-  .banner.info {
-    background: var(--banner-info-bg);
-    color: var(--banner-info-text);
-  }
-  .subbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 0 14px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
   }
   main {
     position: relative;

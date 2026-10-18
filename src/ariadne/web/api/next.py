@@ -3,7 +3,8 @@
 Grundlage sind die offenen Einträge aus ``v_inbox`` (wie :func:`ariadne.ingest.queries.inbox`,
 hier als flache Liste mit der Zeit pro Eintrag), :func:`~ariadne.ingest.queries.group_ref` und
 :func:`~ariadne.ingest.queries.quiet_summary`. «Klären» ist die Spur «entscheiden», «Bestätigen»
-gibt es nur im Profil customer (Gruppen mit Sammelbestätigung, E88). Denkanstösse folgen später.
+gibt es nur im Profil customer (Gruppen mit Sammelbestätigung, E88). Denkanstösse liefert
+:func:`ariadne.rules.api.suggestions` (web-api.md 18.6).
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from starlette.responses import Response
 
 from ariadne.ingest import queries
 from ariadne.ingest.proj_build import display
+from ariadne.rules import api as rules_api
 from ariadne.web.api.common import Api
 from ariadne.web.api.text import Bag, iso
 from ariadne.web.api.views import (
@@ -26,6 +28,8 @@ from ariadne.web.api.views import (
     conflict_view,
     fact_view,
     loads,
+    secret_values,
+    term_ref,
     unit_brief,
     with_secrets,
 )
@@ -34,6 +38,91 @@ __all__ = ["add_routes", "next_view"]
 
 _VALUE_KINDS = ("decide_value", "candidate_group")
 _ITEMS_MAX = 2000
+EXCERPT_LINES = 4  # «Darum mehrdeutig»: höchstens so viele Zeilen (18.8)
+
+
+def _off_ts(conn: Any, tid: Any, off: Any) -> int | None:
+    """Zeit eines Offsets im Strom eines Terminals (aus den gespeicherten Blöcken)."""
+    if not isinstance(tid, str) or not isinstance(off, int):
+        return None
+    row = conn.execute(
+        "SELECT ts_utc_ns FROM seg_chunk WHERE terminal_id = ? AND off <= ? ORDER BY off DESC LIMIT 1",
+        (tid, off),
+    ).fetchone()
+    if row is None:
+        row = conn.execute(
+            "SELECT ts_utc_ns FROM seg_chunk WHERE terminal_id = ? ORDER BY off LIMIT 1", (tid,)
+        ).fetchone()
+    return int(row[0]) if row and isinstance(row[0], int) else None
+
+
+def _line_pos(conn: Any, unit_id: str, span_json: Any) -> int | None:
+    span = loads(span_json, None)
+    idx = span.get("line_start") if isinstance(span, Mapping) else None
+    if not isinstance(idx, int):
+        return None
+    row = conn.execute("SELECT pos FROM unit_line WHERE unit_id = ? AND idx = ?", (unit_id, idx)).fetchone()
+    return int(row[0]) if row else None
+
+
+def _excerpt(conn: Any, tid: str, off: int, claim_key: Any, bag: Bag, redactor: Any) -> dict[str, Any] | None:
+    """Logauszug zum Kontextvorschlag (18.8): beim zweiten Callback aus einer anderen Adresse in
+    derselben Stufe dieser (``note: 'second_callback'``, «Darum mehrdeutig»), sonst die Zeile des
+    vorgeschlagenen Callbacks (``note: 'callback'``). Höchstens :data:`EXCERPT_LINES` Zeilen,
+    bekannte und eigene Secrets wie in der Belegansicht verdeckt. Solange die Zeilen einer offenen
+    Einheit noch nicht gespeichert sind (Listener läuft), gibt es keinen Auszug (``None``)."""
+    from ariadne.web.api.evidence import render_rows, secret_spans
+
+    hits: list[tuple[str, Any, Any, str]] = []
+    for unit_id, span_json, ts, subject in conn.execute(
+        "SELECT cs.unit_id, cs.span_json, cs.ts_utc_ns, c.subject_identifier FROM claim c "
+        "JOIN claim_source cs ON cs.claim_key = c.claim_key JOIN obs_unit u ON u.unit_id = cs.unit_id "
+        "WHERE c.predicate = 'access.callback' AND c.state != 'rejected' AND u.terminal_id = ? "
+        "AND u.ctx_opened_at = ? ORDER BY cs.ts_utc_ns, cs.unit_id LIMIT 200",
+        (tid, off),
+    ):
+        hits.append((str(unit_id), span_json, ts, str(subject)))
+    pick: tuple[str, Any, Any] | None = None
+    note = None
+    seen: list[str] = []
+    for unit_id, span_json, ts, ip in hits:
+        if seen and ip not in seen:
+            pick, note = (unit_id, span_json, ts), "second_callback"
+            break
+        if ip not in seen:
+            seen.append(ip)
+    if pick is None and isinstance(claim_key, str):
+        row = conn.execute(
+            "SELECT unit_id, span_json, ts_utc_ns FROM claim_source WHERE claim_key = ? "
+            "AND unit_id IS NOT NULL ORDER BY ts_utc_ns LIMIT 1",
+            (claim_key,),
+        ).fetchone()
+        if row is not None:
+            pick, note = (str(row[0]), row[1], row[2]), "callback"
+    if pick is None:
+        return None
+    unit_id, span_json, ts = pick
+    pos = _line_pos(conn, unit_id, span_json)
+    if pos is None:
+        return None
+    first = max(0, pos - 1)
+    rows = conn.execute(
+        "SELECT pos, idx, text, flags, sgr FROM unit_line WHERE unit_id = ? AND pos >= ? "
+        "ORDER BY pos LIMIT ?",
+        (unit_id, first, EXCERPT_LINES),
+    ).fetchall()
+    if not rows:
+        return None
+    spans = secret_spans(conn, unit_id) if bag.presentation else {}
+    lines = render_rows(rows, secret_values(conn), spans, reveal=False, redactor=redactor)
+    return {
+        "unit_id": unit_id,
+        "lines": [int(rows[0][0]), int(rows[-1][0])],
+        "text": [ln["text"] for ln in lines],
+        "ctrl": any(ln["ctrl"] for ln in lines),
+        "note": note,
+        "ts": iso(ts),
+    }
 
 
 def _brief(
@@ -58,8 +147,9 @@ def _verdicts(conn: Any, keys: list[str]) -> dict[str, str | None]:
     return out
 
 
-def next_view(conn: Any, profile: str, bag: Bag) -> dict[str, Any]:
+def next_view(conn: Any, profile: str, bag: Bag, redactor: Any = None) -> dict[str, Any]:
     bag = with_secrets(bag, conn)  # Titel kommen aus Befehlstexten (SEC-W1)
+    refs = queries.term_refs(conn)
     rows = conn.execute(
         "SELECT item_key, kind, group_key, title, payload_json, created_ts FROM v_inbox "
         "ORDER BY created_ts, group_key, item_key LIMIT ?",
@@ -163,6 +253,9 @@ def next_view(conn: Any, profile: str, bag: Bag) -> dict[str, Any]:
                 "candidate": b(data.get("candidate")),
                 "units": int(data.get("units") or data.get("values") or (1 if unit else 0)),
                 "unit": unit,
+                "terminal": term_ref(data.get("terminal_id"), refs, bag),
+                "from_ts": iso(_off_ts(conn, data.get("terminal_id"), data.get("from_off"))),
+                "excerpt": None,
             }
         elif kind == "ctx_suggestion":
             host = data.get("suggested_host")
@@ -180,6 +273,16 @@ def next_view(conn: Any, profile: str, bag: Bag) -> dict[str, Any]:
                 "suggested_label": b(display(host)),
                 "reason": b(data.get("reason")) or "",
                 "claim_key": data.get("claim_key") if isinstance(data.get("claim_key"), str) else None,
+                "terminal": term_ref(data["terminal_id"], refs, bag),
+                "from_ts": iso(_off_ts(conn, data["terminal_id"], data.get("from_off"))),
+                "excerpt": _excerpt(
+                    conn,
+                    data["terminal_id"],
+                    int(data.get("from_off") or 0),
+                    data.get("claim_key"),
+                    bag,
+                    redactor,
+                ),
             }
         elif kind == "merge_suggestion":
             idents = []
@@ -223,8 +326,9 @@ def next_view(conn: Any, profile: str, bag: Bag) -> dict[str, Any]:
     return {
         "clarify": clarify,
         "confirm": list(groups.values()) if profile == "customer" else [],
-        "suggestions": [],
-        "suggestions_available": False,
+        # Denkanstösse aus der Regel-Engine (web-api.md 18.6, Bau v0.1-Oberfläche): nur offene.
+        "suggestions": rules_api.suggestions(conn, profile=profile, state="open", limit=50)[0],
+        "suggestions_available": not rules_api.STUB,
         "quiet": queries.quiet_summary(conn),
         "open": len(clarify),
     }
@@ -236,4 +340,5 @@ def add_routes(router: APIRouter, api: Api) -> None:
         p = api.project(pid)
         bag = api.bag()
         profile = p.info.profile
-        return await api.respond(await api.query(p, lambda c: next_view(c, profile, bag)))
+        redactor = api.daemon.redactor
+        return await api.respond(await api.query(p, lambda c: next_view(c, profile, bag, redactor)))

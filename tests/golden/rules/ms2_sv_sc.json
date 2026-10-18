@@ -1,0 +1,2587 @@
+[
+ {
+  "ai": null,
+  "basis": "89fb80e6d35254f7",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "d306a41a56dd9a1c53facae210a71befdd0c277716e065d3baef4b9c2a8b9401",
+    "label": "nmap -sV -sC · 14:02 · Zeile 6",
+    "lines": [
+     5,
+     5
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: vsftpd 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/21",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:04e64e671d15d9e8a9617a3a",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit vsftpd 2.3.4",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "vsftpd"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "2.3.4"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "vsftpd"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: vsftpd 2.3.4 (192.168.56.101:21)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "vsftpd 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:21"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "c836ded91b57cf63",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "4c38ea3ce13ce94f243858f6c5c71a6f68e5181eabd23668b0269f4234c78472",
+    "label": "nmap -sV -sC · 14:02 · Zeile 20",
+    "lines": [
+     19,
+     19
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: OpenSSH 4.7p1 Debian 8ubuntu1",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/22",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:9aacaf7fb10245762ac5ae11",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit OpenSSH 4.7p1",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "OpenSSH"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "4.7p1"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "OpenSSH"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "4.7p1"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: OpenSSH 4.7p1 Debian 8ubuntu1 (192.168.56.101:22)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "OpenSSH 4.7p1 Debian 8ubuntu1"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:22"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "d40b80726fa10f92",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "8b93c1b7421a1658464141df9f829584e1fc2ffb2b4c2a47274de408aa2546cc",
+    "label": "nmap -sV -sC · 14:02 · Zeile 31",
+    "lines": [
+     30,
+     30
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: ISC BIND 9.4.2",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/53",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:a4b0a7451ff9def7aae9204b",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit ISC BIND 9.4.2",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "ISC BIND"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "9.4.2"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "ISC BIND"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "9.4.2"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: ISC BIND 9.4.2 (192.168.56.101:53)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "ISC BIND 9.4.2"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:53"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "b35dbb04be605335",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "f038c3d26c702ea6e8a89d9bb30a00152cd2377163786461b35be4776c3774aa",
+    "label": "nmap -sV -sC · 14:02 · Zeile 34",
+    "lines": [
+     33,
+     33
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: Apache httpd 2.2.8",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/80",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:b07eeafb49d05a132cd86b19",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit Apache 2.2.8",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "Apache"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "2.2.8"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "Apache"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.2.8"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: Apache httpd 2.2.8 (192.168.56.101:80)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "Apache httpd 2.2.8"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:80"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "d4801bc0ab7712a0",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "ba81615e67da9776437db409fdc088f5d5b7614a8927a1c43176133c2b3aa529",
+    "label": "nmap -sV -sC · 14:02 · Zeilen 103 bis 109",
+    "lines": [
+     102,
+     108
+    ],
+    "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "afb2a3bc401b838d38a3c27ec4363eb64c939a534258ad401ab0a04b592ab6b4",
+    "label": "nmap -sV -sC · 14:02 · Zeile 46",
+    "lines": [
+     45,
+     45
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: Samba smbd 3.0.20-Debian",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/445",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:1ac19846b47d3092f193f83e",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit Samba 3.0.20",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "Samba"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "3.0.20"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "Samba"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "3.0.20"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: Samba smbd 3.0.20-Debian (192.168.56.101:445)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "Samba smbd 3.0.20-Debian"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:445"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "532f67baed6b14f6",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "1aa480475830630fa95ec5e6cb5416d522fa1f4e8051b9f0ee2ce12d1da72f59",
+    "label": "nmap -sV -sC · 14:02 · Zeile 53",
+    "lines": [
+     52,
+     52
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: ProFTPD 1.3.1",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/2121",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:68801c47bdaf51a8f39b179c",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit ProFTPD 1.3.1",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "ProFTPD"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "1.3.1"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "ProFTPD"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "1.3.1"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: ProFTPD 1.3.1 (192.168.56.101:2121)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "ProFTPD 1.3.1"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:2121"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "f28e0dbc73ea5bb5",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "e468a68c1e84708cb642c5503084fbcb5c0bcad0ecc07b9c09064e26a29a1dff",
+    "label": "nmap -sV -sC · 14:02 · Zeile 54",
+    "lines": [
+     53,
+     53
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: MySQL 5.0.51a-3ubuntu5",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/3306",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:ee0f33b0bf83aca418ed9fe6",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit MySQL 5.0.51a",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "MySQL"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "5.0.51a"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "MySQL"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "5.0.51a"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: MySQL 5.0.51a-3ubuntu5 (192.168.56.101:3306)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "MySQL 5.0.51a-3ubuntu5"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:3306"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "a238590007d16ab4",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "e89f2c0ecf57205bb3bd7a7a11fc151288a3f5562f392452416e3d6c524e2fac",
+    "label": "nmap -sV -sC · 14:02 · Zeile 88",
+    "lines": [
+     87,
+     87
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: Apache Tomcat/Coyote JSP engine 1.1",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/8180",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:e4fd37e251960d87f540b5f2",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit Apache Tomcat Coyote JSP 1.1",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "Apache Tomcat Coyote JSP"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "1.1"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "Apache Tomcat Coyote JSP"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "1.1"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: Apache Tomcat/Coyote JSP engine 1.1 (192.168.56.101:8180)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "Apache Tomcat/Coyote JSP engine 1.1"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:8180"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "2292e38589d9c933",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "51f73905ed00a822bad2d2031af580191ae71b83b5671ea45c90e10ca4d4ccda",
+    "label": "nmap -sV -sC · 14:02 · Zeile 45",
+    "lines": [
+     44,
+     44
+    ],
+    "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "7969cdde237c27b9975b0e4d606a71bfc21c253468b2f9280c7c0e8e3122a979",
+    "label": "nmap -sV -sC · 14:02 · Zeile 46",
+    "lines": [
+     45,
+     45
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-SMB-SHARES",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "SMB auf Port 139, 445 ohne Liste der Shares",
+  "rule_id": "R-SMB-SHARES",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/445",
+  "stages": {
+   "direction": "Freigaben lassen sich oft ohne Konto auflisten; eine beschreibbare Freigabe ist ein häufiger Einstieg.",
+   "question": "Welche Freigaben bietet dieser Host an, und welche sind ohne Anmeldung lesbar?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:7264e04a68fba97d7fd094a0",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "smbclient -N -L //192.168.56.101",
+    "label": "smbclient: Shares ohne Anmeldung auflisten",
+    "parts": [
+     {
+      "target": false,
+      "text": "smbclient -N -L //"
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "smbclient-list",
+    "tool": "smbclient",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "smbclient"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "smbmap -H 192.168.56.101",
+    "label": "smbmap: Shares und Rechte",
+    "parts": [
+     {
+      "target": false,
+      "text": "smbmap -H "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "smbmap",
+    "tool": "smbmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "smbmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 445 --script smb-enum-shares 192.168.56.101",
+    "label": "nmap-Skript smb-enum-shares",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "445"
+     },
+     {
+      "target": false,
+      "text": " --script smb-enum-shares "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-smb-enum-shares",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "445"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   }
+  ],
+  "title": "SMB-Shares auf 192.168.56.101 auflisten",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "SMB-Shares auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101"
+   },
+   {
+    "target": false,
+    "text": " auflisten"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "99cc9392b15c721b",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "f5bf491ec15e07f66cc45b210205dd51ed74c03e4043a48627a21d9172fa825c",
+    "label": "nmap -sV -sC · 14:02 · Zeile 52",
+    "lines": [
+     51,
+     51
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-NFS-EXPORTS",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "NFS auf Port 2049 ohne Liste der Exporte",
+  "rule_id": "R-NFS-EXPORTS",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/2049",
+  "stages": {
+   "direction": "Exporte für alle Clients (*) lassen sich ohne Anmeldung einhängen; bei NFS ist das die Prüfung auf Zugriff ohne Anmeldung.",
+   "question": "Welche Verzeichnisse exportiert dieser Host, und für welche Clients?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:71fa8b65ef9894c488631aa7",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "showmount -e 192.168.56.101",
+    "label": "showmount: Exporte auflisten",
+    "parts": [
+     {
+      "target": false,
+      "text": "showmount -e "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "showmount",
+    "tool": "showmount",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "showmount"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 111 --script nfs-showmount 192.168.56.101",
+    "label": "nmap-Skript nfs-showmount",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p 111 --script nfs-showmount "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-nfs-showmount",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   }
+  ],
+  "title": "NFS-Exporte von 192.168.56.101 auflisten",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "NFS-Exporte von "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101"
+   },
+   {
+    "target": false,
+    "text": " auflisten"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "afd43438a34cccd7",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "74c7da44e6bf8312cbd99f299abef60fd53c7017887db9d6bb11f3ac08c3e3ea",
+    "label": "nmap -sV -sC · 14:02 · Zeile 34",
+    "lines": [
+     33,
+     33
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-WEB-INHALT",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
+  "rule_id": "R-WEB-INHALT",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/80",
+  "stages": {
+   "direction": "Verzeichnisse und Dateien raten, Kopfzeilen und Technik bestimmen; Admin-Bereiche und Sicherungskopien sind häufige Funde.",
+   "question": "Was liefert dieser Webdienst ausser der Startseite?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:a47650139e488423da0a9ce0",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "curl -i http://192.168.56.101:80/",
+    "label": "curl: Antwort mit Kopfzeilen",
+    "parts": [
+     {
+      "target": false,
+      "text": "curl -i "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:80/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "curl-head",
+    "tool": "curl",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "curl"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:80/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "whatweb http://192.168.56.101:80/",
+    "label": "whatweb: Technik erkennen",
+    "parts": [
+     {
+      "target": false,
+      "text": "whatweb "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:80/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "whatweb",
+    "tool": "whatweb",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "whatweb"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:80/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "gobuster dir -u http://192.168.56.101:80/ -w /usr/share/wordlists/dirb/common.txt",
+    "label": "gobuster: Verzeichnisse raten",
+    "parts": [
+     {
+      "target": false,
+      "text": "gobuster dir -u "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:80/"
+     },
+     {
+      "target": false,
+      "text": " -w /usr/share/wordlists/dirb/common.txt"
+     }
+    ],
+    "rendered": true,
+    "template_id": "gobuster-dir",
+    "tool": "gobuster",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "gobuster"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:80/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nikto -h http://192.168.56.101:80/",
+    "label": "nikto: bekannte Probleme",
+    "parts": [
+     {
+      "target": false,
+      "text": "nikto -h "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:80/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nikto",
+    "tool": "nikto",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nikto"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:80/"
+     }
+    ]
+   }
+  ],
+  "title": "Webinhalt auf 192.168.56.101:80 untersuchen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Webinhalt auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:80"
+   },
+   {
+    "target": false,
+    "text": " untersuchen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "afd43438a34cccd7",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "5c0443fb0b7d5807373a6e1ef4f2bf893749a3116d4a0591b681bf84710f3819",
+    "label": "nmap -sV -sC · 14:02 · Zeile 88",
+    "lines": [
+     87,
+     87
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-WEB-INHALT",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Webdienst ohne Prüfung von Inhalt und Verzeichnissen",
+  "rule_id": "R-WEB-INHALT",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/8180",
+  "stages": {
+   "direction": "Verzeichnisse und Dateien raten, Kopfzeilen und Technik bestimmen; Admin-Bereiche und Sicherungskopien sind häufige Funde.",
+   "question": "Was liefert dieser Webdienst ausser der Startseite?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:fb4d7d13c47ee7bdab38af1a",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "curl -i http://192.168.56.101:8180/",
+    "label": "curl: Antwort mit Kopfzeilen",
+    "parts": [
+     {
+      "target": false,
+      "text": "curl -i "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:8180/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "curl-head",
+    "tool": "curl",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "curl"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:8180/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "whatweb http://192.168.56.101:8180/",
+    "label": "whatweb: Technik erkennen",
+    "parts": [
+     {
+      "target": false,
+      "text": "whatweb "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:8180/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "whatweb",
+    "tool": "whatweb",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "whatweb"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:8180/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "gobuster dir -u http://192.168.56.101:8180/ -w /usr/share/wordlists/dirb/common.txt",
+    "label": "gobuster: Verzeichnisse raten",
+    "parts": [
+     {
+      "target": false,
+      "text": "gobuster dir -u "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:8180/"
+     },
+     {
+      "target": false,
+      "text": " -w /usr/share/wordlists/dirb/common.txt"
+     }
+    ],
+    "rendered": true,
+    "template_id": "gobuster-dir",
+    "tool": "gobuster",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "gobuster"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:8180/"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nikto -h http://192.168.56.101:8180/",
+    "label": "nikto: bekannte Probleme",
+    "parts": [
+     {
+      "target": false,
+      "text": "nikto -h "
+     },
+     {
+      "target": true,
+      "text": "http://192.168.56.101:8180/"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nikto",
+    "tool": "nikto",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nikto"
+     },
+     {
+      "ctrl": false,
+      "label": "URL",
+      "safe": true,
+      "slot": "service.url",
+      "target": true,
+      "type": "url",
+      "value": "http://192.168.56.101:8180/"
+     }
+    ]
+   }
+  ],
+  "title": "Webinhalt auf 192.168.56.101:8180 untersuchen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Webinhalt auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:8180"
+   },
+   {
+    "target": false,
+    "text": " untersuchen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "47d8b38ee2e40314",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "b05e8daeeb4978292f2f123efcff1fbcd89e0336eef556af92a3d42d61041db6",
+    "label": "nmap -sV -sC · 14:02 · Zeile 24",
+    "lines": [
+     23,
+     23
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-CRED-DEFAULT",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "Telnet-Zugänge in Labs haben oft Standardkonten",
+  "rule_id": "R-STANDARD-CREDS",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/23",
+  "stages": {
+   "direction": "Die Dokumentation des Produkts nennt die Standardkonten. Bei Anmeldeversuchen an Kontosperren denken.",
+   "question": "Welche Standardkonten liefert der Hersteller aus, und sind sie noch aktiv?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:f9ea06dbe59b0a9375568c76",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "telnet 192.168.56.101 23",
+    "label": "telnet-Client",
+    "parts": [
+     {
+      "target": false,
+      "text": "telnet "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "23"
+     }
+    ],
+    "rendered": true,
+    "template_id": "telnet-client",
+    "tool": "telnet",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "telnet"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "23"
+     }
+    ]
+   }
+  ],
+  "title": "Gibt es auf 192.168.56.101:23 Standardkonten?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Gibt es auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:23"
+   },
+   {
+    "target": false,
+    "text": " Standardkonten?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "503909fd64d1d918",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "76cfccf8101de3b84607cf77b1457f64559a802cbd6f708ebda20587b48f735a",
+    "label": "nmap -sV -sC · 14:02 · Zeile 68",
+    "lines": [
+     67,
+     67
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-CRED-DEFAULT",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "VNC-Server sind oft nur mit einem schwachen oder leeren Passwort geschützt",
+  "rule_id": "R-STANDARD-CREDS",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/5900",
+  "stages": {
+   "direction": "Die Dokumentation des Produkts nennt die Standardkonten. Bei Anmeldeversuchen an Kontosperren denken.",
+   "question": "Welche Standardkonten liefert der Hersteller aus, und sind sie noch aktiv?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:45f14c2d0ac33528a28bb89f",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "vncviewer 192.168.56.101::5900",
+    "label": "vncviewer",
+    "parts": [
+     {
+      "target": false,
+      "text": "vncviewer "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     },
+     {
+      "target": false,
+      "text": "::"
+     },
+     {
+      "target": true,
+      "text": "5900"
+     }
+    ],
+    "rendered": true,
+    "template_id": "vncviewer",
+    "tool": "vncviewer",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "vncviewer"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "5900"
+     }
+    ]
+   }
+  ],
+  "title": "Gibt es auf 192.168.56.101:5900 Standardkonten?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Gibt es auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:5900"
+   },
+   {
+    "target": false,
+    "text": " Standardkonten?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "a6735fb8463dbfa8",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "70ab8b42842dff8959ae11ccf5e863766cfb0c7d1131bd1d92d5317652b48347",
+    "label": "nmap -sV -sC · 14:02 · Zeile 88",
+    "lines": [
+     87,
+     87
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-CRED-DEFAULT",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "Der Tomcat-Manager wird oft mit Standardkonten betrieben",
+  "rule_id": "R-STANDARD-CREDS",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/8180",
+  "stages": {
+   "direction": "Die Dokumentation des Produkts nennt die Standardkonten. Bei Anmeldeversuchen an Kontosperren denken.",
+   "question": "Welche Standardkonten liefert der Hersteller aus, und sind sie noch aktiv?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:6a31b7d22c60e058454af554",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 8180 --script http-default-accounts 192.168.56.101",
+    "label": "nmap-Skript http-default-accounts",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "8180"
+     },
+     {
+      "target": false,
+      "text": " --script http-default-accounts "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-http-default-accounts",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "8180"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   }
+  ],
+  "title": "Gibt es auf 192.168.56.101:8180 Standardkonten?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Gibt es auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:8180"
+   },
+   {
+    "target": false,
+    "text": " Standardkonten?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "5a45ef9546a5cff8",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "4ef25f7975286c73b66fa21e9fbec660627f22c135926560b8e1516b81463156",
+    "label": "nmap -sV -sC · 14:02 · Zeile 54",
+    "lines": [
+     53,
+     53
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-DB-ZUGRIFF",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "MySQL-Dienst ohne Anmeldeversuch",
+  "rule_id": "R-DB-ZUGRIFF",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/3306",
+  "stages": {
+   "direction": "Lab-Datenbanken erlauben oft root oder postgres ohne Passwort. Bei Erfolg liegen Konten und Hashes in den Systemtabellen.",
+   "question": "Nimmt die Datenbank Verbindungen von aussen an, etwa mit einem Standardkonto ohne Passwort?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:47753c571679203b6273c50d",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "mysql -h 192.168.56.101 -P 3306 -u root --skip-ssl",
+    "label": "mysql-Client als root ohne Passwort",
+    "parts": [
+     {
+      "target": false,
+      "text": "mysql -h "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     },
+     {
+      "target": false,
+      "text": " -P "
+     },
+     {
+      "target": true,
+      "text": "3306"
+     },
+     {
+      "target": false,
+      "text": " -u root --skip-ssl"
+     }
+    ],
+    "rendered": true,
+    "template_id": "mysql-root-nopass",
+    "tool": "mysql",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "mysql"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "3306"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 3306 --script mysql-empty-password 192.168.56.101",
+    "label": "nmap-Skript mysql-empty-password",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "3306"
+     },
+     {
+      "target": false,
+      "text": " --script mysql-empty-password "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-mysql-empty-password",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "3306"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   }
+  ],
+  "title": "Lässt die Datenbank auf 192.168.56.101:3306 eine Anmeldung zu?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Lässt die Datenbank auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:3306"
+   },
+   {
+    "target": false,
+    "text": " eine Anmeldung zu?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "c824b2d8e63c3876",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "56285221ea1350f4d3d9283c1c81a3c82c4132fd398deed5f4d24852cce27810",
+    "label": "nmap -sV -sC · 14:02 · Zeile 63",
+    "lines": [
+     62,
+     62
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-DB-ZUGRIFF",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "PostgreSQL-Dienst ohne Anmeldeversuch",
+  "rule_id": "R-DB-ZUGRIFF",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/5432",
+  "stages": {
+   "direction": "Lab-Datenbanken erlauben oft root oder postgres ohne Passwort. Bei Erfolg liegen Konten und Hashes in den Systemtabellen.",
+   "question": "Nimmt die Datenbank Verbindungen von aussen an, etwa mit einem Standardkonto ohne Passwort?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:4a39c889174b7b9e1b26fadf",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "psql -h 192.168.56.101 -p 5432 -U postgres",
+    "label": "psql als postgres",
+    "parts": [
+     {
+      "target": false,
+      "text": "psql -h "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     },
+     {
+      "target": false,
+      "text": " -p "
+     },
+     {
+      "target": true,
+      "text": "5432"
+     },
+     {
+      "target": false,
+      "text": " -U postgres"
+     }
+    ],
+    "rendered": true,
+    "template_id": "psql-postgres",
+    "tool": "psql",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "psql"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "5432"
+     }
+    ]
+   }
+  ],
+  "title": "Lässt die Datenbank auf 192.168.56.101:5432 eine Anmeldung zu?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Lässt die Datenbank auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:5432"
+   },
+   {
+    "target": false,
+    "text": " eine Anmeldung zu?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "2f7792926dfc1f8b",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "e73cffe5aabcf13668621151e9a0fc792211e492ef4230c368752d6d5ae4536e",
+    "label": "nmap -sV -sC · 14:02 · Zeile 25",
+    "lines": [
+     24,
+     24
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-SMTP-USER",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "question",
+  "origin": "rule",
+  "reason": "SMTP-Dienst ohne Prüfung auf Benutzer-Enumeration",
+  "rule_id": "R-SMTP-USER",
+  "service_id": "svc:ip:default/192.168.56.101|tcp/25",
+  "stages": {
+   "direction": "Die SMTP-Befehle VRFY, EXPN und RCPT TO bestätigen oft vorhandene Konten.",
+   "question": "Verrät der Mailserver, welche Benutzer es gibt?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:fa4314d72eb6368dfa5b9784",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "smtp-user-enum -M VRFY -U /usr/share/wordlists/metasploit/unix_users.txt -t 192.168.56.101 -p 25",
+    "label": "smtp-user-enum mit VRFY",
+    "parts": [
+     {
+      "target": false,
+      "text": "smtp-user-enum -M VRFY -U /usr/share/wordlists/metasploit/unix_users.txt -t "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     },
+     {
+      "target": false,
+      "text": " -p "
+     },
+     {
+      "target": true,
+      "text": "25"
+     }
+    ],
+    "rendered": true,
+    "template_id": "smtp-user-enum-vrfy",
+    "tool": "smtp-user-enum",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "smtp-user-enum"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "25"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 25 --script smtp-enum-users 192.168.56.101",
+    "label": "nmap-Skript smtp-enum-users",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "25"
+     },
+     {
+      "target": false,
+      "text": " --script smtp-enum-users "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-smtp-enum-users",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "25"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   }
+  ],
+  "title": "Lassen sich über SMTP auf 192.168.56.101:25 Benutzer ermitteln?",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Lassen sich über SMTP auf "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101:25"
+   },
+   {
+    "target": false,
+    "text": " Benutzer ermitteln?"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "3b3d97cda0a1a647",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "ffe0cb5cf075ac05e73a0956bd40be50ca2f8942221543a28b880e97439b679e",
+    "label": "nmap -sV -sC · 14:02 · Zeile 3",
+    "lines": [
+     2,
+     2
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-PORTS-TCP",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Bisher nur die häufigsten TCP-Ports gescannt",
+  "rule_id": "R-FULL-PORTSCAN",
+  "service_id": null,
+  "stages": {
+   "direction": "Ein Scan über alle 65535 TCP-Ports findet Dienste auf ungewöhnlichen Ports, etwa Hintertüren oder Verwaltungsoberflächen.",
+   "question": "Laufen auf diesem Host Dienste ausserhalb der häufigsten 1000 Ports?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:ec73661cb5353b0b3357891a",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p- -T4 192.168.56.101",
+    "label": "nmap: alle TCP-Ports",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p- -T4 "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-full-tcp",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   }
+  ],
+  "title": "Alle TCP-Ports von 192.168.56.101 scannen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Alle TCP-Ports von "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101"
+   },
+   {
+    "target": false,
+    "text": " scannen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "c2031137f9cc58bb",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "ffe0cb5cf075ac05e73a0956bd40be50ca2f8942221543a28b880e97439b679e",
+    "label": "nmap -sV -sC · 14:02 · Zeile 3",
+    "lines": [
+     2,
+     2
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-PORTS-UDP",
+  "host_id": "ip:default/192.168.56.101",
+  "host_label": "192.168.56.101",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Noch kein UDP-Scan für diesen Host",
+  "rule_id": "R-UDP-SCAN",
+  "service_id": null,
+  "stages": {
+   "direction": "Ein UDP-Scan der häufigsten Ports dauert länger als TCP, findet aber oft SNMP oder TFTP.",
+   "question": "Welche Dienste laufen über UDP, etwa SNMP, TFTP oder DNS?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:958a7b47f5e48c711c35f825",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "sudo nmap -sU --top-ports 100 192.168.56.101",
+    "label": "nmap: häufigste UDP-Ports (braucht root)",
+    "parts": [
+     {
+      "target": false,
+      "text": "sudo nmap -sU --top-ports 100 "
+     },
+     {
+      "target": true,
+      "text": "192.168.56.101"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-udp-top",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "192.168.56.101"
+     }
+    ]
+   }
+  ],
+  "title": "UDP-Ports von 192.168.56.101 scannen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "UDP-Ports von "
+   },
+   {
+    "target": true,
+    "text": "192.168.56.101"
+   },
+   {
+    "target": false,
+    "text": " scannen"
+   }
+  ],
+  "ts": "2026-10-08T12:02:12.000000Z"
+ }
+]

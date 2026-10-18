@@ -1,42 +1,96 @@
 /**
- * Zustand der App: Anmeldung, Status (REC, Sperre, KI, Präsentation),
- * SSE-Verbindung und der Store des aktiven Projekts.
+ * Zustand der Anwendung (Briefing 4.1, SCREENS 9, BEHAVIOR). Besitzer: ui-fundament.
  *
- * Regeln (Architektur 7.3, 7.4):
- * - Der REC-Knopf zeigt den neuen Zustand erst nach Bestätigung per SSE,
- *   weil auch Hotkey und CLI REC ändern.
- * - Beim Ereignis `project` wird der Projekt-Store verworfen und neu aufgebaut.
- * - Ohne aktives oder bei gesperrtem Projekt fragt die App /status alle 5 s ab.
+ * - Anmeldung: Code aus dem Fragment (main.ts) oder getippt; Fehler nur als Code.
+ * - Status: `/status` beim Start, nach jedem `terminal`/`project`/`presentation`-Ereignis, jede
+ *   Minute (Pause-Restzeit, Leerlauf) und ohne Projekt alle 5 s.
+ * - Ein globaler SSE-Strom pro Tab (auch ohne Projekt). Bei `project` wird der ProjectStore
+ *   verworfen und neu angelegt (E70); bei 401 geht es ohne Grund zur Anmeldung.
+ * - Keine Verbindung: nach 5 s ohne offenen Strom bzw. bei Netzfehlern `offline = true`; Daten
+ *   bleiben gedämpft sichtbar mit «Stand HH:MM», Aktionen sind gesperrt.
+ * - Pause und Fortsetzen: Anzeige «wartet auf Bestätigung», bis das Ereignis `terminal` den neuen
+ *   Zustand meldet (nach 5 s ohne Ereignis lädt sie `/status`). Lehnt der Server ab (403 `policy`,
+ *   E117: mehr als 30 min Web-Pause in der gleitenden Stunde), bleibt die Grenze am Terminal sichtbar
+ *   (`pauseRefused`), bis der Status ein neues Budget meldet.
+ * - Scope-Warnung (Briefing 4.5): eine Meldung beim Eintreffen eines neuen, nicht quittierten
+ *   Befehls (`ui.scopeCard`), das Kennzeichen in der Kopfzeile bis zum Quittieren
+ *   (`PUT /ui/scope-ack`, kein Browser-Speicher).
+ * - Präsentationsmodus: umschalten über Menü, Palette und Shift+P; angezeigt wird er erst nach dem
+ *   SSE-Ereignis `presentation` (bzw. dem nächsten `/status`), mit einer kurzen Meldung.
  */
 import type { Backend } from '../api/backend';
-import { isApiError } from '../api/client';
+import { isApiError, type ClientErrorCode } from '../api/client';
 import type { ConnectionState } from '../api/sse';
-import type { Status, StreamEvent, StreamPayloads } from '../api/types';
+import type { Profile, Status, StreamEvent } from '../api/types';
+import { t } from '../i18n';
+import { errorText } from '../util/errors';
+import type { AppApi } from './ctx';
+import { PrefsStore } from './prefs.svelte';
 import { ProjectStore } from './project.svelte';
+import { UiStore } from './ui.svelte';
 
 export type AuthState = 'init' | 'login' | 'ready';
-type ProgressInfo = StreamPayloads['progress'];
+export type Phase = 'boot' | 'login' | 'no_project' | 'locked' | 'project';
+export type PendingPause = { kind: 'pause' | 'resume'; since: number };
 
-export class AppState {
+const OFFLINE_AFTER_MS = 5000;
+
+export class AppState implements AppApi {
   readonly backend: Backend;
+  readonly ui = new UiStore();
+  readonly prefs: PrefsStore;
+
   auth = $state<AuthState>('init');
-  status = $state<Status | null>(null);
+  loginError = $state<ClientErrorCode | null>(null);
+  status = $state.raw<Status | null>(null);
+  /** Zeitpunkt des letzten erfolgreichen /status (Anzeige «Stand HH:MM» ohne Verbindung) */
+  lastGoodAt = $state<number | null>(null);
   connection = $state<ConnectionState>('closed');
-  project = $state<ProjectStore | null>(null);
-  /** gewünschter REC-Zustand, bis SSE ihn bestätigt */
-  recPending = $state<boolean | null>(null);
-  jobs = $state.raw<Record<string, ProgressInfo>>({});
-  error = $state<string | null>(null);
-  loginError = $state<string | null>(null);
+  offline = $state(false);
+  project = $state.raw<ProjectStore | null>(null);
+  pendingPause = $state<Record<string, PendingPause>>({});
+  /** Terminals, deren Web-Pause der Server abgelehnt hat (E117), mit dem Budget zu dem Zeitpunkt */
+  pauseRefused = $state<Record<string, number | null>>({});
 
   private unsubscribe: (() => void) | null = null;
+  private offUnauthorized: (() => void) | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private recTimer: ReturnType<typeof setTimeout> | null = null;
+  private offlineTimer: ReturnType<typeof setTimeout> | null = null;
+  private pauseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private stopped = false;
+  /** cmd_id der zuletzt gemeldeten Scope-Warnung (nur im Speicher dieses Tabs) */
+  private scopeShownFor: string | null = null;
+  private readonly onVisibility = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') void this.refreshStatus();
+  };
 
   constructor(backend: Backend) {
     this.backend = backend;
-    backend.onUnauthorized(() => this.toLogin());
+    this.prefs = new PrefsStore(backend, this.ui);
+    this.offUnauthorized = backend.onUnauthorized(() => this.toLogin());
+  }
+
+  get presentation(): boolean {
+    return this.status?.presentation ?? false;
+  }
+
+  get profile(): Profile | null {
+    return this.status?.project?.profile ?? null;
+  }
+
+  /** Mock-Daten statt Daemon (nur Mock-Build und Dev-Server) */
+  get mock(): boolean {
+    return this.backend.kind === 'mock';
+  }
+
+  get phase(): Phase {
+    if (this.auth === 'init') return 'boot';
+    if (this.auth === 'login') return 'login';
+    const s = this.status;
+    if (!s) return 'boot';
+    if (s.project) return 'project';
+    if (s.locked || (s.active && !s.active.stopped)) return 'locked';
+    return 'no_project';
   }
 
   async start(code: string | null = null): Promise<void> {
@@ -48,162 +102,308 @@ export class AppState {
       }
     }
     if (this.backend.needsLogin()) {
+      // Vorlieben gibt es erst nach der Anmeldung (Bearer); bis dahin folgt die Seite dem System.
       this.auth = 'login';
       return;
     }
-    this.auth = 'ready';
-    await this.refreshStatus();
+    await this.enter();
   }
 
-  async login(code: string): Promise<void> {
+  async login(code: string): Promise<boolean> {
     this.loginError = null;
     try {
       await this.backend.login(code);
-      this.auth = 'ready';
-      await this.refreshStatus();
     } catch (e) {
       this.loginError = isApiError(e) ? e.code : 'internal';
+      return false;
+    }
+    await this.enter();
+    return true;
+  }
+
+  private async enter(): Promise<void> {
+    this.auth = 'ready';
+    this.loginError = null;
+    void this.prefs.load();
+    this.subscribe();
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibility);
+      document.addEventListener('visibilitychange', this.onVisibility);
+    }
+    await this.refreshStatus();
+    this.ensurePolling();
+  }
+
+  /** Fehler der Anmeldung vergessen (neuer Versuch nach «zu viele Versuche»). */
+  clearLoginError(): void {
+    this.loginError = null;
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await this.backend.logout();
+    } finally {
+      this.toLogin();
     }
   }
 
+  /** Sitzung beendet (401, Abmelden): Anmeldung ohne Grund (Briefing 4.1), alle Daten weg. */
   private toLogin(): void {
     this.closeProject();
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     this.status = null;
+    this.loginError = null;
+    this.offline = false;
+    if (this.offlineTimer) clearTimeout(this.offlineTimer);
+    this.offlineTimer = null;
+    this.pendingPause = {};
+    this.pauseRefused = {};
+    this.scopeShownFor = null;
+    this.ui.closeDialog();
+    this.ui.closePopover();
+    this.ui.scopeCard = false;
     this.auth = 'login';
   }
 
+  private subscribe(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = this.backend.subscribe({
+      onEvent: (ev) => this.handleEvent(ev),
+      onState: (st) => this.setConnection(st),
+    });
+  }
+
+  private setConnection(st: ConnectionState): void {
+    this.connection = st;
+    if (st === 'open') {
+      if (this.offlineTimer) clearTimeout(this.offlineTimer);
+      this.offlineTimer = null;
+      if (this.offline) {
+        this.offline = false;
+        void this.refreshStatus();
+      }
+    } else if (st === 'retrying' && !this.offlineTimer && !this.offline) {
+      this.offlineTimer = setTimeout(() => {
+        this.offlineTimer = null;
+        if (this.connection !== 'open') this.offline = true;
+      }, OFFLINE_AFTER_MS);
+    }
+  }
+
   async refreshStatus(): Promise<void> {
+    if (this.auth !== 'ready') return;
     try {
       const s = await this.backend.status();
+      if (this.auth !== 'ready') return;
+      const before = this.status?.presentation;
       this.status = s;
-      this.error = null;
+      this.lastGoodAt = Date.now();
+      // Ein REST-Fehler allein macht offline; zurück, sobald Status und Strom wieder gehen.
+      if (this.offline && this.connection === 'open') this.offline = false;
+      if (before !== undefined && before !== s.presentation) this.announcePresentation(s.presentation);
+      this.syncPending(s);
+      this.syncRefused(s);
+      this.syncScopeWarning(s);
       this.syncProject();
     } catch (e) {
-      this.error = isApiError(e) ? e.code : 'internal';
-      this.connection = 'retrying';
-      this.ensurePolling();
+      if (isApiError(e, 'network') || isApiError(e, 'timeout') || isApiError(e, 'bad_response')) this.offline = true;
     }
+  }
+
+  /** Neue, nicht quittierte Scope-Warnung: einmal als Meldung zeigen (Briefing 4.5). */
+  private syncScopeWarning(s: Status): void {
+    const w = s.scope_warning;
+    if (!w || w.acked === true) {
+      if (this.ui.scopeCard && (!w || w.acked === true)) this.ui.scopeCard = false;
+      return;
+    }
+    if (w.cmd_id !== this.scopeShownFor) {
+      this.scopeShownFor = w.cmd_id;
+      this.ui.scopeCard = true;
+    }
+  }
+
+  /** Quittiert die Scope-Warnung auf dem Server (kein Browser-Speicher); Fehler als Meldung. */
+  async ackScopeWarning(): Promise<boolean> {
+    const w = this.status?.scope_warning;
+    const p = this.project;
+    if (!w || !p || this.offline) return false;
+    try {
+      await this.backend.ackScopeWarning(p.pid, w.cmd_id);
+    } catch (e) {
+      this.ui.notify('error', errorText(e));
+      return false;
+    }
+    this.ui.scopeCard = false;
+    if (this.status?.scope_warning?.cmd_id === w.cmd_id) {
+      this.status = { ...this.status, scope_warning: { ...w, acked: true } };
+    }
+    void this.refreshStatus();
+    return true;
   }
 
   /** Projekt-Store an den Status anpassen: öffnen, verwerfen oder warten. */
   private syncProject(): void {
     const s = this.status;
-    const pid = s && !s.locked ? (s.project?.id ?? null) : null;
+    const pid = s?.project?.id ?? null;
     if (this.project && this.project.pid !== pid) this.closeProject();
-    if (pid && !this.project) {
-      this.stopPolling();
-      const store = new ProjectStore(pid, this.backend);
+    if (pid && s?.project && !this.project) {
+      const store = new ProjectStore(pid, s.project.slug, this, s.generation);
       this.project = store;
-      this.unsubscribe = this.backend.subscribe(pid, {
-        onEvent: (ev) => this.handleEvent(ev),
-        onState: (st) => {
-          this.connection = st;
-        },
-      });
       void store.loadAll();
     }
-    if (!pid) this.ensurePolling();
   }
 
   private closeProject(): void {
-    this.unsubscribe?.();
-    this.unsubscribe = null;
     this.project?.dispose();
     this.project = null;
-    this.jobs = {};
   }
 
   private ensurePolling(): void {
     if (this.pollTimer || this.stopped) return;
-    this.pollTimer = setInterval(() => void this.refreshStatus(), 5000);
-  }
-
-  private stopPolling(): void {
-    if (this.pollTimer) clearInterval(this.pollTimer);
-    this.pollTimer = null;
+    // Ohne Projekt und ohne Verbindung alle 5 s (Briefing 8), sonst jede Minute (Restzeit, Leerlauf).
+    let tick = 0;
+    this.pollTimer = setInterval(() => {
+      tick++;
+      if (this.auth !== 'ready') return;
+      if (!this.project || this.offline || tick % 12 === 0) void this.refreshStatus();
+    }, 5000);
   }
 
   handleEvent(ev: StreamEvent): void {
-    const p = this.project;
     switch (ev.name) {
-      case 'changes':
-        void p?.onChanges(ev.data.generation);
-        break;
-      case 'rec':
-        if (this.status) this.status = { ...this.status, rec: ev.data };
-        this.recPending = null;
-        if (this.recTimer) clearTimeout(this.recTimer);
-        break;
-      case 'terminal':
-        p?.refresh('terminals', 'timeline');
-        break;
-      case 'inbox':
-        p?.refresh('inbox');
-        break;
-      case 'suggestion':
-        p?.refresh('suggestions');
-        break;
-      case 'progress': {
-        const jobs = { ...this.jobs, [ev.data.job_id]: ev.data };
-        this.jobs = jobs;
-        if (ev.data.status === 'done' || ev.data.status === 'failed' || ev.data.status === 'refused') {
-          const id = ev.data.job_id;
-          setTimeout(() => {
-            const { [id]: _done, ...rest } = this.jobs;
-            this.jobs = rest;
-          }, 5000);
-        }
-        break;
-      }
-      case 'presentation':
-        if (this.status) this.status = { ...this.status, presentation: ev.data.on };
-        p?.refresh('credentials');
-        if (p) p.version++;
-        break;
       case 'project':
-        // Projekt gewechselt, gesperrt oder geschlossen: alles verwerfen.
+        // Projekt gewechselt, gesperrt oder geschlossen: alles verwerfen (E70).
         this.closeProject();
         void this.refreshStatus();
+        return;
+      case 'terminal':
+        void this.refreshStatus();
         break;
-      case 'reset':
-        void p?.onReset();
-        break;
-    }
-  }
-
-  /** REC umschalten; die Anzeige wechselt erst mit dem SSE-Ereignis `rec`. */
-  async toggleRec(): Promise<void> {
-    const current = this.status?.rec.on ?? false;
-    this.recPending = !current;
-    try {
-      await this.backend.setRec(!current);
-      if (this.recTimer) clearTimeout(this.recTimer);
-      // Bleibt die Bestätigung aus, Status direkt nachladen.
-      this.recTimer = setTimeout(() => {
-        if (this.recPending !== null) {
-          this.recPending = null;
-          void this.refreshStatus();
+      case 'presentation':
+        if (this.status && this.status.presentation !== ev.data.on) {
+          this.status = { ...this.status, presentation: ev.data.on };
+          this.announcePresentation(ev.data.on);
         }
-      }, 5000);
+        break;
+      case 'prefs':
+        void this.prefs.load();
+        return;
+      case 'progress':
+        return;
+      default:
+        break;
+    }
+    this.project?.dispatch(ev);
+  }
+
+  private announcePresentation(on: boolean): void {
+    this.ui.notify('info', on ? t('present.on') : t('present.off'), 2500);
+  }
+
+  // ------------------------------------------------------------------ Pause (E22, E107, E117)
+  /** Abgelehnte Pausen vergessen, sobald der Status wieder genug Budget meldet. */
+  private syncRefused(s: Status): void {
+    const ids = Object.keys(this.pauseRefused);
+    if (ids.length === 0) return;
+    const next = { ...this.pauseRefused };
+    let changed = false;
+    for (const tid of ids) {
+      const term = s.terminals.find((x) => x.terminal_id === tid);
+      const left = term?.web_pause_left_s;
+      const was = this.pauseRefused[tid];
+      if (!term || (typeof left === 'number' && typeof was === 'number' && left > was) || (typeof left === 'number' && left >= 600)) {
+        delete next[tid];
+        changed = true;
+      }
+    }
+    if (changed) this.pauseRefused = next;
+  }
+
+  private syncPending(s: Status): void {
+    const next = { ...this.pendingPause };
+    let changed = false;
+    for (const [tid, p] of Object.entries(this.pendingPause)) {
+      const term = s.terminals.find((x) => x.terminal_id === tid);
+      const done = !term || (p.kind === 'pause' ? term.state === 'paused' : term.state !== 'paused');
+      if (done) {
+        delete next[tid];
+        const tm = this.pauseTimers.get(tid);
+        if (tm) clearTimeout(tm);
+        this.pauseTimers.delete(tid);
+        changed = true;
+      }
+    }
+    if (changed) this.pendingPause = next;
+  }
+
+  private markPending(tid: string, kind: PendingPause['kind']): void {
+    this.pendingPause = { ...this.pendingPause, [tid]: { kind, since: Date.now() } };
+    const old = this.pauseTimers.get(tid);
+    if (old) clearTimeout(old);
+    this.pauseTimers.set(
+      tid,
+      setTimeout(() => {
+        const { [tid]: _gone, ...rest } = this.pendingPause;
+        this.pendingPause = rest;
+        void this.refreshStatus();
+      }, 5000),
+    );
+  }
+
+  /** Pause pro Terminal (Standard 10 min). Gibt den Fehlercode zurück (z. B. 'policy' bei E117). */
+  async pause(tid: string, minutes = 10): Promise<ClientErrorCode | null> {
+    if (this.offline) return 'network';
+    if (this.pendingPause[tid]) return null;
+    try {
+      await this.backend.pause(tid, minutes);
+      this.markPending(tid, 'pause');
+      return null;
     } catch (e) {
-      this.recPending = null;
-      this.error = isApiError(e) ? e.code : 'internal';
+      const code = isApiError(e) ? e.code : 'internal';
+      if (code === 'policy') {
+        const term = this.status?.terminals.find((x) => x.terminal_id === tid);
+        this.pauseRefused = { ...this.pauseRefused, [tid]: term?.web_pause_left_s ?? null };
+        this.ui.notify('error', t('rec.budgetEmpty'));
+      } else {
+        this.ui.notify('error', errorText(e));
+      }
+      return code;
     }
   }
 
-  async togglePresentation(): Promise<void> {
-    const on = !(this.status?.presentation ?? false);
+  async resume(tid: string): Promise<ClientErrorCode | null> {
+    if (this.offline) return 'network';
+    if (this.pendingPause[tid]) return null;
     try {
-      await this.backend.setPresentation(on);
+      await this.backend.resume(tid);
+      this.markPending(tid, 'resume');
+      return null;
     } catch (e) {
-      this.error = isApiError(e) ? e.code : 'internal';
+      this.ui.notify('error', errorText(e));
+      return isApiError(e) ? e.code : 'internal';
+    }
+  }
+
+  /** Präsentationsmodus umschalten (Menü, Palette, Shift+P); die Anzeige folgt dem SSE-Ereignis. */
+  async togglePresentation(): Promise<void> {
+    if (this.offline || this.auth !== 'ready') return;
+    try {
+      await this.backend.setPresentation(!this.presentation);
+    } catch (e) {
+      this.ui.notify('error', errorText(e));
     }
   }
 
   stop(): void {
     this.stopped = true;
-    this.stopPolling();
-    if (this.recTimer) clearTimeout(this.recTimer);
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibility);
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.offlineTimer) clearTimeout(this.offlineTimer);
+    for (const tm of this.pauseTimers.values()) clearTimeout(tm);
+    this.unsubscribe?.();
+    this.offUnauthorized?.();
     this.closeProject();
   }
 }

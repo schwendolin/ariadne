@@ -39,6 +39,7 @@ __all__ = [
     "CLAIM_COLS",
     "UNIT_COLS",
     "chunks",
+    "term_ref",
 ]
 
 CLAIM_COLS = (
@@ -127,6 +128,24 @@ def with_secrets(bag: Bag, conn: Any) -> Bag:
     if bag.presentation:
         known += prompt_secret_texts(conn)
     return bag.with_known(known)
+
+
+# --------------------------------------------------------------------------- Terminals
+
+
+def term_ref(tid: Any, refs: Mapping[str, Mapping[str, Any]], bag: Bag) -> dict[str, Any] | None:
+    """TermRef (web-api.md 18.1): Nummer und Name aus :func:`ariadne.ingest.queries.term_refs`.
+
+    Ein Terminal ohne Ereignis im offenen Projekt (ungebunden, ``held``) hat Nummer und Name ``null``."""
+    if not isinstance(tid, str) or not tid:
+        return None
+    r = refs.get(tid) or {}
+    ordinal = r.get("ordinal")
+    return {
+        "terminal_id": tid,
+        "ordinal": ordinal if isinstance(ordinal, int) and not isinstance(ordinal, bool) else None,
+        "label": bag(r.get("label")) if isinstance(r.get("label"), str) else None,
+    }
 
 
 # --------------------------------------------------------------------------- Kontext

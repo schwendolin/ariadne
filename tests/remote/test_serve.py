@@ -560,19 +560,80 @@ def test_t12_code_with_terminal_real_daemon(paths, operator, xdg, tmp_path):
     run(paths, operator, scenario, extensions=[ext], ingest=False)
 
 
-def test_restore_with_config_added_names_the_daemon_restart(paths, io_streams, monkeypatch):
-    """Befund F9 (Anleitung): Kam ``config.toml`` zurück, sagt ``restore`` vom Mac, dass ein schon
-    laufender Daemon sie erst nach einem Neustart liest (etwa ``[ui] port``)."""
+def _gone(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
+    except OSError:
+        return True
+
+
+def test_e118_restore_restarts_the_locked_daemon_with_new_config(paths, io_streams, monkeypatch):
+    """E118 (ersetzt den Hinweis aus Befund F9): Nach ``remote serve restore`` beendet sich ein
+    laufender, gesperrter Daemon und startet mit der zurückgespielten ``config.toml`` neu."""
+    from ariadne.backup.api import RestoreResult
+    from ariadne.daemon.client import CtlClient
+    from ariadne.daemon.main import spawn_detached
+
+    procs: list[subprocess.Popen[Any]] = []
+    real_popen = subprocess.Popen
+
+    class KeepPopen(real_popen):  # type: ignore[misc,valid-type]
+        """Merkt sich die Daemon-Prozesse, damit der Test sie am Ende abräumt (kein ResourceWarning)."""
+
+        def __init__(self, *a: Any, **k: Any) -> None:
+            super().__init__(*a, **k)
+            procs.append(self)
+
+    monkeypatch.setattr(subprocess, "Popen", KeepPopen)
+    assert spawn_detached(paths, timeout=15)
+    client = CtlClient(paths.ctl_sock)
+    old_pid = client.call("ping")["pid"]
+    assert client.call("status")["locked"] is True
+
+    def fake_restore(inp, p):
+        p.config_dir.mkdir(parents=True, exist_ok=True)
+        p.config_file.write_text("[recording]\nidle_end_hours = 77\n", encoding="utf-8")
+        return RestoreResult(projects=("lame",), operator_restored=True, config_added=("config.toml",))
+
+    out, err, _ = io_streams()
+    monkeypatch.setattr(sys, "stdin", Stream(data=b"strom"))
+    monkeypatch.setattr("ariadne.backup.api.restore_from_stream", fake_restore)
+    try:
+        assert serve.main(paths, env("restore")) == 0, err.getvalue()
+        assert "Daemon mit neuer Konfiguration neu gestartet. Weiter: ariadne-mac unlock" in out.getvalue()
+        new_pid = client.call("ping")["pid"]
+        assert new_pid != old_pid
+        assert _gone(old_pid)  # der alte Daemon ist beendet (höchstens noch ein Zombie dieses Tests)
+        assert client.call("status")["idle"]["end_after_s"] == 77 * 3600  # neue Einstellung gilt
+    finally:
+        with contextlib.suppress(Exception):
+            client.call("shutdown")
+        for proc in procs:
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+
+def test_e118_restore_without_daemon_and_with_stuck_daemon(paths, io_streams, monkeypatch):
     from ariadne.backup.api import RestoreResult
 
     out, err, _ = io_streams()
     monkeypatch.setattr(sys, "stdin", Stream(data=b"strom"))
     monkeypatch.setattr(
         "ariadne.backup.api.restore_from_stream",
-        lambda inp, p: RestoreResult(projects=("lame",), operator_restored=True,
-                                     config_added=("config.toml",)),
+        lambda inp, p: RestoreResult(
+            projects=("lame",), operator_restored=True, config_added=("config.toml",)
+        ),
     )
-    monkeypatch.setattr("ariadne.daemon.client.CtlClient.ping", lambda self: True)
     assert serve.main(paths, env("restore")) == 0, err.getvalue()
-    assert "gelten erst nach einem Neustart des Daemons" in out.getvalue()
-    assert "ariadne daemon stop" in out.getvalue()
+    assert "gelten beim nächsten Start des Daemons. Weiter: ariadne-mac unlock" in out.getvalue()
+    # ein Daemon, der sich nicht beendet: klare Anweisung statt stillem Warten
+    out, err, _ = io_streams()
+    monkeypatch.setattr(sys, "stdin", Stream(data=b"strom"))
+    monkeypatch.setattr("ariadne.daemon.client.CtlClient.ping", lambda self: True)
+    monkeypatch.setattr(serve, "RESTART_WAIT_S", 0.3)
+    assert serve.main(paths, env("restore")) == 0, err.getvalue()
+    assert "hat sich nicht beendet: in der Kali ariadne daemon stop" in out.getvalue()

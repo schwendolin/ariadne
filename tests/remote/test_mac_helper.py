@@ -7,6 +7,7 @@ jeden Aufruf), ``open``, ``fdesetup``, ``lsof``, ``sleep`` (lange Pausen sofort)
 from __future__ import annotations
 
 import os
+import pty
 import shutil
 import signal
 import subprocess
@@ -223,6 +224,29 @@ def _wait(cond, seconds: float = 3.0) -> bool:
     return cond()
 
 
+def run_tty(mac: Mac, *args: str, answer: str) -> subprocess.CompletedProcess[str]:
+    """Wie ``Mac.run``, aber stdin ist ein Terminal (pty), auf dem ``answer`` und Enter stehen."""
+    master, slave = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            ["zsh", str(MAC_HELPER), *args],
+            stdin=slave,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=mac.env(),
+        )
+        os.close(slave)
+        slave = -1
+        os.write(master, (answer + "\n").encode())
+        out, err = proc.communicate(timeout=60)
+    finally:
+        if slave >= 0:
+            os.close(slave)
+        os.close(master)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
 def assert_safe_ssh(mac: Mac) -> None:
     """R13: jedes ssh mit -F ariadne.conf, ControlMaster=no, ControlPath=none, nie -g."""
     calls = mac.ssh_calls()
@@ -261,10 +285,20 @@ def test_t15_start_one_connection_start_file_and_stop(mac):
     pid = mac.tunnel_pid()
     assert pid and _alive(pid)
     assert (mac.state / "tunnel.pid").read_text().strip() == str(pid)
-    # ein zweites start (Neuanmeldung nach lock oder 12 h, F1): Tunnel neu, ohne revoke und lock
+    # ein zweites start ohne Terminal: Rückfrage gilt als Nein (E116), nichts ändert sich
     again = mac.run("start")
     assert again.returncode == 0, again.stdout + again.stderr
-    assert "neu aufgebaut (ohne Sperren)" in again.stdout
+    assert "Tunnel läuft schon. Neu aufbauen? [j/N]" in again.stderr and "Nichts geändert" in again.stdout
+    assert [c[-1] for c in mac.remote_calls()] == ["code"] and _alive(pid)
+    # mit Terminal und «n» (oder nur Enter): ebenfalls nichts
+    for answer in ("n", ""):
+        res = run_tty(mac, "start", answer=answer)
+        assert res.returncode == 0 and "Nichts geändert" in res.stdout, res.stdout + res.stderr
+    assert [c[-1] for c in mac.remote_calls()] == ["code"] and _alive(pid)
+    # mit «j» (Neuanmeldung nach lock oder 12 h, F1): Tunnel neu, ohne revoke und lock
+    again = run_tty(mac, "start", answer="j")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "neu aufgebaut (ohne Sperren" in again.stdout
     assert [c[-1] for c in mac.remote_calls()] == ["code", "code"]
     assert _wait(lambda: not _alive(pid))
     pid = mac.tunnel_pid()

@@ -20,7 +20,14 @@ function files(dir: string): string[] {
 
 describe('Quelltext-Hygiene', () => {
   it('enthält keine unsichtbaren oder richtungsumkehrenden Zeichen', () => {
-    const all = [...files(join(root, 'src')), ...files(join(root, 'tests')), join(root, 'index.html'), join(root, 'README.md')];
+    const all = [
+      ...files(join(root, 'src')),
+      ...files(join(root, 'tests')),
+      ...files(join(root, 'e2e')),
+      join(root, 'index.html'),
+      join(root, 'README.md'),
+      join(root, 'playwright.config.ts'),
+    ];
     const offenders = all.filter((p) => {
       try {
         return HIDDEN.test(readFileSync(p, 'utf8'));

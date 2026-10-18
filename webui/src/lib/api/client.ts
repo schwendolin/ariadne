@@ -8,6 +8,10 @@
  * - Abbruch über AbortSignal; zusätzlich ein Zeitlimit pro Aufruf.
  * - Pfadsegmente werden einzeln kodiert. Kennungen wie `ip:default/10.10.10.3`
  *   enthalten `/` und `:` und landen als `%2F`/`%3A` im Pfad.
+ * - Modus `cors` (web-api.md 17, «UI-Bau»): Nur so schickt der Browser trotz
+ *   `Referrer-Policy: no-referrer` bei schreibenden Anfragen den echten `Origin` statt `null`;
+ *   der Daemon verlangt ihn (R12).
+ * - Kein Token in URL, Log oder Konsole. Fehlermeldungen enthalten nie Antworttexte.
  */
 import type { TokenStore } from './auth';
 import type { ApiErrorBody, ApiErrorCode, SessionResponse } from './types';
@@ -18,15 +22,13 @@ export class ApiError extends Error {
   readonly code: ClientErrorCode;
   readonly status: number;
   readonly detail: ApiErrorBody['error']['detail'] | null;
-  readonly requestId: string | null;
 
-  constructor(code: ClientErrorCode, status: number, message: string, detail: ApiErrorBody['error']['detail'] | null = null, requestId: string | null = null) {
+  constructor(code: ClientErrorCode, status: number, message: string, detail: ApiErrorBody['error']['detail'] | null = null) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.status = status;
     this.detail = detail;
-    this.requestId = requestId;
   }
 }
 
@@ -38,17 +40,22 @@ const STATUS_CODES: Record<number, ApiErrorCode> = {
   401: 'unauthorized',
   403: 'forbidden',
   404: 'not_found',
+  405: 'method',
   409: 'conflict',
+  413: 'too_large',
+  421: 'host',
   422: 'validation',
   423: 'locked',
   429: 'rate_limited',
   500: 'internal',
-  503: 'llm_unavailable',
+  501: 'not_implemented',
+  503: 'unavailable',
 };
 
 const KNOWN_CODES = new Set<string>([
-  'unauthorized', 'forbidden', 'policy', 'budget', 'not_found', 'no_project', 'project_mismatch',
-  'conflict', 'locked', 'validation', 'rate_limited', 'llm_unavailable', 'internal',
+  'unauthorized', 'forbidden', 'policy', 'not_found', 'method', 'no_project', 'project_mismatch',
+  'conflict', 'too_large', 'host', 'validation', 'locked', 'rate_limited', 'not_implemented',
+  'unavailable', 'internal', 'clipboard_tool', 'clipboard_session',
 ]);
 
 export interface ApiClientOptions {
@@ -64,8 +71,10 @@ export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined | null | string[]>;
   body?: unknown;
   signal?: AbortSignal;
-  /** json (Standard), blob (Bilder) oder none (202/204) */
+  /** json (Standard), blob (log.txt) oder none (202/204) */
   expect?: 'json' | 'blob' | 'none';
+  /** fetch keepalive (für PUT /ui/seen beim Unsichtbarwerden des Tabs) */
+  keepalive?: boolean;
   /** ohne Token senden (nur /session) */
   anonymous?: boolean;
   timeoutMs?: number;
@@ -163,7 +172,8 @@ export class ApiClient {
         cache: 'no-store',
         redirect: 'error',
         referrerPolicy: 'no-referrer',
-        mode: 'same-origin',
+        mode: 'cors',
+        keepalive: opts.keepalive ?? false,
       });
     } catch (e) {
       link.done();
@@ -212,7 +222,7 @@ export class ApiClient {
       this.onUnauthorized?.();
     }
     const message = typeof parsed?.error?.message === 'string' ? parsed.error.message : `HTTP ${res.status}`;
-    return new ApiError(code, res.status, message, parsed?.error?.detail ?? null, parsed?.error?.request_id ?? null);
+    return new ApiError(code, res.status, message, parsed?.error?.detail ?? null);
   }
 
   get<T>(path: string, opts?: RequestOptions): Promise<T> {

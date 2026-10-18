@@ -206,7 +206,7 @@ Der Browser ist dein normaler Browser (E93). Erweiterungen mit Zugriff auf alle 
 
 **Pause.** Gehst du weg: in der Kali `ariadne lock` oder vom Mac `ssh -F ~/.ssh/ariadne.conf kali-sl lock`. Das beendet auch die Anmeldung im Dashboard. Zurück: `ariadne-mac unlock`, dann `ariadne-mac start` (siehe «Neu anmelden»).
 
-**Neu anmelden.** Nach `lock`, nach dem Ende eines Projekts oder nach 12 Stunden zeigt das Dashboard wieder die Anmeldung, obwohl der Tunnel noch steht. Dann einfach wieder `ariadne-mac start`: Läuft der eigene Tunnel noch, baut es ihn neu auf und holt einen neuen Code, **ohne** zu sperren. `ariadne-mac stop` ist dafür falsch, es sperrt Ariadne.
+**Neu anmelden.** Nach `lock`, nach dem Ende eines Projekts oder nach 12 Stunden zeigt das Dashboard wieder die Anmeldung, obwohl der Tunnel noch steht. Dann wieder `ariadne-mac start`: Läuft der eigene Tunnel noch, fragt es «Tunnel läuft schon. Neu aufbauen? [j/N]» (E116). Mit `j` baut es ihn neu auf und holt einen neuen Code, **ohne** zu sperren; ein noch offener alter Dashboard-Tab verliert dabei seine Anmeldung. Mit Enter oder `n` bleibt alles, wie es ist. Ohne Terminal (etwa aus einem Skript) gilt die Antwort als Nein. `ariadne-mac stop` ist dafür falsch, es sperrt Ariadne.
 
 **Session beenden:**
 
@@ -242,7 +242,7 @@ Die erste Zeile vergisst den alten Hostkey. Bei der zweiten nur `yes`, wenn der 
 ariadne-mac restore ~/Ariadne-Backups/kali-sl-DATUM.age
 ```
 
-Fragt, ob du den Hostkey geprüft hast, dann nach der Passphrase von `mac.key.age`. Der entschlüsselte Strom existiert nur in der Pipe. Die Kali prüft Manifest, Version und alle Hashes und schreibt erst, wenn alles stimmt. Die Ausgabe zeigt pro Projekt «Kettenkopf SLUG: seq N HASH»: **Diesen Wert vergleichst du mit dem, den `ariadne-mac stop` bei der Sicherung angezeigt hat.** Kam `config.toml` mit zurück und lief der Daemon schon, gelten deren Einstellungen (etwa `[ui] port`) erst nach `ariadne daemon stop` in der Kali; die Ausgabe sagt es dann.
+Fragt, ob du den Hostkey geprüft hast, dann nach der Passphrase von `mac.key.age`. Der entschlüsselte Strom existiert nur in der Pipe. Die Kali prüft Manifest, Version und alle Hashes und schreibt erst, wenn alles stimmt. Die Ausgabe zeigt pro Projekt «Kettenkopf SLUG: seq N HASH»: **Diesen Wert vergleichst du mit dem, den `ariadne-mac stop` bei der Sicherung angezeigt hat.** Lief der Daemon in der Kali schon (gesperrt, denn ohne Tresor lässt er sich nicht entsperren), beendet er sich danach selbst und startet mit der zurückgespielten `config.toml` neu (E118); die Ausgabe endet dann mit «Daemon mit neuer Konfiguration neu gestartet. Weiter: ariadne-mac unlock». Lief keiner, gelten die Einstellungen beim nächsten Start. Beendet er sich nicht innerhalb von 10 Sekunden, sagt die Ausgabe, dass du in der Kali `ariadne daemon stop` tippen sollst.
 
 6. **Ketten prüfen:** `ariadne-mac unlock`, dann in der Kali `ariadne start SLUG` (ohne `--target`, das Projekt gibt es ja) und `ariadne verify`. `verify` muss «in Ordnung» melden und zeigt «Kettenkopf beim letzten Schliessen … (in der Kette)»: Das ist der gesicherte Kopf, und er muss derselbe sein wie oben. Der Kettenkopf in der ersten Zeile von `verify` ist dagegen immer neuer, weil das Öffnen Einträge anhängt; ihn vergleichst du nicht.
 
@@ -265,12 +265,13 @@ ariadne restore --from-file DATEI.age --identity -
 | `[!!] Hostkey der Kali unbekannt` | der erste Login fehlt | Schritt 6, «Erster Login» |
 | `Permission denied (publickey)` | Schlüssel nicht eingetragen, falscher `User`, oder die Verbindung kommt nicht aus dem Tailnet | `HostName` muss die `100.…`-Adresse sein; in der Kali `ariadne remote check` |
 | `ssh: connect to host … timed out` | Tailscale auf Mac oder Kali nicht verbunden | `tailscale status` auf beiden Seiten |
-| `[!!] Port 7330 belegt` | ein anderes Programm oder ein Tunnel, den `ariadne-mac` nicht kennt (von Hand gestartet), hält den Port | `lsof -nP -iTCP:7330 -sTCP:LISTEN` zeigt wer; das Programm bzw. den `ssh` von Hand beenden. Den eigenen Tunnel baut `ariadne-mac start` selbst neu auf |
+| `[!!] Port 7330 belegt` | ein anderes Programm oder ein Tunnel, den `ariadne-mac` nicht kennt (von Hand gestartet), hält den Port | `lsof -nP -iTCP:7330 -sTCP:LISTEN` zeigt wer; das Programm bzw. den `ssh` von Hand beenden. Den eigenen Tunnel baut `ariadne-mac start` nach der Rückfrage (`j`) selbst neu auf |
 | `kein Code von der Kali` | die Verbindung kam nicht zustande oder die Kali gab keinen Code | die letzten Zeilen darunter lesen; Protokoll in `~/Library/Application Support/ariadne-mac/tunnel.log` |
 | `Kein Code: Web-Oberfläche aus: …` | der Web-Server im Daemon läuft nicht, der Grund steht dahinter | in der Kali `ariadne status` (Zeile «Web:» mit Adresse oder Grund); `[ui]` in `config.toml` prüfen, danach `ariadne daemon stop` |
 | `Kein Runtime-Ordner (XDG_RUNTIME_DIR fehlt …)` | kein `/run/user/UID`, weil niemand in der Kali angemeldet ist | in der Webkonsole anmelden oder einmal `sudo loginctl enable-linger $USER` |
 | `Daemon nicht erreichbar` | der Daemon startet nicht | in der Kali `ariadne status` und das Daemon-Log unter `~/.local/state/ariadne/` |
-| Dashboard zeigt wieder die Anmeldung | die Anmeldung endete: `lock`, Tunnel weg, Projekt beendet, 12 Stunden um oder Ctrl-C bei `code` | gesperrt? zuerst `ariadne-mac unlock`; dann `ariadne-mac start` (baut einen laufenden Tunnel ohne Sperren neu auf) |
+| Dashboard zeigt wieder die Anmeldung | die Anmeldung endete: `lock`, Tunnel weg, Projekt beendet, 12 Stunden um oder Ctrl-C bei `code` | gesperrt? zuerst `ariadne-mac unlock`; dann `ariadne-mac start` und die Frage «Neu aufbauen?» mit `j` beantworten (baut einen laufenden Tunnel ohne Sperren neu auf) |
+| `Tunnel läuft schon. Neu aufbauen? [j/N]` | `ariadne-mac start`, während der eigene Tunnel noch steht (E116) | `j`: neuer Tunnel und neuer Code, ein alter Dashboard-Tab verliert die Anmeldung; Enter oder `n`: nichts ändert sich |
 | `421` im Browser | der Port im Browser ist nicht der `[ui] port` der Kali (`ARIADNE_MAC_PORT` auf dem Mac, `--port` bei `kali-setup.sh`), oder ein fremder Name statt `127.0.0.1`, `localhost` oder `[::1]` | `http://127.0.0.1:PORT` mit demselben Port wie in der Kali |
 | `Schlüssel nicht geladen (ssh-add)` | die Passphrase des Mac-Schlüssels war falsch oder die Abfrage wurde abgebrochen | `ariadne-mac start` noch einmal; die Passphrase fragt `ssh-add`, nie der Tunnel im Hintergrund |
 | `--key: genau ein Schlüssel nötig` (kali-setup.sh) | in `~/mac.pub` stehen mehrere Schlüssel, etwa alle aus GitHub | nur die Zeile mit dem Fingerprint des Mac-Schlüssels behalten (Schritt 3) |

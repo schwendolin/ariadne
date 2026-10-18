@@ -19,6 +19,10 @@ Module: :mod:`.status` (Status, Pause, Präsentation), :mod:`.terminals` (Termin
 Services), :mod:`.next` (Als Nächstes), :mod:`.timeline` (Zeitachse, Eingaben), :mod:`.evidence`
 (Belege, Logzeilen), :mod:`.decisions` (Entscheide), :mod:`.search` (Suche, Warteliste),
 :mod:`.secrets` (Aufdecken), :mod:`.later` (501), :mod:`.events` (SSE-Quellen).
+
+Bau v0.1-Oberfläche (web-api.md 18): :mod:`.ui_state` (Vorlieben, «Neu seit», Scope-Quittung),
+:mod:`.findings` (Findings), :mod:`.suggestions` (Denkanstösse), :mod:`.clipboard` (in die Kali
+kopieren).
 """
 
 from __future__ import annotations
@@ -42,8 +46,10 @@ def register(app: Any, ctx: WebContext) -> None:
     from fastapi import APIRouter
 
     from ariadne.web.api import (
+        clipboard,
         decisions,
         evidence,
+        findings,
         graph,
         hosts,
         later,
@@ -51,8 +57,10 @@ def register(app: Any, ctx: WebContext) -> None:
         search,
         secrets,
         status,
+        suggestions,
         terminals,
         timeline,
+        ui_state,
     )
     from ariadne.web.api import (
         next as next_,
@@ -74,6 +82,12 @@ def register(app: Any, ctx: WebContext) -> None:
         decisions,
         search,
         secrets,
+        # Bau v0.1-Oberfläche (web-api.md 18): vor ``later``, damit echte Routen die 501-Routen
+        # mit gleichem Pfad verdecken, bis der Besitzer sie aus ``later`` entfernt.
+        ui_state,
+        findings,
+        suggestions,
+        clipboard,
     ):
         mod.add_routes(router, api)
     later.add_routes(router)

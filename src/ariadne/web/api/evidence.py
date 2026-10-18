@@ -19,6 +19,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 from starlette.responses import Response
 
+from ariadne.ingest.queries import term_refs
+from ariadne.store import chain
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import Bag, iso, render_line
@@ -31,6 +33,7 @@ from ariadne.web.api.views import (
     loads,
     secret_values,
     stack_views,
+    term_ref,
     unit_brief,
     unit_rows,
     with_secrets,
@@ -45,7 +48,14 @@ __all__ = [
     "secret_spans",
     "LINES_MAX",
     "LOG_MAX_LINES",
+    "chain_break_line",
 ]
+
+CHAIN_CHECK_MAX = 5000  # so viele Ausgabe-Events einer Einheit prüft der Kopf der Belegansicht
+_EV_COLS = (
+    "seq, id, layer, kind, ts_utc_ns, mono_ns, boot_id, operator_id, origin, terminal_id, stream_off, "
+    "header, body, salt, body_commit, prev_hash, hash"
+)
 
 LINES_MAX = 2000
 LOG_MAX_LINES = 200_000
@@ -162,7 +172,74 @@ def fact_sources(conn: Any, claim_key: str, bag: Bag) -> dict[str, Any] | None:
     return {"fact": fact_view(rows[0], bag), "sources": out}
 
 
-def unit_detail(conn: Any, unit_id: str, chain_ok: bool, bag: Bag) -> dict[str, Any] | None:
+def _event_ok(jconn: Any, row: Any) -> bool:
+    """Ein Ausgabe-Event der Kette: Commitment, Hash und Verweis auf den Vorgänger stimmen."""
+    seq, header_text, body, salt, commit = int(row[0]), row[11], row[12], row[13], row[14]
+    row_prev, row_hash = bytes(row[15]), bytes(row[16])
+    commit_b = bytes(commit) if commit is not None else None
+    if body is not None:
+        if salt is None or commit_b is None:
+            return False
+        try:
+            if chain.body_commit(bytes(salt), bytes(body)) != commit_b:
+                return False
+        except ValueError:
+            return False
+    h = chain.event_hash(
+        row_prev,
+        seq=seq,
+        event_id=row[1],
+        layer=row[2],
+        kind=row[3],
+        ts_utc_ns=row[4],
+        mono_ns=row[5],
+        boot_id=row[6],
+        operator_id=row[7],
+        origin=row[8],
+        terminal_id=row[9],
+        stream_off=row[10],
+        header_json=str(header_text).encode(),
+        body_commit=commit_b,
+    )
+    if h != row_hash:
+        return False
+    if seq > 1:
+        prev = jconn.execute("SELECT hash FROM event WHERE seq = ?", (seq - 1,)).fetchone()
+        if prev is None or bytes(prev[0]) != row_prev:
+            return False
+    return True
+
+
+def chain_break_line(conn: Any, journal: Any, u: Mapping[str, Any]) -> int | None:
+    """Erste Zeile (``pos``) einer Einheit, ab der die Hash-Kette ihrer Ausgabe nicht stimmt (18.8),
+    sonst ``None``. Geprüft werden die Ausgabe-Events des Terminals im Bereich der Einheit."""
+    tid, start, end = u.get("terminal_id"), u.get("start_off"), u.get("end_off")
+    jconn = getattr(journal, "conn", None)
+    if not isinstance(tid, str) or not isinstance(start, int) or jconn is None:
+        return None
+    hi = end if isinstance(end, int) else 1 << 62
+    rows = jconn.execute(
+        f"SELECT {_EV_COLS} FROM event WHERE kind = 'term.out' AND terminal_id = ? "  # noqa: S608
+        "AND stream_off < ? AND stream_off >= ? ORDER BY stream_off LIMIT ?",
+        (tid, hi, max(0, start - (1 << 20)), CHAIN_CHECK_MAX),
+    ).fetchall()
+    for row in rows:
+        header = loads(row[11], {}) or {}
+        length = header.get("length") if isinstance(header.get("length"), int) else len(row[12] or b"")
+        off = int(row[10] or 0)
+        if off + int(length) <= start:
+            continue
+        if not _event_ok(jconn, row):
+            hit = conn.execute(
+                "SELECT MIN(pos) FROM unit_line WHERE unit_id = ? AND raw_end > ?", (u.get("unit_id"), off)
+            ).fetchone()
+            return int(hit[0]) if hit and hit[0] is not None else 0
+    return None
+
+
+def unit_detail(
+    conn: Any, unit_id: str, chain_ok: bool, bag: Bag, journal: Any = None
+) -> dict[str, Any] | None:
     rows = unit_rows(conn, "unit_id = ?", (unit_id,), 1)
     if not rows:
         return None
@@ -188,6 +265,8 @@ def unit_detail(conn: Any, unit_id: str, chain_ok: bool, bag: Bag) -> dict[str, 
             "line_count": int(lines),
             "flags": b.many(f for f in loads(u.get("flags"), []) or [] if isinstance(f, str)),
             "chain_ok": bool(chain_ok),
+            "terminal": term_ref(u.get("terminal_id"), term_refs(conn), b),
+            "chain_break_line": chain_break_line(conn, journal, u) if journal is not None else None,
         }
     )
     out["ctrl"] = bool(out.get("ctrl")) or b.ctrl
@@ -325,9 +404,11 @@ def add_routes(router: APIRouter, api: Api) -> None:
             raise ApiError("not_found")
         bag = api.bag()
         chain_ok = bool(p.head_ok)
-        res = await api.query(p, lambda c: unit_detail(c, unit_id, chain_ok, bag))
+        res = await api.query_journal(p, lambda c, j: unit_detail(c, unit_id, chain_ok, bag, j))
         if res is None:
             raise ApiError("not_found")
+        if res.get("chain_break_line") is not None:
+            res["chain_ok"] = False  # Bruchstelle in dieser Einheit, auch wenn der Kopf stimmt
         return await api.respond(res)
 
     @router.get("/p/{pid}/units/{unit_id}/lines", name="unit_lines")

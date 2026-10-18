@@ -16,6 +16,7 @@ Der einzige allgemeine Schreibweg (Architektur 7.1). Ablauf «alle oder keiner»
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import OrderedDict
 from typing import Any
@@ -27,6 +28,9 @@ from starlette.responses import Response
 from ariadne import events
 from ariadne.daemon.terminal import normalize_host
 from ariadne.ingest.identity import host_identifier, normalize_identifier
+from ariadne.ingest.proj_findings import FINDING_KINDS, evidence_id, fold
+from ariadne.ingest.queries import entity_of_subject
+from ariadne.rules import api as rules_api
 from ariadne.store.api import AppendItem
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError, validation_detail
@@ -52,12 +56,17 @@ WRITABLE = frozenset(
         "d.keystep.mark",
         "d.revoke",
         "d.unit.distrust",
+        # Bau v0.1-Oberfläche (web-api.md 18.5, 18.6)
+        "d.suggestion.done",
+        "d.suggestion.dismiss",
+        *FINDING_KINDS,
     }
 )
 CRITICAL = frozenset({"d.scope.update", "d.lab.not_customer"})  # v0.1 nur im Terminal (Briefing 9.10)
-LATER = frozenset(
-    {"d.suggestion.done", "d.suggestion.dismiss", "d.finding", "d.artifact", "d.hypothesis", "d.goal.status"}
-)
+LATER = frozenset({"d.artifact", "d.hypothesis", "d.goal.status"})
+OLD_FINDING = "d.finding"  # altes Modell ohne Felder: ersetzt durch d.finding.* (422)
+_ATTACK_RE = re.compile(r"^T\d{4}(\.\d{3})?$")
+_CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,7}$")
 _CTX = frozenset({"d.ctx.set", "d.ctx.push", "d.ctx.pop", "d.ctx.accept"})
 _SUBJECT = frozenset({"d.status.work", "d.status.access", "d.note.set", "d.tag.add", "d.tag.remove"})
 _CACHE_S = 600.0
@@ -110,8 +119,38 @@ def _ints_fit(obj: Any, depth: int = 0) -> bool:
     return True
 
 
+def _bad_at(i: int, loc: list[Any], typ: str) -> ApiError:
+    return ApiError("validation", [{"loc": ["body", "decisions", i, "payload", *loc], "type": typ}])
+
+
+def _finding_shape(i: int, kind: str, payload: dict[str, Any]) -> None:
+    """Prüfungen der Findings mit eigenen 422-Typen (18.10: ``attack``, ``cve``, ``subject``,
+    ``severity_required``), bevor das Modell die Nutzlast sieht. Nie mit Werten in der Antwort."""
+    for key, rx, typ in (("attack", _ATTACK_RE, "attack"), ("cves", _CVE_RE, "cve")):
+        refs = payload.get(key)
+        if refs is None:
+            continue
+        if not isinstance(refs, list):
+            raise _bad_at(i, [key], typ)
+        for j, r in enumerate(refs):
+            rid = r.get("id") if isinstance(r, dict) else None
+            if not isinstance(rid, str) or not rx.match(rid):
+                raise _bad_at(i, [key, j, "id"], typ)
+    affected = payload.get("affected")
+    if affected is not None:
+        if not isinstance(affected, list):
+            raise _bad_at(i, ["affected"], "subject")
+        for j, a in enumerate(affected):
+            if not isinstance(a, str) or not a or len(a) > 600:
+                raise _bad_at(i, ["affected", j], "subject")
+    if kind == "d.finding.create" and payload.get("status") == "final" and payload.get("severity") is None:
+        raise _bad_at(i, ["severity"], "severity_required")
+
+
 def _validate(i: int, kind: str, payload: dict[str, Any], profile: str, alone: bool) -> dict[str, Any]:
     """Nutzlast prüfen und normalisieren. Reihenfolge der Fehler: 422, 403, 501."""
+    if kind == OLD_FINDING:
+        raise _bad(i, "kind", "kind")  # web-api.md 18.5: nur noch d.finding.*
     if not kind.startswith("d.") or kind not in events.KINDS or kind in _CTX:
         raise _bad(i, "kind", "kind")
     if kind in CRITICAL:
@@ -126,6 +165,10 @@ def _validate(i: int, kind: str, payload: dict[str, Any], profile: str, alone: b
         raise _bad(i, "kind", "distrust_alone")
     if not _ints_fit(payload):
         raise _bad(i, "payload", "int_range")
+    if kind in FINDING_KINDS:
+        _finding_shape(i, kind, payload)
+    if kind == "d.suggestion.done" and not payload.get("basis"):
+        raise _bad_at(i, ["basis"], "basis_required")
     if kind == "d.keystep.mark":
         if "terminal_id" in payload or "stream_off" in payload:
             raise _bad(i, "payload", "extra_forbidden")
@@ -166,10 +209,132 @@ def _entity(conn: Any, subject: Any) -> str | None:
     return str(row[0]) if ok else None
 
 
-def _check_refs(conn: Any, journal: Any, items: list[tuple[str, dict[str, Any]]]) -> None:
-    """Bezüge gegen den Stand prüfen; Fehler: 409 ``conflict`` (oder 403 bei kritischen Zielen)."""
+class _Rec:
+    """Journal-Record in der Form, die :func:`ariadne.ingest.proj_findings.fold` erwartet."""
+
+    __slots__ = ("seq", "id", "kind", "payload", "ts")
+
+    def __init__(self, rec: Any) -> None:
+        self.seq, self.id, self.kind = rec.seq, rec.id, rec.kind
+        self.payload, self.ts = dict(rec.header), rec.ts_utc_ns
+
+
+class _Findings:
+    """Stand der Findings für die Prüfung einer Anfrage (alle oder keiner): aus den Entscheiden im
+    Journal (nicht aus der Projektion, die erst nach der nächsten Auswertung nachzieht), danach jeder
+    Entscheid der Anfrage der Reihe nach angewandt."""
+
+    def __init__(self, conn: Any, journal: Any) -> None:
+        self.conn = conn
+        recs = [_Rec(r) for r in journal.iter_events(kinds=[*FINDING_KINDS, "d.revoke"])]
+        self.state: dict[str, dict[str, Any]] = {
+            fid: {
+                "deleted": f.deleted or not f.exists,
+                "severity": f.severity,
+                "status": f.status,
+                "ev": set(f.evidence),
+            }
+            for fid, f in fold(recs).items()
+        }
+        self.creates_here = False
+
+    def ref_ok(self, ev: Any) -> bool:
+        if not isinstance(ev, dict):
+            return False
+        ck, uid = ev.get("claim_key"), ev.get("unit_id")
+        if ck is not None:
+            row = self.conn.execute("SELECT 1 FROM claim WHERE claim_key = ?", (ck,)).fetchone()
+            if row is None:
+                return False
+        if uid is not None and not _unit_known(self.conn, uid):
+            return False
+        return ck is not None or uid is not None
+
+    def live(self, i: int, fid: Any) -> dict[str, Any]:
+        f = self.state.get(str(fid))
+        if f is None:
+            if self.creates_here:
+                raise _bad_at(i, ["finding_id"], "same_request")
+            raise ApiError("conflict")
+        if f["deleted"]:
+            raise ApiError("conflict")
+        return f
+
+    def check(self, i: int, kind: str, h: dict[str, Any]) -> None:
+        for a in h.get("affected") or ():
+            if entity_of_subject(self.conn, a) is None:
+                raise ApiError("conflict")
+        if kind == "d.finding.create":
+            for ev in h.get("evidence") or ():
+                if not self.ref_ok(ev):
+                    raise ApiError("conflict")
+            if h.get("created_from") is not None and not self.ref_ok(h["created_from"]):
+                raise ApiError("conflict")
+            self.creates_here = True
+            return
+        f = self.live(i, h.get("finding_id"))
+        if kind == "d.finding.update":
+            severity = h.get("severity", f["severity"])
+            status = h.get("status", f["status"])
+            if status == "final" and severity is None:
+                raise _bad_at(i, ["severity"], "severity_required")
+            f["severity"], f["status"] = severity, status
+        elif kind == "d.finding.evidence.add":
+            if not self.ref_ok(h):
+                raise ApiError("conflict")
+            eid = evidence_id(h.get("claim_key"), h.get("unit_id"), h.get("lines"))
+            if eid in f["ev"]:
+                raise ApiError("conflict")  # dieser Beleg hängt schon am Finding
+            f["ev"].add(eid)
+        elif kind == "d.finding.evidence.remove":
+            eid = str(h.get("evidence_id"))
+            if eid not in f["ev"]:
+                raise ApiError("conflict")
+            f["ev"].discard(eid)
+        elif kind == "d.finding.delete":
+            f["deleted"] = True
+
+
+def _unit_known(conn: Any, unit_id: Any) -> bool:
+    if not isinstance(unit_id, str):
+        return False
+    for table in ("unit", "obs_unit"):
+        try:
+            if conn.execute(f"SELECT 1 FROM {table} WHERE unit_id = ?", (unit_id,)).fetchone():  # noqa: S608
+                return True
+        except Exception as exc:  # noqa: BLE001 - Tabelle fehlt (nur Projektion)
+            if "no such table" not in str(exc):
+                raise
+    return False
+
+
+def _check_refs(
+    conn: Any,
+    journal: Any,
+    items: list[tuple[str, dict[str, Any]]],
+    profile: str = "lab",
+    positions: list[int] | None = None,
+) -> None:
+    """Bezüge gegen den Stand prüfen; Fehler: 409 ``conflict`` (oder 403 bei kritischen Zielen,
+    422 bei ``severity_required``, ``same_request`` und ``basis_required``). ``positions`` nennt die
+    Stelle jedes Eintrags in der Anfrage (für ``loc``)."""
     revoked: set[str] | None = None
-    for kind, h in items:
+    findings: _Findings | None = None
+    for n, (kind, h) in enumerate(items):
+        i = positions[n] if positions is not None and n < len(positions) else n
+        if kind in FINDING_KINDS:
+            if findings is None:
+                findings = _Findings(conn, journal)
+            findings.check(i, kind, h)
+            continue
+        if kind in ("d.suggestion.done", "d.suggestion.dismiss"):
+            try:
+                rules_api.check_decision(conn, kind, h, profile=profile)
+            except rules_api.RuleRefError as exc:
+                if exc.code == "basis_required":
+                    raise _bad_at(i, ["basis"], "basis_required") from None
+                raise ApiError("conflict") from None
+            continue
         if kind in ("d.claim.confirm", "d.claim.reject", "d.claim.edit"):
             row = conn.execute(
                 "SELECT lane_reason FROM claim WHERE claim_key = ?", (h["claim_key"],)
@@ -289,7 +454,9 @@ def add_routes(router: APIRouter, api: Api) -> None:
             cache.put(p.info.id, first.client_ref, out)
             return await api.respond({"results": [out]}, 201)
         items = [(body.decisions[i].kind, validated[i]) for i in todo]
-        await api.query_journal(p, lambda c, j: _check_refs(c, j, items))
+        if any(k in ("d.suggestion.done", "d.suggestion.dismiss") for k, _h in items):
+            await api.sync(p)  # die Regel-Engine liest frühere Entscheide aus der Projektion
+        await api.query_journal(p, lambda c, j: _check_refs(c, j, items, profile, todo))
         # Ab hier kein await: Projekt prüfen, einreihen, ein Commit (E70)
         d = api.daemon
         if d.project is not p or p.info.id != pid:

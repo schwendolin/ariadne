@@ -4,7 +4,8 @@
 #
 #   ariadne-mac check            Mac prüfen (FileVault, Schlüssel, Hostkey, Port 7330, Sicherung)
 #   ariadne-mac start            Tunnel auf, Code holen, Dashboard im Standardbrowser öffnen
-#                                (läuft der eigene Tunnel schon: neu aufbauen, ohne zu sperren)
+#                                (läuft der eigene Tunnel schon: Rückfrage «Neu aufbauen? [j/N]»,
+#                                bei j neu aufbauen ohne zu sperren; ohne Terminal gilt Nein, E116)
 #   ariadne-mac stop             Sitzungen widerrufen, sperren, Sicherung holen, Tunnel zu
 #   ariadne-mac unlock           Passphrase im Mac-Terminal eingeben (ssh -t kali-sl unlock)
 #   ariadne-mac backup           verschlüsselte Sicherung der Kali in den Sicherungsordner
@@ -291,12 +292,30 @@ start_html() {
     print -r -- "<body><p>Weiter zu <a href=\"$1\" rel=\"noreferrer\">Ariadne</a>.</p></body></html>"
 }
 
+# E116: Läuft der eigene Tunnel schon, fragt start nach, statt ihn still zu ersetzen (ein offener
+# Dashboard-Tab verlöre sonst seine Sitzung). Nur j oder J ersetzt ihn; ohne Terminal gilt Nein.
+confirm_rebuild() {
+    local ans=""
+    if [[ -t 0 ]]; then
+        print -rn -- "Tunnel läuft schon. Neu aufbauen? [j/N] " >&2
+        IFS= read -r ans || ans=""
+    else
+        print -r -- "Tunnel läuft schon. Neu aufbauen? [j/N] (ohne Terminal: Nein)" >&2
+    fi
+    [[ $ans == [jJ] ]]
+}
+
 cmd_start() {
     local pid
     if pid=$(tunnel_pid); then
+        if ! confirm_rebuild; then
+            say "Nichts geändert: Der Tunnel läuft weiter (PID $pid), das Dashboard bleibt angemeldet."
+            say "Neu anmelden: ariadne-mac start und mit j bestätigen. Ende der Session: ariadne-mac stop"
+            return 0
+        fi
         # Neuanmeldung (nach lock, Projektende, 12 h): nur den eigenen Tunnel neu aufbauen, ohne
         # revoke und lock (stop würde sperren; Befund F1 der Anleitung)
-        say "Tunnel läuft schon (PID $pid): wird für eine neue Anmeldung neu aufgebaut (ohne Sperren)."
+        say "Tunnel wird für eine neue Anmeldung neu aufgebaut (ohne Sperren, PID $pid endet)."
         stop_tunnel >/dev/null
     fi
     preflight_start

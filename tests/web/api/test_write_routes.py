@@ -79,8 +79,10 @@ def test_decisions_all_or_none_refs_and_kinds(paths, operator):
             (_dec("d.scope.update", {"version": 2, "toml": "x"}), 403, "policy"),
             (_dec("d.lab.not_customer", {"scope_version": 1}), 403, "policy"),
             (_dec("d.automode.set", {"enabled": True}), 403, "policy"),
-            (_dec("d.finding", {"title": "x"}), 501, "not_implemented"),
-            (_dec("d.suggestion.done", {"suggestion_key": "x"}), 501, "not_implemented"),
+            # Bau v0.1-Oberfläche: altes d.finding ersetzt durch d.finding.* (422), done braucht basis (422)
+            (_dec("d.finding", {"title": "x"}), 422, "validation"),
+            (_dec("d.suggestion.done", {"suggestion_key": "x"}), 422, "validation"),
+            (_dec("d.artifact", {}), 501, "not_implemented"),
             (_dec("d.bogus", {}), 422, "validation"),
             (_dec("term.out", {}), 422, "validation"),
             (_dec("d.tag.add", {"subject": HOST}), 422, "validation"),

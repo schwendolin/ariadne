@@ -24,7 +24,9 @@ Shell, kein ``exec`` eines Client-Werts, und keine Variable des Clients wird aus
 * ``backup``: nur wenn stdout kein Terminal ist; age-verschlüsselter Strom auf stdout
   (:func:`ariadne.backup.api.backup_to_stream`), Meldungen nur auf stderr.
 * ``restore``: nur ohne Operator-Tresor (geprüft vor dem Lesen) und nur aus einer Pipe;
-  :func:`ariadne.backup.api.restore_from_stream` liest den entschlüsselten Strom von stdin.
+  :func:`ariadne.backup.api.restore_from_stream` liest den entschlüsselten Strom von stdin. Danach
+  beendet sich ein laufender (gesperrter) Daemon und startet mit der zurückgespielten Konfiguration
+  neu (E118, :func:`restart_daemon`).
 * ``check``: wie ``ariadne remote check`` (ohne ``--full``).
 
 Exit-Codes: 0 gut, 1 Fehler, 2 abgelehnt, 3 Fernzugriff nicht bereit (Prüfung, Daemon, Web aus).
@@ -41,7 +43,8 @@ from typing import Any, TextIO
 
 from ariadne.paths import Paths
 
-__all__ = ["main", "ALLOWED", "hold", "HOLD_SIGNALS", "parse_command", "STUB", "EXIT_REFUSED", "EXIT_UNREADY"]
+__all__ = ["main", "ALLOWED", "hold", "HOLD_SIGNALS", "parse_command", "STUB", "EXIT_REFUSED", "EXIT_UNREADY",
+           "restart_daemon"]
 
 ALLOWED = ("code", "unlock", "lock", "revoke", "backup", "restore", "check")
 
@@ -276,28 +279,81 @@ def _restore(paths: Paths, env: Mapping[str, str]) -> int:
     if summary is not None:
         for line in summary(res, remote=True):
             _say(_s(line, 600))
-        if res.config_added:
-            _say(_restart_hint(paths))
-        return EXIT_OK
-    projects = ", ".join(_s(p, 64) for p in res.projects) or "keine"
-    vault = "ja" if res.operator_restored else "nein"
-    _say(f"Wiederhergestellt: Operator-Tresor {vault}, Projekte: {projects}.")
-    _say("Weiter: ssh -t kali-sl unlock, dann in der Kali ariadne project open SLUG und ariadne verify.")
+    else:
+        projects = ", ".join(_s(p, 64) for p in res.projects) or "keine"
+        vault = "ja" if res.operator_restored else "nein"
+        _say(f"Wiederhergestellt: Operator-Tresor {vault}, Projekte: {projects}.")
+        _say("Weiter: ssh -t kali-sl unlock, dann in der Kali ariadne project open SLUG und ariadne verify.")
+    _say(restart_daemon(paths))
     return EXIT_OK
 
 
-def _restart_hint(paths: Paths) -> str:
-    """Zurückgespielte ``config.toml`` liest ein laufender Daemon erst beim nächsten Start (etwa
-    ``[ui] port``; Befund F9 der Anleitung). Wie ``ariadne restore`` in der Kali darauf hinweisen."""
-    from ariadne.daemon.client import CtlClient
+# E118: Wartezeit, bis der alte Daemon weg ist (Socket zu und Sperre frei)
+RESTART_WAIT_S = 10.0
 
+
+def _lock_free(paths: Paths) -> bool:
+    """Ist die Sperre ``daemon.lock`` frei (kein Daemon mehr)? Prüft nur, legt nichts an."""
+    import fcntl
+
+    path = paths.runtime_dir / "daemon.lock"
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return True
+    finally:
+        os.close(fd)
+
+
+def restart_daemon(paths: Paths, *, wait_s: float | None = None) -> str:
+    """Nach dem Zurückspielen (E118): Ein laufender, gesperrter Daemon beendet sich (ctl
+    ``shutdown``) und startet mit der zurückgespielten Konfiguration neu, wie ``cli.common._client``
+    ihn startet. Ohne laufenden Daemon gibt es nichts zu tun. Gibt die Meldung für den Mac zurück."""
+    import time
+
+    from ariadne.cli.common import CliError, _client
+    from ariadne.daemon.client import CtlClient, CtlError, DaemonUnavailable
+
+    client = CtlClient(paths.ctl_sock)
     running = False
     with contextlib.suppress(Exception):
-        running = CtlClient(paths.ctl_sock).ping()
-    if running:
-        return ("Neue Einstellungen (config.toml) gelten erst nach einem Neustart des Daemons, der hier "
-                "schon läuft: in der Kali ariadne daemon stop, danach startet ariadne-mac unlock ihn neu.")
-    return "Neue Einstellungen (config.toml) gelten beim nächsten Start des Daemons (ariadne-mac unlock)."
+        running = client.ping()
+    if not running:
+        return "Neue Einstellungen gelten beim nächsten Start des Daemons. Weiter: ariadne-mac unlock"
+    status: Any = None
+    with contextlib.suppress(CtlError, DaemonUnavailable, OSError):
+        status = client.call("status")
+    if isinstance(status, dict) and status.get("locked") is False:
+        # Kann nach einem Restore ohne Tresor nicht vorkommen; ein entsperrter Daemon wird nie beendet
+        return ("Daemon läuft entsperrt weiter; neue Einstellungen gelten erst nach ariadne daemon stop in "
+                "der Kali.")
+    with contextlib.suppress(CtlError, DaemonUnavailable, OSError):
+        client.call("shutdown")
+    deadline = time.monotonic() + (RESTART_WAIT_S if wait_s is None else wait_s)
+    while True:
+        alive = False
+        with contextlib.suppress(Exception):
+            alive = client.ping()
+        if not alive and _lock_free(paths):
+            break
+        if time.monotonic() > deadline:
+            return ("Der Daemon hat sich nicht beendet: in der Kali ariadne daemon stop, danach "
+                    "ariadne-mac unlock.")
+        time.sleep(0.1)
+    try:
+        _client(paths, timeout=CODE_START_TIMEOUT_S)
+    except CliError:
+        return "Daemon beendet, aber nicht neu gestartet. Weiter: ariadne-mac unlock (startet ihn)."
+    return "Daemon mit neuer Konfiguration neu gestartet. Weiter: ariadne-mac unlock"
 
 
 def _check(paths: Paths, env: Mapping[str, str]) -> int:

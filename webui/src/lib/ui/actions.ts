@@ -1,14 +1,16 @@
 /**
- * Dynamische Styles nur über CSSOM (element.style.setProperty).
+ * Svelte-Actions für dynamische Werte ohne Inline-Styles (CSP: `style-src 'self'` ohne
+ * 'unsafe-inline'). Besitzer: ui-fundament.
  *
- * Die CSP erlaubt style-src 'self' ohne 'unsafe-inline'. Style-Attribute im
- * Markup und setAttribute('style') wären Verletzungen; CSSOM-Zugriffe nicht.
- * ESLint verbietet style-Attribute in Svelte (svelte/no-inline-styles).
- * Erlaubt sind nur CSS-Variablen (--name) mit Zahlen- oder Längenwerten.
+ * - `styleProps` (Alias `cssVars`) setzt nur CSS-Variablen (`--name`) per CSSOM
+ *   (`element.style.setProperty`), nur mit Zahlen- oder Längenwerten. Style-Attribute im Markup
+ *   und `setAttribute('style')` sind verboten (ESLint `svelte/no-inline-styles`,
+ *   `no-restricted-syntax`).
+ * - `clickOutside` schliesst Popover.
  */
 export type StyleProps = Record<`--${string}`, string | number | null>;
 
-const SAFE_VALUE = /^-?[\d.]+(px|%|em|rem|s|ms|deg)?$/;
+const SAFE_VALUE = /^-?[\d.]+(px|%|em|rem|s|ms|deg|fr)?$/;
 
 function apply(node: HTMLElement, props: StyleProps, prev: StyleProps | null): void {
   if (prev) {
@@ -19,7 +21,7 @@ function apply(node: HTMLElement, props: StyleProps, prev: StyleProps | null): v
       node.style.removeProperty(k);
       continue;
     }
-    const value = typeof v === 'number' ? `${v}` : v;
+    const value = typeof v === 'number' ? (Number.isFinite(v) ? `${v}` : '') : v;
     if (!SAFE_VALUE.test(value)) continue;
     node.style.setProperty(k, value);
   }
@@ -37,12 +39,21 @@ export function styleProps(node: HTMLElement, props: StyleProps) {
   };
 }
 
-/** Kopiert Text in die Zwischenablage, ohne Zeilenumbruch anzuhängen. */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
+export const cssVars = styleProps;
+
+/** Ruft `cb`, wenn ausserhalb des Elements geklickt wird (Popover, Menü). */
+export function clickOutside(node: HTMLElement, cb: (e: MouseEvent) => void) {
+  let handler = cb;
+  const onDown = (e: MouseEvent) => {
+    if (e.target instanceof Node && !node.contains(e.target)) handler(e);
+  };
+  document.addEventListener('mousedown', onDown, true);
+  return {
+    update(next: (e: MouseEvent) => void) {
+      handler = next;
+    },
+    destroy() {
+      document.removeEventListener('mousedown', onDown, true);
+    },
+  };
 }

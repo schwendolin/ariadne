@@ -51,6 +51,11 @@ __all__ = [
     "context_label",
     "EXCLUDE_REASONS",
     "QUIET_KEYS",
+    "revoked_ids",
+    "term_refs",
+    "new_since",
+    "entity_of_subject",
+    "NEW_SINCE_MAX",
 ]
 
 _HEX = re.compile(r"[0-9a-f]{8,64}")
@@ -602,3 +607,149 @@ def reparse_diff(old: Any, new: Any, sample: int = 10) -> dict[str, Any]:
         "removed_sample": [show(k, a[k]) for k in removed[:sample]],
         "changed_sample": [{**show(k, b[k]), "before": a[k][0]} for k in changed[:sample]],
     }
+
+
+# --------------------------------------------------------------------------- Oberfläche (Bau v0.1-Oberfläche)
+
+NEW_SINCE_MAX = 500  # höchstens so viele Kennungen pro Liste in «Neu seit» (web-api.md 18.3)
+
+
+def revoked_ids(conn: Any) -> set[str]:
+    """``decision_id`` aller Entscheide, die ein aktives ``d.revoke`` aufhebt (wie die Projektion:
+    ein aufgehobenes ``d.revoke`` hebt nichts auf)."""
+    rows = conn.execute("SELECT id, payload_json FROM decision WHERE kind = 'd.revoke' ORDER BY seq DESC")
+    revoked: set[str] = set()
+    for rid, payload in rows:
+        if rid in revoked:
+            continue
+        target = (_json(payload, {}) or {}).get("decision_id")
+        if isinstance(target, str):
+            revoked.add(target)
+    return revoked
+
+
+def term_refs(conn: Any) -> dict[str, dict[str, Any]]:
+    """``terminal_id`` -> ``{"ordinal", "label", "first_ts"}`` für «T1 scan» (web-api.md 18.1).
+
+    Die Nummer ist der Rang des ersten Auftretens im Projekt (kleinste Journal-Sequenz eines
+    Ereignisses des Terminals bzw. seiner frühesten Einheit), also stabil über Neustarts. Der Name
+    kommt aus dem jüngsten gültigen ``d.terminal.label`` (ohne aufgehobene). ``first_ts`` ist die
+    Zeit des ersten Ereignisses (Nanosekunden) oder ``None``."""
+    first: dict[str, tuple[int, int | None]] = {}
+    with _MaybeMissing():
+        for tid, seq, ts in conn.execute(
+                "SELECT terminal_id, MIN(seq), MIN(ts_utc_ns) FROM seg_event WHERE terminal_id IS NOT NULL "
+                "GROUP BY terminal_id"):
+            first[str(tid)] = (int(seq), int(ts) if isinstance(ts, int) else None)
+    with _MaybeMissing():
+        for tid, seq, ts in conn.execute(
+                "SELECT terminal_id, MIN(event_seq), MIN(ts_utc_ns) FROM unit WHERE terminal_id IS NOT NULL "
+                "AND event_seq IS NOT NULL GROUP BY terminal_id"):
+            old = first.get(str(tid))
+            t = int(ts) if isinstance(ts, int) else None
+            if old is None:
+                first[str(tid)] = (int(seq), t)
+            else:
+                times = [x for x in (old[1], t) if x is not None]
+                first[str(tid)] = (min(old[0], int(seq)), min(times) if times else None)
+    labels: dict[str, str] = {}
+    revoked = revoked_ids(conn)
+    for did, payload in conn.execute(
+            "SELECT id, payload_json FROM decision WHERE kind = 'd.terminal.label' ORDER BY seq"):
+        if did in revoked:
+            continue
+        p = _json(payload, {}) or {}
+        tid, label = p.get("terminal_id"), p.get("label")
+        if isinstance(tid, str) and isinstance(label, str):
+            labels[tid] = label
+    ranked = sorted(first.items(), key=lambda kv: (kv[1][0], kv[0]))
+    return {tid: {"ordinal": i + 1, "label": labels.get(tid), "first_ts": v[1]}
+            for i, (tid, v) in enumerate(ranked)}
+
+
+class _MaybeMissing:
+    """Kontext, der fehlende Tabellen still übergeht (Projektion ohne Pipeline-Tabellen in Tests)."""
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        return exc_type is not None and issubclass(exc_type, Exception) and "no such table" in str(exc)
+
+
+def entity_of_subject(conn: Any, subject: Any) -> str | None:
+    """Entität zu einem Subjekt eines Entscheids (Entitäts-ID oder Kennung), sonst ``None``."""
+    from ariadne.ingest.identity import host_identifier, normalize_identifier
+
+    if not isinstance(subject, str) or not subject or len(subject) > 600:
+        return None
+    if conn.execute("SELECT 1 FROM entity WHERE entity_id = ?", (subject,)).fetchone() is not None:
+        return subject
+    ident = normalize_identifier(subject) or host_identifier(subject)
+    if ident is None:
+        return None
+    row = conn.execute("SELECT entity_id FROM identifier WHERE key = ?", (ident,)).fetchone()
+    if row is None or row[0] is None:
+        return None
+    ok = conn.execute("SELECT 1 FROM entity WHERE entity_id = ?", (row[0],)).fetchone()
+    return str(row[0]) if ok else None
+
+
+def new_since(conn: Any, since_ns: int, *, profile: str = "lab") -> dict[str, Any]:
+    """Was seit ``since_ns`` neu ist (E106, web-api.md 18.3): Kennungen für das Pulsieren.
+
+    * ``hosts``: Hosts im Scope (auch Nebel, ohne Platzhalter) mit ``first_seen > since``;
+    * ``access``: Hosts im Scope mit Zugriff, der seit ``since`` gesetzt oder erhöht wurde
+      (Schlüsselschritt foothold/privesc, ``d.status.access`` ungleich ``none``, Zugriffs-Wert mit
+      ``first_ts > since``), ohne die aus ``hosts``;
+    * ``services``: Services mit ``first_seen > since``, deren Host im Scope und nicht in ``hosts``;
+    * ``items``: offene Einträge in «Klären» mit ``created_ts > since``;
+    * ``keysteps``: Faden-Kanten (``t<ordinal>``) mit ``ts > since``.
+
+    Jede Liste höchstens :data:`NEW_SINCE_MAX`; ``count`` zählt trotzdem alle."""
+    since = int(since_ns)
+    hosts_in: dict[str, str] = {}
+    new_hosts: list[str] = []
+    for hid, first, access in conn.execute(
+            "SELECT host_id, first_seen, access FROM v_host WHERE scope = 'in' AND "
+            "COALESCE(placeholder, 0) = 0 ORDER BY first_seen, host_id"):
+        hosts_in[str(hid)] = str(access or "none")
+        if isinstance(first, int) and first > since:
+            new_hosts.append(str(hid))
+    host_set = set(new_hosts)
+    access: set[str] = set()
+    for eid, step in conn.execute(
+            "SELECT entity_id, step FROM keystep WHERE ts_utc_ns > ? AND entity_id IS NOT NULL", (since,)):
+        if step in ("foothold", "privesc"):
+            access.add(str(eid))
+    revoked = revoked_ids(conn)
+    for did, payload in conn.execute(
+            "SELECT id, payload_json FROM decision WHERE kind = 'd.status.access' AND ts > ?", (since,)):
+        p = _json(payload, {}) or {}
+        if did in revoked or p.get("value") not in ("user", "admin"):
+            continue
+        eid = entity_of_subject(conn, p.get("subject"))
+        if eid is not None:
+            access.add(eid)
+    for (eid,) in conn.execute(
+            "SELECT DISTINCT entity_id FROM claim WHERE predicate IN ('access.shell', 'access.callback') "
+            "AND state IN ('auto', 'confirmed') AND first_ts > ? AND entity_id IS NOT NULL", (since,)):
+        access.add(str(eid))
+    new_access = sorted(h for h in access
+                        if h in hosts_in and hosts_in[h] in ("user", "admin") and h not in host_set)
+    new_services = [
+        str(sid) for sid, host in conn.execute(
+            "SELECT service_id, host_id FROM v_service WHERE first_seen > ? ORDER BY first_seen, service_id",
+            (since,))
+        if str(host) in hosts_in and str(host) not in host_set
+    ]
+    item_sql = "SELECT item_key FROM v_inbox WHERE created_ts > ?"
+    if profile == "customer":
+        item_sql += " AND kind != 'candidate_group'"
+    items = [str(r[0]) for r in conn.execute(item_sql + " ORDER BY created_ts, item_key", (since,))]
+    keysteps_new = [f"t{int(o)}" for (o,) in conn.execute(
+        "SELECT ordinal FROM v_keystep WHERE ts_utc_ns > ? ORDER BY ordinal", (since,))]
+    lists = {"hosts": new_hosts, "access": new_access, "services": new_services, "items": items,
+             "keysteps": keysteps_new}
+    return {"count": sum(len(v) for v in lists.values()),
+            **{k: v[:NEW_SINCE_MAX] for k, v in lists.items()}}

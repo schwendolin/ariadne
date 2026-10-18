@@ -14,7 +14,10 @@ Akzente egal).
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
+import stat
 import unicodedata
 from typing import Any
 
@@ -28,7 +31,7 @@ from ariadne.web.api.evidence import render_rows, secret_spans
 from ariadne.web.api.text import Bag, iso
 from ariadne.web.api.views import with_secrets
 
-__all__ = ["add_routes", "search_view", "own_secret_hit", "PENDING_MAX"]
+__all__ = ["add_routes", "search_view", "own_secret_hit", "PENDING_MAX", "PENDING_REASONS", "pending_reason"]
 
 PENDING_MAX = 200
 _WORD = re.compile(r"[^\W_]+")
@@ -120,16 +123,53 @@ def add_routes(router: APIRouter, api: Api) -> None:
         res = await api.call("show", {"what": "pending", "limit": PENDING_MAX})
         api.same(p)
         bag = api.bag()
+        raw = list((res or {}).get("items") or [])
+        workspace = getattr(p.info, "workspace", None)
+        sizes = await asyncio.to_thread(lambda: [_lsize(f.get("path"), workspace) for f in raw])
+        api.same(p)
         files = []
-        for f in (res or {}).get("items") or []:
+        for f, size in zip(raw, sizes, strict=True):
             b = bag.new()
             item = {
                 "path": b(f.get("path")) or "",
-                "reason": b(f.get("reason")) or "",
+                "reason": pending_reason(f.get("reason")),
                 "cmd_id": f.get("cmd_id"),
                 "terminal_id": f.get("terminal_id"),
                 "ts": iso(f.get("ts")),
+                "size": size,
             }
             item["ctrl"] = b.ctrl
             files.append(item)
         return await api.respond({"files": files, "truncated": len(files) >= PENDING_MAX})
+
+
+PENDING_REASONS = (
+    "outside_workspace",
+    "symlink",
+    "hardlink",
+    "owner",
+    "not_regular",
+    "other_fs",
+    "path",
+    "too_large",
+)
+_REASON_MAP = {"symlink_or_not_dir": "symlink"}
+
+
+def pending_reason(raw: Any) -> str:
+    """Grund als fester Code (18.8); andere Gründe des Daemons (fehlt, keine Rechte, Sperrliste)
+    gelten als ``path``."""
+    r = _REASON_MAP.get(str(raw), str(raw))
+    return r if r in PENDING_REASONS else "path"
+
+
+def _lsize(path: Any, workspace: Any) -> int | None:
+    """Grösse per ``lstat`` (ohne Symlinks zu folgen), sonst ``None``."""
+    if not isinstance(path, str) or not path or "\0" in path or len(path) > 4096:
+        return None
+    try:
+        full = path if os.path.isabs(path) or workspace is None else os.path.join(str(workspace), path)
+        st = os.lstat(full)
+    except (OSError, ValueError):
+        return None
+    return int(st.st_size) if stat.S_ISREG(st.st_mode) else None

@@ -33,9 +33,17 @@ describe('ESLint-Sicherheitsregeln', () => {
     expect(await rules("export function f(el: HTMLElement) { el.setAttribute('onclick', 'x'); }", 'src/lib/x.ts')).toContain('no-restricted-syntax');
   });
 
-  it('verbietet localStorage ausserhalb von prefs.ts (Token nie in localStorage)', async () => {
+  it('verbietet localStorage überall und sessionStorage ausserhalb von auth.ts (E112)', async () => {
     expect(await rules("export const t = localStorage.getItem('ariadne.token');", 'src/lib/x.ts')).toContain('no-restricted-globals');
     expect(await rules("export const t = window.localStorage.getItem('x');", 'src/lib/x.ts')).toContain('no-restricted-properties');
+  });
+
+  it('verbietet localStorage auch in auth.ts, sessionStorage und Zwischenablage ausserhalb ihrer Datei', async () => {
+    expect(await rules("export const t = localStorage.getItem('x');", 'src/lib/api/auth.ts')).toContain('no-restricted-globals');
+    expect(await rules("export const t = sessionStorage.getItem('x');", 'src/lib/x.ts')).toContain('no-restricted-globals');
+    expect(await rules("export const f = () => navigator.clipboard.writeText('x');", 'src/lib/x.ts')).toContain('no-restricted-properties');
+    expect(await rules("export const f = () => navigator.clipboard.writeText('x');", 'src/lib/util/clipboard.ts')).not.toContain('no-restricted-properties');
+    expect(await rules("export const f = (s: string) => console.log(s);", 'src/lib/x.ts')).toContain('no-restricted-properties');
   });
 
   it('erlaubt DOMPurify und markdown-it nur in SafeMarkdown.svelte', async () => {
@@ -56,7 +64,7 @@ describe('ESLint-Sicherheitsregeln', () => {
   });
 
   it('lässt den echten Code ohne Befund durch, auch SafeMarkdown.svelte', async () => {
-    const results = await eslint.lintFiles(['src/lib/safe/SafeMarkdown.svelte', 'src/lib/util/prefs.ts', 'src/lib/api/auth.ts']);
+    const results = await eslint.lintFiles(['src/lib/safe/SafeMarkdown.svelte', 'src/lib/util/clipboard.ts', 'src/lib/api/auth.ts']);
     expect(results.flatMap((r) => r.messages)).toEqual([]);
   });
 });

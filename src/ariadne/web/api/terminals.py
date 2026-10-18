@@ -19,6 +19,7 @@ from starlette.responses import Response
 
 from ariadne.daemon.terminal import normalize_host
 from ariadne.ingest.proj_build import display
+from ariadne.ingest.queries import term_refs
 from ariadne.scope.matcher import ScopeMatcher
 from ariadne.web.api.common import Api, valid_tid
 from ariadne.web.api.errors import ApiError
@@ -153,19 +154,22 @@ def add_routes(router: APIRouter, api: Api) -> None:
         d = api.daemon
         p = d.project
         extras: dict[str, dict[str, Any]] = {}
+        refs: dict[str, dict[str, Any]] = {}
         local = [
             str(ts.get("terminal_id")) for ts in rows if ts.get("state") not in ("held", "preroll", "off")
         ]
-        if p is not None and local:
+        if p is not None:
             try:
-                extras = await api.query(p, lambda c: terminal_extras(c, local, bag))
+                extras, refs = await api.query(
+                    p, lambda c: (terminal_extras(c, local, bag) if local else {}, term_refs(c))
+                )
             except Exception:  # noqa: BLE001 - Terminals gehen immer, auch ohne Auswertung
-                extras = {}
+                extras, refs = {}, {}
         out = []
         for ts in rows:
             tid = str(ts.get("terminal_id") or "")
             held = ts.get("state") == "held"
-            item = terminal_state(ts, stacks.get(tid), bag)
+            item = terminal_state(ts, stacks.get(tid), bag, refs)
             b = bag.new()
             ex = extras.get(tid) or {}
             item.update(

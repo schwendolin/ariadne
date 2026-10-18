@@ -33,6 +33,7 @@ from ariadne.events import canonical_json
 from ariadne.ingest.claims import effective_confidence, normalize_value
 from ariadne.ingest.identity import canon_ip, id_type, normalize_identifier
 from ariadne.ingest.proj_build import PROFILES, DecisionRow, MentionRow, ObsRow, UnitRow, build
+from ariadne.ingest.proj_findings import rebuild_findings, snapshot_rows
 from ariadne.ingest.schema_claims import MASK, SCHEMA_SQL, VIEWS_SQL, statements
 from ariadne.ontology import PREDICATES
 from ariadne.parsers.api import BASE_CONFIDENCE, Mention, Obs, UnitView
@@ -322,7 +323,8 @@ class Projector:
         """Berechnet die Projektion neu und gibt die neue Generation zurück."""
         with _savepoint(self.conn):
             before = self._snapshot()
-            res = build(self._units(), self._observations(), self._mentions(), self._decisions(),
+            decisions = self._decisions()
+            res = build(self._units(), self._observations(), self._mentions(), decisions,
                         self.scope, self.project_key, spans=self._spans(), profile=self.profile,
                         own_addrs=self._own_addrs())
             for table in ("identifier", "entity", "claim", "claim_source", "conflict", "inbox_item",
@@ -342,6 +344,8 @@ class Projector:
                [(v, k) for k, v in sorted(res.mention_verdicts.items())])
             ex("INSERT OR IGNORE INTO secret_value VALUES (?,?,?)",
                [(k, kind, val) for k, (kind, val) in sorted(res.secrets.items())])
+            # Findings (E113): aus d.finding.*, Belegzustand nach dem neuen Stand der Claims
+            rebuild_findings(self.conn, decisions)
             after = self._snapshot()
             changes = _diff(before, after)
             gen = self.generation + 1
@@ -416,7 +420,8 @@ class Projector:
         for r in self.conn.execute("SELECT item_key, kind, payload_json, state FROM inbox_item"):
             snap[("inbox", r[0])] = tuple(r)
         for r in self.conn.execute("SELECT * FROM keystep"):
-            snap[("thread", r[1])] = tuple(r)
+            snap[("keystep", r[1])] = tuple(r)  # Entität «keystep» wie in web-api.md 7 (vorher «thread»)
+        snap.update(snapshot_rows(self.conn))
         return snap
 
 

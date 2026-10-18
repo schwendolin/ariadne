@@ -15,11 +15,13 @@ from fastapi import APIRouter, Query
 from starlette.responses import Response
 
 from ariadne.ingest import inputs, queries
+from ariadne.ingest.pipeline import SILENCE_NS
+from ariadne.ingest.proj_build import display
 from ariadne.ingest.seg_stream import record_time
 from ariadne.web.api.common import Api, valid_tid
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import MASK, Bag, decode_cursor, encode_cursor, iso, ns_str
-from ariadne.web.api.views import chunks, command_ref, loads, secret_values, with_secrets
+from ariadne.web.api.views import chunks, command_ref, loads, secret_values, term_ref, with_secrets
 
 __all__ = [
     "add_routes",
@@ -93,9 +95,7 @@ def input_view(v: Mapping[str, Any], bag: Bag, secrets: list[str]) -> dict[str, 
         "ts": iso(v.get("t_shim_ns")),
         "ts_ns": ns_str(v.get("t_shim_ns")),
         # verdeckt und nicht aufgedeckt: keine Länge (SEC-W3, E104)
-        "length": None
-        if v.get("hidden") and not v.get("revealed")
-        else int(v.get("length") or 0),
+        "length": None if v.get("hidden") and not v.get("revealed") else int(v.get("length") or 0),
         "paste": bool(v.get("paste")),
         "redacted": bool(v.get("redacted")),
         "hidden": bool(v.get("hidden")),
@@ -184,6 +184,7 @@ def _collect(conn: Any, journal: Any, types: frozenset[str], terminal: str | Non
                     kind=kind,
                     summary=_summary(str(kind), data),
                     host_id=subj if isinstance(subj, str) else None,
+                    payload=data,
                 )
             )
     if "context" in types:
@@ -390,6 +391,7 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
         "terminal_id": e.get("terminal_id"),
         "context_label": None,
         "host_id": b(e.get("host_id")) if isinstance(e.get("host_id"), str) else None,
+        "terminal": term_ref(e.get("terminal_id"), ctx["refs"], b),
     }
     if t in ("command", "segment", "file"):
         item["context_label"] = b(e.get("context"))
@@ -428,6 +430,9 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
                 "flags": [f for f in (e.get("flags") or []) if f in _FLAGS],
                 "files": [{"unit_id": f[0], "path": b(f[1]) or ""} for f in ctx["files"].get(str(cid), [])],
                 "lines": int(e.get("lines") or 0),
+                "result": ctx["results"].get(
+                    str(cid), {"hosts_new": 0, "services": 0, "values": 0, "out_of_scope": 0, "conflicts": 0}
+                ),
             }
         )
     elif t == "segment":
@@ -436,6 +441,12 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
                 "unit_id": e.get("unit_id"),
                 "lines": int(e.get("lines") or 0),
                 "state": e.get("state") if e.get("state") in ("open", "provisional", "final") else "open",
+                "evaluate_after": (
+                    iso(ctx["last_out"].get(str(e.get("terminal_id"))) + SILENCE_NS)
+                    if e.get("state") != "final"
+                    and isinstance(ctx["last_out"].get(str(e.get("terminal_id"))), int)
+                    else None
+                ),
             }
         )
     elif t == "file":
@@ -447,6 +458,7 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
                 "host_label": b(e.get("context") if e.get("context") != "-" else None),
                 "note": b(e.get("note")),
                 "ordinal": int(e.get("ordinal") or 0),
+                "decision_id": e.get("decision_id"),
             }
         )
     elif t == "context":
@@ -460,6 +472,7 @@ def _shape(e: Mapping[str, Any], ctx: Mapping[str, Any], bag: Bag) -> dict[str, 
         item["context_label"] = item["stack_label"]
     elif t == "decision":
         item.update({"decision_id": e.get("id"), "kind": e.get("kind"), "summary": e.get("summary")})
+        item.update(_decision_extra(e, ctx, b))
     elif t == "gap":
         item.update(
             {
@@ -510,7 +523,143 @@ def _page_context(conn: Any, page: list[dict[str, Any]], all_entries: list[dict[
         if e["type"] == "file" and e.get("cmd_id") in wanted:
             files.setdefault(str(e["cmd_id"]), []).append((str(e.get("unit_id")), str(e.get("title") or "")))
     secrets = secret_values(conn) if any(e["type"] == "input" for e in page) else []
-    return {"ends": ends, "scope": scope, "distrust": distrust, "files": files, "secrets": secrets}
+    last_out = {
+        str(tid): int(ts)
+        for tid, ts in conn.execute(
+            "SELECT terminal_id, last_out_ns FROM seg_term WHERE last_out_ns IS NOT NULL"
+        )
+    }
+    return {
+        "ends": ends,
+        "scope": scope,
+        "distrust": distrust,
+        "files": files,
+        "secrets": secrets,
+        "refs": queries.term_refs(conn),
+        "results": _results(conn, cmd_ids),
+        "last_out": last_out,
+        "decisions": _decision_refs(conn, page),
+    }
+
+
+def _results(conn: Any, cmd_ids: list[str]) -> dict[str, dict[str, int]]:
+    """Ergebnis pro Befehl (18.8): «1 Host, 23 Services · 141 Werte übernommen», «+17 ausserhalb»,
+    «1 Widerspruch». Grundlage ist die Evidenzgruppe des Befehls (``claim_source.group_key``)."""
+    out: dict[str, dict[str, int]] = {}
+    for part in chunks(cmd_ids):
+        marks = ",".join("?" * len(part))
+        where = f"WHERE cs.group_key IN ({marks}) AND cs.distrusted = 0"
+        sql = (
+            "SELECT cs.group_key, c.claim_key, c.entity_id, c.state, c.lane, c.lane_reason, c.scope, "  # noqa: S608
+            "c.conflict_key FROM claim_source cs JOIN claim c ON c.claim_key = cs.claim_key " + where
+        )
+        rows = conn.execute(sql, tuple(part)).fetchall()
+        seen: set[tuple[str, str]] = set()
+        services: dict[str, set[str]] = {}
+        open_conf = {
+            str(r[0]) for r in conn.execute("SELECT conflict_key FROM conflict WHERE state = 'open'")
+        }
+        for gk, ck, eid, state, lane, reason, scope, conflict in rows:
+            g = str(gk)
+            if (g, ck) in seen:
+                continue
+            seen.add((g, ck))
+            r = out.setdefault(
+                g, {"hosts_new": 0, "services": 0, "values": 0, "out_of_scope": 0, "conflicts": 0}
+            )
+            if lane == "auto" and state == "auto":
+                r["values"] += 1
+            if reason == "out_of_scope" or (scope not in (None, "in") and lane == "quiet"):
+                r["out_of_scope"] += 1
+            if conflict is not None and str(conflict) in open_conf:
+                r["conflicts"] += 1
+            if isinstance(eid, str) and eid.startswith("svc:") and scope == "in":
+                services.setdefault(g, set()).add(eid)
+        for g, svcs in services.items():
+            out[g]["services"] = len(svcs)
+    # neue Hosts: Hosts im Scope, deren früheste Quelle (eines Werts des Hosts selbst) aus diesem
+    # Befehl stammt. SQLite liefert zu MIN() die Spalten derselben Zeile.
+    wanted = set(cmd_ids)
+    if wanted:
+        for _eid, gk, _ts in conn.execute(
+            "SELECT c.entity_id, cs.group_key, MIN(cs.ts_utc_ns) FROM claim c "
+            "JOIN claim_source cs ON cs.claim_key = c.claim_key "
+            "JOIN v_host h ON h.host_id = c.entity_id WHERE h.scope = 'in' AND cs.ts_utc_ns IS NOT NULL "
+            "GROUP BY c.entity_id"
+        ):
+            if gk in wanted:
+                r = out.setdefault(
+                    str(gk), {"hosts_new": 0, "services": 0, "values": 0, "out_of_scope": 0, "conflicts": 0}
+                )
+                r["hosts_new"] += 1
+    return out
+
+
+def _decision_refs(conn: Any, page: list[dict[str, Any]]) -> dict[str, Any]:
+    """Wirkung von ``d.unit.distrust`` und Befehle der Entscheide auf der Seite."""
+    ids = [str(e["id"]) for e in page if e["type"] == "decision"]
+    effects: dict[str, tuple[int, int, str]] = {}
+    for part in chunks(ids):
+        marks = ",".join("?" * len(part))
+        sql = "SELECT decision_id, rejected, weakened, cmd_id FROM unit_distrust WHERE decision_id IN "
+        sql += f"({marks})"
+        for did, rej, weak, cid in conn.execute(sql, tuple(part)):
+            effects[str(did)] = (int(rej), int(weak), str(cid))
+    claims: dict[str, tuple[str, str]] = {}
+    keys = sorted(
+        {
+            str((e.get("payload") or {}).get("claim_key"))
+            for e in page
+            if e["type"] == "decision" and isinstance((e.get("payload") or {}).get("claim_key"), str)
+        }
+    )
+    for part in chunks(keys):
+        marks = ",".join("?" * len(part))
+        for ck, subj, pred in conn.execute(
+            f"SELECT claim_key, subject_identifier, predicate FROM claim WHERE claim_key IN ({marks})",  # noqa: S608
+            tuple(part),
+        ):
+            claims[str(ck)] = (str(subj), str(pred))
+    return {"effects": effects, "claims": claims}
+
+
+_ACCESS_DETAIL = {"none": "kein Zugriff", "user": "Benutzer", "admin": "root"}
+
+
+def _decision_extra(e: Mapping[str, Any], ctx: Mapping[str, Any], b: Bag) -> dict[str, Any]:
+    """``detail`` (Zielbezug als Text), ``reason``, ``ref`` und ``effect`` eines Entscheids (18.8)."""
+    kind = str(e.get("kind") or "")
+    data = e.get("payload") or {}
+    refs = ctx["decisions"]
+    detail: str | None = None
+    subj = data.get("subject")
+    if kind == "d.status.access" and isinstance(subj, str):
+        detail = f"Zugriff {_ACCESS_DETAIL.get(str(data.get('value')), 'geändert')} auf {display(subj)}"
+    elif kind in ("d.status.work", "d.note.set", "d.tag.add", "d.tag.remove") and isinstance(subj, str):
+        detail = display(subj)
+        if kind in ("d.tag.add", "d.tag.remove") and isinstance(data.get("tag"), str):
+            detail += f" · {data['tag']}"
+    elif kind.startswith("d.claim.") and isinstance(data.get("claim_key"), str):
+        c = refs["claims"].get(data["claim_key"])
+        if c is not None:
+            detail = f"{display(c[0])} · {c[1]}"
+    elif kind in ("d.entity.merge", "d.entity.split"):
+        idents = [display(str(x)) for x in data.get("identifiers") or [] if isinstance(x, str)]
+        detail = " + ".join(idents[:4]) or None
+    elif kind.startswith("d.finding.") and isinstance(data.get("title"), str):
+        detail = data["title"]
+    effect = refs["effects"].get(str(e.get("id")))
+    ref = None
+    if kind == "d.unit.distrust":
+        cid = data.get("cmd_id")
+        ref = queries.cmd_ref(cid) if isinstance(cid, str) else (effect[2] if effect else None)
+    reason = data.get("reason") if isinstance(data.get("reason"), str) else None
+    return {
+        "detail": b(detail),
+        "reason": b(reason),
+        "ref": b(ref),
+        "effect": {"rejected": effect[0], "weakened": effect[1]} if effect else None,
+    }
 
 
 def timeline_page(

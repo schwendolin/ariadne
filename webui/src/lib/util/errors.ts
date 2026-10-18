@@ -1,16 +1,47 @@
+/**
+ * Fehlertexte (Briefing 5.14, B.3): Die UI übersetzt nur über den stabilen Code, nie über den
+ * Text des Servers, und nennt nie Zieldaten. Besitzer: ui-fundament.
+ */
 import { isApiError, type ClientErrorCode } from '../api/client';
-import { t } from '../i18n';
+import { t, type MessageKey } from '../i18n';
 
-/** Fehlertext über den stabilen Code, nie über den Servertext. */
-export function errText(e: unknown): string {
-  return isApiError(e) ? t(`err.${e.code}`) : t('err.internal');
+const KEYS: Record<ClientErrorCode, MessageKey> = {
+  unauthorized: 'err.unauthorized',
+  forbidden: 'err.forbidden',
+  policy: 'err.policy',
+  not_found: 'err.not_found',
+  method: 'err.internal',
+  no_project: 'err.no_project',
+  project_mismatch: 'err.project_mismatch',
+  conflict: 'err.conflict',
+  too_large: 'err.too_large',
+  host: 'err.forbidden',
+  validation: 'err.validation',
+  locked: 'err.locked',
+  rate_limited: 'err.rate_limited',
+  not_implemented: 'err.not_implemented',
+  unavailable: 'err.unavailable',
+  internal: 'err.internal',
+  clipboard_tool: 'err.clipboard_tool',
+  clipboard_session: 'err.clipboard_session',
+  network: 'err.network',
+  aborted: 'err.aborted',
+  timeout: 'err.timeout',
+  bad_response: 'err.internal',
+  http: 'err.internal',
+};
+
+export function errorCode(e: unknown): ClientErrorCode {
+  return isApiError(e) ? e.code : 'internal';
 }
 
-export function codeText(code: string | null): string {
-  if (!code) return '';
-  const known: ClientErrorCode[] = [
-    'unauthorized', 'forbidden', 'policy', 'budget', 'not_found', 'no_project', 'project_mismatch', 'conflict', 'locked',
-    'validation', 'rate_limited', 'llm_unavailable', 'internal', 'network', 'aborted', 'timeout', 'bad_response', 'http',
-  ];
-  return (known as string[]).includes(code) ? t(`err.${code as ClientErrorCode}`) : t('err.internal');
+/** Fester deutscher Text für einen Fehler; `prefix` etwa «Entscheid nicht gespeichert». */
+export function errorText(e: unknown, prefix?: MessageKey): string {
+  const text = t(KEYS[errorCode(e)] ?? 'err.internal');
+  return prefix ? `${t(prefix)}: ${text}` : text;
+}
+
+/** Abbrüche (Projektwechsel, Navigation) sind keine Fehler für die Anzeige. */
+export function isAbort(e: unknown): boolean {
+  return isApiError(e, 'aborted');
 }

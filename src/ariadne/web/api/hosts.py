@@ -31,10 +31,12 @@ from ariadne.web.api.text import Bag, iso
 from ariadne.web.api.views import (
     claim_rows,
     command_ref,
+    commands_for,
     conflict_rows,
     conflict_view,
     fact_view,
     loads,
+    unit_brief,
     with_secrets,
 )
 
@@ -73,6 +75,7 @@ def services_view(
 ) -> list[dict[str, Any]]:
     """ServiceView mit Verlauf (E45): abgelöste Werte von Zustand, Version, Produkt und Name."""
     extra = {str(r[0]): r[1:] for r in conn.execute("SELECT service_id, work, conflicts FROM v_service")}
+    banners = _banners(conn)
     history: dict[str, list[dict[str, Any]]] = {}
     marks = ",".join("?" * len(_HISTORY_PREDICATES))
     for eid, pred, value, last, key in conn.execute(
@@ -113,9 +116,76 @@ def services_view(
             "cves": b.many(c for c in s.get("cves") or [] if isinstance(c, str)),
             "history": history.get(sid, []),
         }
+        ban = banners.get(sid) or {}
+        item.update(
+            banner=b(ban.get("banner")),
+            from_target=bool(ban.get("from_target")),
+            suspect=bool(ban.get("suspect")),
+        )
         item["ctrl"] = b.ctrl
         out.append(item)
     return out
+
+
+def _banners(conn: Any) -> dict[str, dict[str, Any]]:
+    """Zusatzinfo (``service.extrainfo``, Zieldaten) und Herkunft vom Ziel bzw. Injection-Verdacht
+    pro Service (18.8: «! Injection-Verdacht · vom Ziel angeboten»)."""
+    out: dict[str, dict[str, Any]] = {}
+    for eid, pred, value, from_target, suspect, history in conn.execute(
+        "SELECT entity_id, predicate, value_text, from_target, suspect, history FROM v_claim "
+        "WHERE substr(entity_id, 1, 4) = 'svc:' AND state != 'rejected' LIMIT 50000"
+    ):
+        d = out.setdefault(str(eid), {"banner": None, "from_target": False, "suspect": False})
+        d["from_target"] = d["from_target"] or bool(from_target)
+        d["suspect"] = d["suspect"] or bool(suspect)
+        if pred == "service.extrainfo" and not history and d["banner"] is None:
+            d["banner"] = value
+    return out
+
+
+def _access_by(conn: Any, hid: str, access: Any) -> dict[str, Any] | None:
+    """Woher der Zugriff kommt (18.8, «root, per Entscheid 16:46»): Entscheid vor Schlüsselschritt
+    vor Wert. ``None`` ohne Zugriff."""
+    if access not in ("user", "admin"):
+        return None
+    revoked = queries.revoked_ids(conn)
+    last = None
+    for did, payload, ts in conn.execute(
+        "SELECT id, payload_json, ts FROM decision WHERE kind = 'd.status.access' ORDER BY seq"
+    ):
+        if did in revoked:
+            continue
+        data = loads(payload, {}) or {}
+        if queries.entity_of_subject(conn, data.get("subject")) == hid:
+            last = {"source": "decision", "decision_id": did, "ts": iso(ts)}
+    if last is not None:
+        return last
+    row = conn.execute(
+        "SELECT decision_id, ts_utc_ns FROM keystep WHERE entity_id = ? AND step IN ('foothold', 'privesc') "
+        "ORDER BY seq DESC LIMIT 1",
+        (hid,),
+    ).fetchone()
+    if row is not None:
+        return {"source": "keystep", "decision_id": row[0], "ts": iso(row[1])}
+    row = conn.execute(
+        "SELECT MIN(first_ts) FROM claim WHERE entity_id = ? "
+        "AND predicate IN ('access.shell', 'access.callback') AND state IN ('auto', 'confirmed')",
+        (hid,),
+    ).fetchone()
+    return {"source": "value", "decision_id": None, "ts": iso(row[0]) if row else None}
+
+
+def _candidate_claims(conn: Any, hid: str) -> list[str]:
+    """Claims, deren Annehmen oder Verwerfen einen Host im Nebel ein- oder ausfärbt (Screen 3)."""
+    return [
+        str(r[0])
+        for r in conn.execute(
+            "SELECT claim_key FROM claim WHERE entity_id = ? AND state = 'candidate' AND history = 0 "
+            "ORDER BY CASE predicate WHEN 'host.address' THEN 0 WHEN 'host.name' THEN 1 ELSE 2 END, "
+            "predicate, claim_key LIMIT 20",
+            (hid,),
+        )
+    ]
 
 
 def _entity_of(conn: Any, ident: str) -> str | None:
@@ -248,10 +318,21 @@ def _detail(conn: Any, settings: Any, host_id: str, bag: Bag) -> dict[str, Any] 
             "thread": thread,
             "note": nb(ex.get("note")),
             "commands": _commands(conn, hid, idents, bag),
+            "candidate_claims": _candidate_claims(conn, hid) if h.get("claim_state") == "candidate" else [],
+            "access_by": _access_by(conn, hid, h.get("access")),
+            "first_source": _first_source(conn, ex.get("first_unit"), bag),
         }
     )
     out["ctrl"] = bool(out["ctrl"] or nb.ctrl)
     return out
+
+
+def _first_source(conn: Any, unit_id: Any, bag: Bag) -> dict[str, Any] | None:
+    """Erste Quelle des Hosts als UnitBrief («Quelle: nmap -O · 15:10»)."""
+    if not isinstance(unit_id, str):
+        return None
+    u = commands_for(conn, [unit_id]).get(unit_id)
+    return unit_brief(u, with_secrets(bag, conn)) if u else None
 
 
 def add_routes(router: APIRouter, api: Api) -> None:

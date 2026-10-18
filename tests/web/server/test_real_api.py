@@ -55,7 +55,7 @@ def test_real_api_errors_carry_server_headers(paths, operator):
         await ctl_ok(paths.ctl_sock, "start", slug="lame", targets=["10.10.10.3"])
         pid = (await ctl_ok(paths.ctl_sock, "status"))["project"]["id"]
         for method, path, status in (("POST", f"/api/v1/p/{pid}/ai/denkanstoss", 501),
-                                     ("GET", f"/api/v1/p/{pid}/findings", 501),
+                                     ("GET", f"/api/v1/p/{pid}/exports", 501),
                                      ("GET", "/api/v1/p/0199aaaa-0000-7000-8000-000000000000/hosts", 409),
                                      ("POST", "/api/v1/terminals/gibtsnicht/pause", 404)):
             r = await web.req(method, path, token=token, json_body={} if method == "POST" else None)

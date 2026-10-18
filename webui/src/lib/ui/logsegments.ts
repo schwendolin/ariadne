@@ -55,11 +55,11 @@ export function segments(line: LogLine, showHidden: boolean): Segment[] {
         if (fg) classes.push(fg);
         if (bg) classes.push(bg);
         if (s.bold) classes.push('b');
-        if (s.concealed) concealed = true;
       }
     }
     if (line.masked.some((m) => m.col_start <= a && m.col_end >= b)) classes.push('masked');
     let part = text.slice(a, b);
+    if (line.concealed && line.masked.some((m) => m.kind === 'concealed' && m.col_start <= a && m.col_end >= b)) concealed = true;
     if (concealed) {
       classes.push('concealed');
       if (!showHidden) part = '·'.repeat(Math.min(part.length, 8));

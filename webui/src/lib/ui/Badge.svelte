@@ -1,46 +1,43 @@
+<!--
+  Kennzeichen (Radius 4): neutral, attention (Handlungsbedarf, Pause, held), error, ai («KI»),
+  solid (Präsentation). Status nie nur über Farbe: immer mit Text. Besitzer: ui-fundament.
+-->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-
-  type Tone = 'muted' | 'ok' | 'warn' | 'danger' | 'ai' | 'info';
-  let { tone = 'muted', title, children }: { tone?: Tone; title?: string; children: Snippet } = $props();
+  let { tone = 'neutral', children }: { tone?: 'neutral' | 'attention' | 'error' | 'ai' | 'solid'; children: Snippet } = $props();
 </script>
 
-<span class="badge {tone}" {title}>{@render children()}</span>
+<span class="badge {tone}">{@render children()}</span>
 
 <style>
   .badge {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 0 6px;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    line-height: 1.6;
+    gap: var(--sp-1);
+    padding: 1px 6px;
+    border-radius: var(--r-badge);
+    border: var(--lw-1) solid var(--line-strong);
+    font-size: var(--fs-xs);
+    color: var(--muted);
     white-space: nowrap;
-    font-weight: 600;
   }
-  .muted {
-    background: var(--badge-muted-bg);
-    color: var(--badge-muted-text);
+  .attention {
+    border-color: var(--attention);
+    color: var(--attention);
   }
-  .ok {
-    background: var(--badge-ok-bg);
-    color: var(--badge-ok-text);
-  }
-  .warn {
-    background: var(--badge-warn-bg);
-    color: var(--badge-warn-text);
-  }
-  .danger {
-    background: var(--badge-danger-bg);
-    color: var(--badge-danger-text);
+  .error {
+    border-color: var(--error);
+    color: var(--error);
   }
   .ai {
-    background: var(--badge-ai-bg);
-    color: var(--badge-ai-text);
+    border-color: var(--fg-2);
+    color: var(--fg);
+    font-weight: 700;
   }
-  .info {
-    background: var(--badge-info-bg);
-    color: var(--badge-info-text);
+  .solid {
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
+    font-weight: 600;
   }
 </style>

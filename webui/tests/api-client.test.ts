@@ -59,10 +59,10 @@ describe('ApiClient', () => {
   });
 
   it('übernimmt den Fehlercode aus dem Body', async () => {
-    const { api } = setup(TOKEN, async () => json(423, { error: { code: 'locked', message: 'gesperrt', request_id: 'r1' } }));
+    const { api } = setup(TOKEN, async () => json(423, { error: { code: 'locked', message: 'gesperrt' } }));
     const err = await api.get('/p/x/hosts').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect(err).toMatchObject({ code: 'locked', status: 423, requestId: 'r1' });
+    expect(err).toMatchObject({ code: 'locked', status: 423 });
   });
 
   it('ignoriert unbekannte Codes im Body und nimmt den HTTP-Status', async () => {

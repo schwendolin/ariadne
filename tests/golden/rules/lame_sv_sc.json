@@ -1,0 +1,713 @@
+[
+ {
+  "ai": null,
+  "basis": "89fb80e6d35254f7",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "6d3025a68cd1a6a5170c06f12b4184728f2a2df196b63c5f141eafd3bdb67f56",
+    "label": "nmap -sV -sC · 19:02 · Zeile 6",
+    "lines": [
+     5,
+     5
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/10.10.10.3",
+  "host_label": "10.10.10.3",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: vsftpd 2.3.4",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/10.10.10.3|tcp/21",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:3293e2c09a9593835c239292",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit vsftpd 2.3.4",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "vsftpd"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "2.3.4"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "vsftpd"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "2.3.4"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: vsftpd 2.3.4 (10.10.10.3:21)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "vsftpd 2.3.4"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "10.10.10.3:21"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-15T17:02:00.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "c836ded91b57cf63",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "3d64f949172648556429c23dbac9c4bf30bcf77127e6f0d3a1ca7f68341be2b1",
+    "label": "nmap -sV -sC · 19:02 · Zeile 20",
+    "lines": [
+     19,
+     19
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/10.10.10.3",
+  "host_label": "10.10.10.3",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: OpenSSH 4.7p1 Debian 8ubuntu1",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/10.10.10.3|tcp/22",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:0d43a6c1ae5641073ac3b6eb",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit OpenSSH 4.7p1",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "OpenSSH"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "4.7p1"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "OpenSSH"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "4.7p1"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: OpenSSH 4.7p1 Debian 8ubuntu1 (10.10.10.3:22)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "OpenSSH 4.7p1 Debian 8ubuntu1"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "10.10.10.3:22"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-15T17:02:00.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "d4801bc0ab7712a0",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "84c62bb0ea5f90e70085282eee1c90f7b554e83862f1b9e6c7cb6e4ed5d562fd",
+    "label": "nmap -sV -sC · 19:02 · Zeile 25",
+    "lines": [
+     24,
+     24
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-VULN-RECHERCHE",
+  "host_id": "ip:default/10.10.10.3",
+  "host_label": "10.10.10.3",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Produkt und Version bekannt: Samba smbd 3.0.20-Debian",
+  "rule_id": "R-VERSION-RECHERCHE",
+  "service_id": "svc:ip:default/10.10.10.3|tcp/445",
+  "stages": {
+   "direction": "Exploit-Datenbanken nach Produkt und Version durchsuchen; Treffer immer an der genauen Version prüfen.",
+   "question": "Gibt es für diese Version bekannte Schwachstellen?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:7c4d1363ce47b77d73b55d6f",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "searchsploit Samba 3.0.20",
+    "label": "searchsploit",
+    "parts": [
+     {
+      "target": false,
+      "text": "searchsploit "
+     },
+     {
+      "target": true,
+      "text": "Samba"
+     },
+     {
+      "target": false,
+      "text": " "
+     },
+     {
+      "target": true,
+      "text": "3.0.20"
+     }
+    ],
+    "rendered": true,
+    "template_id": "searchsploit",
+    "tool": "searchsploit",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "searchsploit"
+     },
+     {
+      "ctrl": false,
+      "label": "Produkt",
+      "safe": true,
+      "slot": "service.product",
+      "target": true,
+      "type": "words",
+      "value": "Samba"
+     },
+     {
+      "ctrl": false,
+      "label": "Version",
+      "safe": true,
+      "slot": "service.version",
+      "target": true,
+      "type": "word",
+      "value": "3.0.20"
+     }
+    ]
+   }
+  ],
+  "title": "Version recherchieren: Samba smbd 3.0.20-Debian (10.10.10.3:445)",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Version recherchieren: "
+   },
+   {
+    "target": true,
+    "text": "Samba smbd 3.0.20-Debian"
+   },
+   {
+    "target": false,
+    "text": " ("
+   },
+   {
+    "target": true,
+    "text": "10.10.10.3:445"
+   },
+   {
+    "target": false,
+    "text": ")"
+   }
+  ],
+  "ts": "2026-10-15T17:02:00.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "2292e38589d9c933",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "9a25a419cc3496f31757c16c730b87bfcb7faa12b2f29e7ce4526d271d433dea",
+    "label": "nmap -sV -sC · 19:02 · Zeile 24",
+    "lines": [
+     23,
+     23
+    ],
+    "unit_id": "cmd1"
+   },
+   {
+    "claim_key": "aaced6225222fba58a7917a906ecc8d462cb59fead1d3f268f9c560070e526a3",
+    "label": "nmap -sV -sC · 19:02 · Zeile 25",
+    "lines": [
+     24,
+     24
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-SMB-SHARES",
+  "host_id": "ip:default/10.10.10.3",
+  "host_label": "10.10.10.3",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "SMB auf Port 139, 445 ohne Liste der Shares",
+  "rule_id": "R-SMB-SHARES",
+  "service_id": "svc:ip:default/10.10.10.3|tcp/445",
+  "stages": {
+   "direction": "Freigaben lassen sich oft ohne Konto auflisten; eine beschreibbare Freigabe ist ein häufiger Einstieg.",
+   "question": "Welche Freigaben bietet dieser Host an, und welche sind ohne Anmeldung lesbar?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:4b12bccf3c16f3e35b422024",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "smbclient -N -L //10.10.10.3",
+    "label": "smbclient: Shares ohne Anmeldung auflisten",
+    "parts": [
+     {
+      "target": false,
+      "text": "smbclient -N -L //"
+     },
+     {
+      "target": true,
+      "text": "10.10.10.3"
+     }
+    ],
+    "rendered": true,
+    "template_id": "smbclient-list",
+    "tool": "smbclient",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "smbclient"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "10.10.10.3"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "smbmap -H 10.10.10.3",
+    "label": "smbmap: Shares und Rechte",
+    "parts": [
+     {
+      "target": false,
+      "text": "smbmap -H "
+     },
+     {
+      "target": true,
+      "text": "10.10.10.3"
+     }
+    ],
+    "rendered": true,
+    "template_id": "smbmap",
+    "tool": "smbmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "smbmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "10.10.10.3"
+     }
+    ]
+   },
+   {
+    "blocked_reason": null,
+    "command": "nmap -p 445 --script smb-enum-shares 10.10.10.3",
+    "label": "nmap-Skript smb-enum-shares",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p "
+     },
+     {
+      "target": true,
+      "text": "445"
+     },
+     {
+      "target": false,
+      "text": " --script smb-enum-shares "
+     },
+     {
+      "target": true,
+      "text": "10.10.10.3"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-smb-enum-shares",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "Port",
+      "safe": true,
+      "slot": "service.port",
+      "target": true,
+      "type": "port",
+      "value": "445"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "10.10.10.3"
+     }
+    ]
+   }
+  ],
+  "title": "SMB-Shares auf 10.10.10.3 auflisten",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "SMB-Shares auf "
+   },
+   {
+    "target": true,
+    "text": "10.10.10.3"
+   },
+   {
+    "target": false,
+    "text": " auflisten"
+   }
+  ],
+  "ts": "2026-10-15T17:02:00.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "3b3d97cda0a1a647",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "50c9eec59babbf22278924953bf806e4b172b320053e3d490fa944788d5c420f",
+    "label": "nmap -sV -sC · 19:02 · Zeile 3",
+    "lines": [
+     2,
+     2
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-PORTS-TCP",
+  "host_id": "ip:default/10.10.10.3",
+  "host_label": "10.10.10.3",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Bisher nur die häufigsten TCP-Ports gescannt",
+  "rule_id": "R-FULL-PORTSCAN",
+  "service_id": null,
+  "stages": {
+   "direction": "Ein Scan über alle 65535 TCP-Ports findet Dienste auf ungewöhnlichen Ports, etwa Hintertüren oder Verwaltungsoberflächen.",
+   "question": "Laufen auf diesem Host Dienste ausserhalb der häufigsten 1000 Ports?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:e9420233156f24cb5b0cc0d7",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "nmap -p- -T4 10.10.10.3",
+    "label": "nmap: alle TCP-Ports",
+    "parts": [
+     {
+      "target": false,
+      "text": "nmap -p- -T4 "
+     },
+     {
+      "target": true,
+      "text": "10.10.10.3"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-full-tcp",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "10.10.10.3"
+     }
+    ]
+   }
+  ],
+  "title": "Alle TCP-Ports von 10.10.10.3 scannen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "Alle TCP-Ports von "
+   },
+   {
+    "target": true,
+    "text": "10.10.10.3"
+   },
+   {
+    "target": false,
+    "text": " scannen"
+   }
+  ],
+  "ts": "2026-10-15T17:02:00.000000Z"
+ },
+ {
+  "ai": null,
+  "basis": "c2031137f9cc58bb",
+  "ctrl": false,
+  "ctrl_reason": false,
+  "decision_id": null,
+  "evidence": [
+   {
+    "claim_key": "50c9eec59babbf22278924953bf806e4b172b320053e3d490fa944788d5c420f",
+    "label": "nmap -sV -sC · 19:02 · Zeile 3",
+    "lines": [
+     2,
+     2
+    ],
+    "unit_id": "cmd1"
+   }
+  ],
+  "flags": [],
+  "goal_id": "PZ-PORTS-UDP",
+  "host_id": "ip:default/10.10.10.3",
+  "host_label": "10.10.10.3",
+  "kind": "goal",
+  "origin": "rule",
+  "reason": "Noch kein UDP-Scan für diesen Host",
+  "rule_id": "R-UDP-SCAN",
+  "service_id": null,
+  "stages": {
+   "direction": "Ein UDP-Scan der häufigsten Ports dauert länger als TCP, findet aber oft SNMP oder TFTP.",
+   "question": "Welche Dienste laufen über UDP, etwa SNMP, TFTP oder DNS?"
+  },
+  "state": "open",
+  "suggestion_key": "sg:a0e7402fa98dd512a82139f5",
+  "templates": [
+   {
+    "blocked_reason": null,
+    "command": "sudo nmap -sU --top-ports 100 10.10.10.3",
+    "label": "nmap: häufigste UDP-Ports (braucht root)",
+    "parts": [
+     {
+      "target": false,
+      "text": "sudo nmap -sU --top-ports 100 "
+     },
+     {
+      "target": true,
+      "text": "10.10.10.3"
+     }
+    ],
+    "rendered": true,
+    "template_id": "nmap-udp-top",
+    "tool": "nmap",
+    "values": [
+     {
+      "ctrl": false,
+      "label": "Werkzeug",
+      "safe": true,
+      "slot": "tool",
+      "target": false,
+      "type": "word",
+      "value": "nmap"
+     },
+     {
+      "ctrl": false,
+      "label": "IP",
+      "safe": true,
+      "slot": "host.ip",
+      "target": true,
+      "type": "ip",
+      "value": "10.10.10.3"
+     }
+    ]
+   }
+  ],
+  "title": "UDP-Ports von 10.10.10.3 scannen",
+  "title_parts": [
+   {
+    "target": false,
+    "text": "UDP-Ports von "
+   },
+   {
+    "target": true,
+    "text": "10.10.10.3"
+   },
+   {
+    "target": false,
+    "text": " scannen"
+   }
+  ],
+  "ts": "2026-10-15T17:02:00.000000Z"
+ }
+]

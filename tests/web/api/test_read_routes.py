@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import urllib.parse
 
+from ariadne.rules import api as rules_api
 from ariadne.web.api.text import MASK
 from tests.web.api.helpers import BASE, CRYPT, HOSTILE, OWN_SECRET, REMOTE_PW, TARGET, clean, run_api
 
@@ -26,7 +27,8 @@ def test_status_terminals_project_and_changes(paths, operator):
             "profile": "lab",
             "chain_head_ok": True,
         }
-        assert st["operator"] == {"exists": True, "unlocked": True} and st["locked"] is False
+        assert st["operator"] == {"exists": True, "unlocked": True, "own_secrets": 1}
+        assert st["locked"] is False
         assert st["active"] == {"slug": "lame", "stopped": False, "end_reason": None}
         assert st["recording"] == {"connected": 2, "on": 2, "paused": 0, "held": 0, "mux": 0}
         assert set(st["preroll"]) == {
@@ -133,7 +135,10 @@ def test_map_hosts_services_and_next(paths, operator):
         nx = (await c.get(f"{BASE}/p/{fx.pid}/next")).json()
         kinds = sorted(i["kind"] for i in nx["clarify"])
         assert kinds == ["conflict", "conflict", "ctx_suggestion"] and nx["open"] == 3
-        assert nx["confirm"] == [] and nx["suggestions"] == [] and nx["suggestions_available"] is False
+        # Denkanstösse kommen aus der Regel-Engine (web-api.md 18.6); ihr Inhalt wird in tests/rules geprüft.
+        assert nx["confirm"] == [] and isinstance(nx["suggestions"], list)
+        assert nx["suggestions_available"] is (not rules_api.STUB)
+        assert all(s["state"] == "open" for s in nx["suggestions"])
         sug = next(i for i in nx["clarify"] if i["kind"] == "ctx_suggestion")
         assert (
             sug["terminal_id"] == fx.extra["callback"] and sug["suggested_host"] == "ip:default/10.10.10.99"

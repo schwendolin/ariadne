@@ -1,22 +1,28 @@
 /**
- * Kleines i18n-Modul. Alle UI-Texte laufen über t(), Standard ist Deutsch.
+ * i18n: alle UI-Texte laufen über t(). Deutsch (Schweiz): echte Umlaute, nie «ß», keine Emojis.
+ * Besitzer: ui-fundament.
  *
- * - Platzhalter `{name}` werden durch Parameter ersetzt. Parameter sind Text,
- *   die Ausgabe wird in Svelte normal escapt.
- * - Plural mit «Einzahl|Mehrzahl», gewählt über `n`.
- * - tKey() für Schlüssel aus Serverwerten (z. B. Prädikate) mit Rückfall auf den Rohwert.
+ * Drei Wörterbücher, je ein Besitzer (Vertrag v0.1-Oberfläche, Abschnitt 6):
+ *   de.ts         ui-fundament  Präfixe app, nav, header, rec, login, state, menu, settings, palette,
+ *                               help, err, copy, secret, common, time, keys, present, scope, notice
+ *   de.karte.ts   ui-karte      Präfixe karte, lage, oos, layers, table, next, sug, host
+ *   de.verlauf.ts ui-verlauf    Präfixe term, ctx, tl, pending, ev, fd, export, shot
+ * tests/fundament/i18n.test.ts prüft: keine doppelten Schlüssel, Präfixe passen zum Besitzer,
+ * kein «ß», keine Emojis.
+ *
+ * Platzhalter `{name}` werden durch Parameter ersetzt (Text, Svelte escapt). Plural mit
+ * «Einzahl|Mehrzahl», gewählt über den Parameter `n`.
  */
 import { de } from './de';
+import { deKarte } from './de.karte';
+import { deVerlauf } from './de.verlauf';
 
-export type MessageKey = keyof typeof de;
-export type Messages = Record<MessageKey, string>;
+const all = { ...de, ...deKarte, ...deVerlauf } as const;
 
-let messages: Messages = de;
+export type MessageKey = keyof typeof de | keyof typeof deKarte | keyof typeof deVerlauf;
 export const locale = 'de-CH';
 
-export function setMessages(next: Messages): void {
-  messages = next;
-}
+const messages: Record<string, string> = all;
 
 function format(msg: string, params?: Record<string, string | number>): string {
   let text = msg;
@@ -25,16 +31,16 @@ function format(msg: string, params?: Record<string, string | number>): string {
     text = (params.n === 1 ? one : other) ?? text;
   }
   if (!params) return text;
-  return text.replace(/\{(\w+)\}/g, (all, k: string) => (params[k] !== undefined ? String(params[k]) : all));
+  return text.replace(/\{(\w+)\}/g, (whole, k: string) => (params[k] !== undefined ? String(params[k]) : whole));
 }
 
 export function t(key: MessageKey, params?: Record<string, string | number>): string {
   return format(messages[key] ?? key, params);
 }
 
-/** Für Schlüssel, die aus Serverwerten zusammengesetzt sind; unbekannte geben `fallback` zurück. */
+/** Für Schlüssel aus Serverwerten (Prädikate, Gründe); unbekannte ergeben `fallback`. */
 export function tKey(key: string, fallback: string, params?: Record<string, string | number>): string {
-  const msg = (messages as Record<string, string>)[key];
+  const msg = messages[key];
   return msg === undefined ? fallback : format(msg, params);
 }
 
@@ -46,3 +52,6 @@ export function hasKey(key: string): key is MessageKey {
 export function num(n: number): string {
   return n.toLocaleString(locale);
 }
+
+/** Nur für Tests: die drei Wörterbücher einzeln. */
+export const dictionaries = { de, deKarte, deVerlauf };

@@ -15,6 +15,9 @@ laufen mit ``sqlite3`` wie mit ``sqlcipher3``.
   ``net.route``, A5) schreibt die Pipeline; ``ctx_auto`` (Auto-Kontext aus dem
   ersten Callback, E23) und ``unit_distrust`` (Rückgängig pro Befehl, A2) sind
   abgeleitet.
+* ``finding`` und ``finding_evidence`` (E113, Bau v0.1-Oberfläche) baut
+  :mod:`ariadne.ingest.proj_findings` aus den Entscheiden ``d.finding.*``. Neue
+  Tabellen legt ``CREATE TABLE IF NOT EXISTS`` auch in einer bestehenden Datei an.
 * Spuren (E42): ``claim.lane`` ist ``auto``, ``quiet``, ``decide`` oder ``user``,
   ``lane_reason`` der Grund; ``history = 1`` heisst durch einen neueren Zustand
   oder eine genauere Version abgelöst (E45). ``group_key`` ist die Evidenzgruppe.
@@ -254,6 +257,38 @@ CREATE TABLE IF NOT EXISTS unit_distrust (
   decision_id  TEXT NOT NULL,
   rejected     INTEGER NOT NULL,
   weakened     INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS finding (
+  finding_id         TEXT PRIMARY KEY,
+  ordinal            INTEGER NOT NULL,
+  title              TEXT NOT NULL,
+  severity           TEXT,
+  status             TEXT NOT NULL,
+  affected_json      TEXT NOT NULL DEFAULT '[]',
+  description        TEXT NOT NULL DEFAULT '',
+  remediation        TEXT NOT NULL DEFAULT '',
+  attack_json        TEXT NOT NULL DEFAULT '[]',
+  cves_json          TEXT NOT NULL DEFAULT '[]',
+  created_from_json  TEXT,
+  deleted            INTEGER NOT NULL DEFAULT 0,
+  created_ts         INTEGER NOT NULL,
+  updated_ts         INTEGER NOT NULL,
+  history_json       TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS finding_evidence (
+  finding_id   TEXT NOT NULL,
+  evidence_id  TEXT NOT NULL,
+  claim_key    TEXT,
+  unit_id      TEXT,
+  line_start   INTEGER,
+  line_end     INTEGER,
+  state        TEXT NOT NULL CHECK (state IN ('ok','distrusted','missing')),
+  added_ts     INTEGER NOT NULL,
+  decision_id  TEXT NOT NULL,
+  pos          INTEGER NOT NULL,
+  PRIMARY KEY (finding_id, evidence_id)
 );
 
 CREATE TABLE IF NOT EXISTS generation (

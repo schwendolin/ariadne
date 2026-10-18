@@ -1,5 +1,6 @@
 /**
- * SSE-Client auf fetch-Basis (Architektur 7.3).
+ * SSE-Client auf fetch-Basis (Architektur 7.3, web-api.md 14): ein globaler Strom
+ * `GET /api/v1/events` pro Tab, auch ohne Projekt.
  *
  * `EventSource` kann keine Header setzen, das Token muss aber als Bearer mit.
  * Deshalb liest dieser Client `text/event-stream` selbst:
@@ -117,7 +118,7 @@ export function backoffDelay(attempt: number, initialMs = 1000, maxMs = 30000, j
 }
 
 const EVENT_NAMES = new Set<StreamEventName>([
-  'changes', 'rec', 'terminal', 'inbox', 'suggestion', 'progress', 'presentation', 'project', 'reset',
+  'changes', 'terminal', 'inbox', 'suggestion', 'progress', 'presentation', 'project', 'reset', 'prefs',
 ]);
 
 /** Wandelt eine SSE-Nachricht in ein typisiertes Ereignis; unbekannte oder kaputte werden verworfen. */

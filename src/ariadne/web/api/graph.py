@@ -23,7 +23,7 @@ from ariadne.ingest.db import get_meta
 from ariadne.web.api.common import Api
 from ariadne.web.api.errors import ApiError
 from ariadne.web.api.text import Bag, iso
-from ariadne.web.api.views import loads
+from ariadne.web.api.views import commands_for, loads, unit_brief, with_secrets
 
 __all__ = [
     "add_routes",
@@ -37,7 +37,12 @@ __all__ = [
     "SERVICE_CLASSES",
     "TABLE_ONLY_HOSTS",
     "build_graph",
+    "host_ports",
+    "idn_label",
+    "PORTS_MAX",
 ]
+
+PORTS_MAX = 12  # Host-Tabelle «22 · 445» (web-api.md 18.8)
 
 LAYERS = ("topology", "services", "thread", "oos", "fog")
 SERVICE_CLASSES = ("web", "smb", "db", "remote", "file", "mail", "other")
@@ -189,6 +194,18 @@ def host_data(conn: Any) -> dict[str, Any]:
     open_conflicts = int(conn.execute("SELECT COUNT(*) FROM conflict WHERE state = 'open'").fetchone()[0])
     own = sorted(str(r[0]) for r in conn.execute("SELECT addr FROM own_addr"))
     gen = get_meta(conn, "generation")
+    briefs: dict[str, dict[str, Any]] = {}
+    for entity_id, predicate in conn.execute(
+        "SELECT entity_id, predicate FROM conflict WHERE state = 'open' AND entity_id IS NOT NULL "
+        "ORDER BY entity_id, predicate"
+    ):
+        eid = str(entity_id)
+        host, port = eid, None
+        if eid.startswith("svc:"):
+            host, _, pp = eid[4:].rpartition("|")
+            with contextlib.suppress(ValueError):
+                port = int(pp.partition("/")[2])
+        briefs.setdefault(host, {"predicate": predicate, "port": port})
     return {
         "hosts": hosts,
         "extra": extra,
@@ -199,7 +216,27 @@ def host_data(conn: Any) -> dict[str, Any]:
         "open_conflicts": open_conflicts,
         "own": own,
         "generation": int(gen) if gen is not None and gen.isdigit() else 0,
+        "conflict_brief": briefs,
     }
+
+
+def host_ports(services: Iterable[Mapping[str, Any]]) -> list[int]:
+    """Bis :data:`PORTS_MAX` Ports, offene zuerst, je aufsteigend (18.8)."""
+    opened = sorted(
+        {int(s["port"]) for s in services if s.get("state") == "open" and isinstance(s.get("port"), int)}
+    )
+    rest = sorted({int(s["port"]) for s in services if isinstance(s.get("port"), int)} - set(opened))
+    return (opened + rest)[:PORTS_MAX]
+
+
+def idn_label(label: str) -> tuple[str, str | None]:
+    """Anzeige eines Namens und seine Punycode-Form (Namen liegen kanonisch in ASCII vor)."""
+    if "xn--" not in label:
+        return label, None
+    try:
+        return label.encode("ascii").decode("idna"), label
+    except UnicodeError:
+        return label, label
 
 
 def host_node(h: Mapping[str, Any], data: Mapping[str, Any], segment: str | None, bag: Bag) -> dict[str, Any]:
@@ -236,6 +273,8 @@ def host_node(h: Mapping[str, Any], data: Mapping[str, Any], segment: str | None
         "on_thread": hid in data["thread"],
         "hint": hint,
         "tags": b.many(t for t in ex.get("tags") or [] if isinstance(t, str)),
+        "ports": host_ports(services),
+        "conflict_brief": (data.get("conflict_brief") or {}).get(hid),
     }
     node["ctrl"] = b.ctrl
     return node
@@ -291,6 +330,50 @@ def thread_edges(conn: Any, nodes: set[str], bag: Bag) -> list[dict[str, Any]]:
     return out
 
 
+def _ip_of(ident: str) -> str | None:
+    return ident.split("/", 1)[1] if ident.startswith("ip:") and "/" in ident else None
+
+
+def _oos_notes(conn: Any, data: Mapping[str, Any]) -> tuple[dict[str, str], set[str], dict[str, str]]:
+    """Hinweise im Out-of-Scope-Popover (18.8): gleiche MAC wie ein Host im Scope und Callbacks von
+    Adressen ausserhalb (``access.callback``; ein Listener sieht sie nur als Text, sie können gefälscht
+    sein). ``related``: ein Callback im Scope in derselben Stufe (der echte neben dem fremden)."""
+    macs_in: dict[str, str] = {}
+    macs_of: dict[str, list[str]] = {}
+    for hid, scope, macs_json in conn.execute("SELECT host_id, scope, macs_json FROM v_host"):
+        macs = [m for m in loads(macs_json, []) or [] if isinstance(m, str)]
+        if scope == "in":
+            for m in macs:
+                macs_in.setdefault(m, str(hid))
+        else:
+            macs_of[str(hid)] = macs
+    same_mac = {
+        hid: next(macs_in[m] for m in macs if m in macs_in)
+        for hid, macs in macs_of.items()
+        if any(m in macs_in for m in macs)
+    }
+    callbacks: set[str] = set()
+    related: dict[str, str] = {}
+    stages: dict[tuple[Any, Any], list[tuple[str, Any]]] = {}
+    for subject, scope, tid, opened in conn.execute(
+        "SELECT c.subject_identifier, c.scope, u.terminal_id, u.ctx_opened_at FROM claim c "
+        "JOIN claim_source cs ON cs.claim_key = c.claim_key LEFT JOIN obs_unit u ON u.unit_id = cs.unit_id "
+        "WHERE c.predicate = 'access.callback' AND c.state != 'rejected' ORDER BY cs.ts_utc_ns LIMIT 5000"
+    ):
+        ip = _ip_of(str(subject))
+        if ip is None:
+            continue
+        callbacks.add(ip)
+        stages.setdefault((tid, opened), []).append((str(subject), scope))
+    for entries in stages.values():
+        inside = [subj for subj, scope in entries if scope == "in"]
+        for subj, scope in entries:
+            ip = _ip_of(subj)
+            if scope != "in" and inside and ip is not None:
+                related.setdefault(ip, inside[0])  # Callback von ausserhalb neben einem echten
+    return same_mac, callbacks, related
+
+
 def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
     own = set(data["own"])
     host_addrs: set[str] = set()
@@ -301,6 +384,7 @@ def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
             "SELECT value, COUNT(*) FROM mention WHERE value_type = 'ip' AND value IS NOT NULL GROUP BY value"
         )
     }
+    same_mac, callbacks, cb_related = _oos_notes(conn, data)
     for h in data["hosts"]:
         host_addrs.update(str(a) for a in h.get("addresses") or [])
         if h.get("scope") == "in" or h.get("placeholder"):
@@ -308,14 +392,24 @@ def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
         hid = str(h.get("host_id"))
         verdict = h.get("scope") if h.get("scope") in ("out", "excluded", "outside_window") else "unknown"
         b = bag.new()
+        label, puny = idn_label(str(h.get("label") or ""))
+        ip = _ip_of(hid)
+        note, related = None, None
+        if hid in same_mac:
+            note, related = "same_mac", same_mac[hid]
+        elif ip is not None and ip in callbacks:
+            note, related = "forged_callback", cb_related.get(ip)
         items.append(
             {
                 "identifier": b(hid),
-                "label": b(h.get("label")) or "",
+                "label": b(label) or "",
                 "verdict": verdict,
                 "rule": b((data["rules"].get(hid) or (None, None))[1]),
                 "mentions": sum(mentions.get(str(a), 0) for a in h.get("addresses") or []),
                 "first_unit": (data["extra"].get(hid) or {}).get("first_unit"),
+                "punycode": b(puny),
+                "note": note,
+                "related": b(related),
                 "ctrl": b.ctrl,
             }
         )
@@ -328,6 +422,7 @@ def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
             continue
         ident = f"ip:default/{value}"
         b = bag.new()
+        forged = str(value) in callbacks
         items.append(
             {
                 "identifier": b(ident),
@@ -336,11 +431,39 @@ def _oos(conn: Any, data: Mapping[str, Any], bag: Bag) -> dict[str, Any]:
                 "rule": b((data["rules"].get(ident) or (None, None))[1]),
                 "mentions": int(n),
                 "first_unit": first,
+                "punycode": None,
+                "note": "forged_callback" if forged else None,
+                "related": b(cb_related.get(str(value))) if forged else None,
                 "ctrl": b.ctrl,
             }
         )
     items.sort(key=lambda i: (-int(i["mentions"]), str(i["identifier"])))
-    return {"total": len(items), "items": items[:OOS_MAX]}
+    shown = items[:OOS_MAX]
+    _oos_sources(conn, shown, bag)
+    return {"total": len(items), "items": shown}
+
+
+def _oos_sources(conn: Any, items: list[dict[str, Any]], bag: Bag) -> None:
+    """``source``: erste Quelle als UnitBrief («nmap -6 15:20»); Titel wie Befehlstexte maskiert."""
+    firsts: dict[int, str] = {}
+    for i, it in enumerate(items):
+        first = it.get("first_unit")
+        ip = _ip_of(str(it.get("identifier") or ""))
+        if ip is not None:
+            row = conn.execute(
+                "SELECT unit_id FROM mention WHERE value_type = 'ip' AND value = ? "
+                "ORDER BY ts_utc_ns, unit_id LIMIT 1",
+                (ip,),
+            ).fetchone()
+            if row is not None:
+                first = row[0]
+        if isinstance(first, str):
+            firsts[i] = first
+    units = commands_for(conn, sorted(set(firsts.values()))) if firsts else {}
+    cbag = with_secrets(bag, conn) if units else bag
+    for i, it in enumerate(items):
+        u = units.get(firsts.get(i, ""))
+        it["source"] = unit_brief(u, cbag) if u else None
 
 
 def build_graph(conn: Any, settings: Any, layers: set[str], bag: Bag, project_id: str) -> dict[str, Any]:
@@ -372,9 +495,13 @@ def build_graph(conn: Any, settings: Any, layers: set[str], bag: Bag, project_id
         ids = {str(h.get("host_id")) for h in shown}
         edges.extend(thread_edges(conn, ids, bag))
     oos = _oos(conn, data, bag) if "oos" in layers else {"total": 0, "items": []}
+    as_of = conn.execute(
+        "SELECT ts_utc_ns FROM generation WHERE generation = (SELECT MAX(generation) FROM generation)"
+    ).fetchone()
     return {
         "project_id": project_id,
         "generation": data["generation"],
+        "as_of": iso(as_of[0]) if as_of else None,
         "nodes": nodes,
         "edges": edges,
         "oos": oos,

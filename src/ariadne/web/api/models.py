@@ -26,6 +26,11 @@ __all__ = [
     "Position",
     "PositionsRequest",
     "MAX_WEB_PAUSE_MIN",
+    "PrefsRequest",
+    "SeenRequest",
+    "ScopeAckRequest",
+    "Theme",
+    "Density",
 ]
 
 MAX_WEB_PAUSE_MIN = 30  # länger nur im Terminal (Briefing 9.10, Vertrag 1.4 Punkt 5)
@@ -111,3 +116,27 @@ class Position(_In):
 
 class PositionsRequest(_In):
     positions: dict[Annotated[str, Field(min_length=1, max_length=512)], Position] = Field(max_length=5000)
+
+
+# --------------------------------------------------------------------------- Bau v0.1-Oberfläche (18)
+
+Theme = Literal["system", "light", "dark"]
+Density = Literal["comfortable", "compact"]
+
+
+class PrefsRequest(_In):
+    """``PUT /ui/prefs`` (18.2): nur die genannten Felder; ``null`` gilt nicht als Wert."""
+
+    theme: Theme | None = None
+    density: Density | None = None
+    learning: bool | None = None
+
+
+class SeenRequest(_In):
+    """``PUT /p/{pid}/ui/seen`` (18.3): leerer Körper; die Zeit nimmt der Server selbst."""
+
+
+class ScopeAckRequest(_In):
+    """``PUT /p/{pid}/ui/scope-ack`` (18.4): Befehl voll (``<tid>@<off>``) oder als ``cmd_ref``."""
+
+    cmd_id: str = Field(min_length=10, max_length=200, pattern=r"^[0-9A-Za-z-]{8,64}@[0-9]{1,19}$")

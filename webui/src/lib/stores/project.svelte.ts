@@ -1,244 +1,144 @@
 /**
- * Store pro Projekt. Alles, was zu einem Projekt gehört, hängt an genau einer
- * Instanz. Beim SSE-Ereignis `project` verwirft die App die Instanz komplett
- * (dispose): laufende Abrufe werden abgebrochen, Blob-URLs freigegeben. So
- * mischen sich Projekte im Browser nie (Architektur 7.3).
+ * Store des offenen Projekts (Vertrag v0.1-Oberfläche, Abschnitt 4). Besitzer: ui-fundament.
  *
- * Grosse Listen liegen in $state.raw und werden nur als Ganzes ersetzt; das
- * spart Proxies und Speicher auf einer schwachen VM.
+ * - Hält die Projekt-Stores der drei UI-Teile und verteilt SSE-Ereignisse an sie.
+ * - `changes`: holt `/changes?since=<eigene Generation>` (gebündelt, 250 ms) und reicht das
+ *   ChangeSet weiter; bei `reset: true` lädt er alles neu. `reset` (Reparse, Puffer, Neustart)
+ *   lädt ebenfalls alles neu.
+ * - `dispose()` bricht jeden laufenden Abruf ab (AbortController) und verwirft alle Teile;
+ *   AppState legt bei `project`, Sperre und Abmelden einen neuen Store an (E70).
  */
 import type { Backend } from '../api/backend';
-import { isApiError } from '../api/client';
-import type {
-  ChangeEntity, CredentialView, Finding, GraphLayer, GraphView, HostSummary, InboxView, Lens, Suggestion, Terminal, TimelineItem,
-} from '../api/types';
+import type { ChangeSet, DecisionInput, DecisionResponse, ProjectView, StreamEvent } from '../api/types';
+import { errorText, isAbort } from '../util/errors';
+import { clientRef, type AppApi, type DecideOptions, type ProjectCtx, type ProjectPart } from './ctx';
+import { EvidenceStore } from './evidence.svelte';
+import { FindingsStore } from './findings.svelte';
+import { HostStore } from './host.svelte';
+import { MapStore } from './map.svelte';
+import { NextStore } from './next.svelte';
+import { SeenStore } from './seen.svelte';
+import { TerminalsStore } from './terminals.svelte';
+import { TimelineStore } from './timeline.svelte';
 
-export const DEFAULT_LAYERS: GraphLayer[] = ['topology', 'services', 'attack', 'oos', 'fog'];
-
-type Resource = 'graph' | 'hosts' | 'inbox' | 'suggestions' | 'findings' | 'timeline' | 'terminals' | 'credentials';
-
-const ENTITY_RESOURCES: Record<ChangeEntity, Resource[]> = {
-  host: ['graph', 'hosts'],
-  service: ['graph', 'hosts'],
-  claim: ['graph', 'inbox'],
-  credential: ['credentials', 'graph'],
-  suggestion: ['suggestions'],
-  finding: ['findings', 'graph'],
-  terminal: ['terminals'],
-  timeline: ['timeline'],
-  inbox: ['inbox'],
-  thread: ['graph', 'timeline'],
-  note: [],
-};
-
-export class ProjectStore {
+export class ProjectStore implements ProjectCtx {
   readonly pid: string;
+  readonly slug: string;
   readonly backend: Backend;
-  private readonly ctrl = new AbortController();
-  private readonly blobUrls = new Map<string, string>();
-  private pending = new Set<Resource>();
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly app: AppApi;
+  private readonly abort = new AbortController();
 
+  info = $state.raw<ProjectView | null>(null);
   generation = $state<number | null>(null);
-  /** Generation beim ersten Laden; Grundlage für «neu seit …» */
-  baseline = $state<number | null>(null);
-  baselineTs = $state<string | null>(null);
-  graph = $state.raw<GraphView | null>(null);
-  hosts = $state.raw<HostSummary[]>([]);
-  inbox = $state.raw<InboxView | null>(null);
-  suggestions = $state.raw<Suggestion[]>([]);
-  findings = $state.raw<Finding[]>([]);
-  timeline = $state.raw<TimelineItem[]>([]);
-  terminals = $state.raw<Terminal[]>([]);
-  credentials = $state.raw<CredentialView[]>([]);
-  /** neu hinzugekommene Entitäten seit baseline (Schlüssel -> Art) */
-  fresh = $state.raw<Record<string, ChangeEntity>>({});
-  layers = $state.raw<GraphLayer[]>([...DEFAULT_LAYERS]);
-  lens = $state<Lens>('karte');
-  loading = $state(false);
-  error = $state<string | null>(null);
-  /** steigt bei jeder Änderung; Detailansichten laden dann neu */
-  version = $state(0);
-  disposed = $state(false);
+  loaded = $state(false);
 
-  constructor(pid: string, backend: Backend, layers?: GraphLayer[]) {
+  readonly map: MapStore;
+  readonly next: NextStore;
+  readonly host: HostStore;
+  readonly seen: SeenStore;
+  readonly terminals: TerminalsStore;
+  readonly timeline: TimelineStore;
+  readonly evidence: EvidenceStore;
+  readonly findings: FindingsStore;
+  private readonly parts: ProjectPart[];
+  private changesTimer: ReturnType<typeof setTimeout> | null = null;
+  private changesBusy = false;
+
+  constructor(pid: string, slug: string, app: AppApi, generation: number | null = null) {
     this.pid = pid;
-    this.backend = backend;
-    if (layers) this.layers = layers;
+    this.slug = slug;
+    this.app = app;
+    this.backend = app.backend;
+    this.generation = generation;
+    this.map = new MapStore(this);
+    this.next = new NextStore(this);
+    this.host = new HostStore(this);
+    this.seen = new SeenStore(this);
+    this.terminals = new TerminalsStore(this);
+    this.timeline = new TimelineStore(this);
+    this.evidence = new EvidenceStore(this);
+    this.findings = new FindingsStore(this);
+    this.parts = [this.map, this.next, this.host, this.seen, this.terminals, this.timeline, this.evidence, this.findings];
   }
 
   get signal(): AbortSignal {
-    return this.ctrl.signal;
+    return this.abort.signal;
+  }
+
+  get disposed(): boolean {
+    return this.abort.signal.aborted;
   }
 
   async loadAll(): Promise<void> {
-    if (this.disposed) return;
-    this.loading = true;
-    this.error = null;
     try {
-      await Promise.all([
-        this.load('graph'), this.load('hosts'), this.load('inbox'), this.load('suggestions'), this.load('findings'),
-        this.load('timeline'), this.load('terminals'), this.load('credentials'),
-      ]);
-      if (this.graph && this.generation === null) {
-        this.generation = this.graph.generation;
-      }
-      if (this.baseline === null) {
-        this.baseline = this.generation;
-        this.baselineTs = new Date().toISOString();
-      }
-      this.version++;
+      this.info = await this.backend.project(this.pid, this.signal);
     } catch (e) {
-      if (!this.disposed && !isApiError(e, 'aborted')) this.error = isApiError(e) ? e.code : 'internal';
-    } finally {
-      this.loading = false;
+      if (!isAbort(e)) this.info = null;
     }
+    await Promise.all(this.parts.map((p) => p.load().catch(() => undefined)));
+    this.loaded = true;
   }
 
-  private async load(r: Resource): Promise<void> {
-    if (this.disposed) return;
-    const { backend: b, pid } = this;
-    const s = this.signal;
-    switch (r) {
-      case 'graph': {
-        const g = await b.graph(pid, { layers: this.layers, lens: this.lens }, s);
-        if (!this.disposed) this.graph = g;
-        break;
-      }
-      case 'hosts': {
-        const v = await b.hosts(pid, s);
-        if (!this.disposed) this.hosts = v;
-        break;
-      }
-      case 'inbox': {
-        const v = await b.inbox(pid, s);
-        if (!this.disposed) this.inbox = v;
-        break;
-      }
-      case 'suggestions': {
-        const v = await b.suggestions(pid, s);
-        if (!this.disposed) this.suggestions = v;
-        break;
-      }
-      case 'findings': {
-        const v = await b.findings(pid, s);
-        if (!this.disposed) this.findings = v;
-        break;
-      }
-      case 'timeline': {
-        const v = await b.timeline(pid, { limit: 500 }, s);
-        if (!this.disposed) this.timeline = v.items;
-        break;
-      }
-      case 'terminals': {
-        const v = await b.terminals(s);
-        if (!this.disposed) this.terminals = v.filter((t) => t.project_id === null || t.project_id === pid);
-        break;
-      }
-      case 'credentials': {
-        const v = await b.credentials(pid, s);
-        if (!this.disposed) this.credentials = v;
-        break;
-      }
-    }
-  }
-
-  /** Mehrere Invalidierungen kurz hintereinander werden gebündelt. */
-  refresh(...resources: Resource[]): void {
-    if (this.disposed) return;
-    for (const r of resources) this.pending.add(r);
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
-      const todo = [...this.pending];
-      this.pending.clear();
-      void Promise.all(todo.map((r) => this.load(r).catch(() => undefined))).then(() => {
-        if (!this.disposed) this.version++;
-      });
-    }, 80);
-  }
-
-  /** SSE `changes`: Änderungen seit der eigenen Generation holen und gezielt neu laden. */
-  async onChanges(generation: number): Promise<void> {
-    if (this.disposed) return;
-    if (this.generation !== null && generation <= this.generation) return;
+  async decide(decisions: DecisionInput[], opts: DecideOptions = {}): Promise<DecisionResponse | null> {
+    if (this.app.offline || this.disposed) return null;
     try {
-      const cs = await this.backend.changes(this.pid, this.generation ?? 0, this.signal);
-      if (this.disposed) return;
-      if (cs.reset) {
-        this.generation = null;
+      return await this.backend.decide(
+        this.pid,
+        decisions.map((d) => ({ ...d, client_ref: d.client_ref ?? clientRef() })),
+      );
+    } catch (e) {
+      if (!opts.silent && !isAbort(e)) this.app.ui.notify('error', errorText(e, opts.errorPrefix ?? 'err.decisionPrefix'));
+      return null;
+    }
+  }
+
+  /** SSE-Ereignis (ausser `project`, das AppState behandelt). */
+  dispatch(ev: StreamEvent): void {
+    if (this.disposed) return;
+    if (ev.name === 'changes') {
+      if (ev.data.project_id !== this.pid) return;
+      this.scheduleChanges();
+    } else if (ev.name === 'reset') {
+      this.generation = null;
+      void this.loadAll();
+      return;
+    }
+    for (const p of this.parts) p.onEvent?.(ev);
+  }
+
+  private scheduleChanges(): void {
+    if (this.changesTimer) return;
+    this.changesTimer = setTimeout(() => {
+      this.changesTimer = null;
+      void this.fetchChanges();
+    }, 250);
+  }
+
+  private async fetchChanges(): Promise<void> {
+    if (this.changesBusy || this.disposed) return;
+    this.changesBusy = true;
+    try {
+      if (this.generation === null) {
         await this.loadAll();
         return;
       }
+      const cs: ChangeSet = await this.backend.changes(this.pid, this.generation, this.signal);
       this.generation = cs.to;
-      const todo = new Set<Resource>();
-      const fresh = { ...this.fresh };
-      for (const c of cs.changes) {
-        for (const r of ENTITY_RESOURCES[c.entity] ?? []) todo.add(r);
-        if (c.change === 'added' && (c.entity === 'host' || c.entity === 'service' || c.entity === 'credential')) {
-          fresh[c.entity_key] = c.entity;
-        }
+      if (cs.reset) {
+        await this.loadAll();
+        return;
       }
-      this.fresh = fresh;
-      this.refresh(...todo);
+      if (cs.changes.length > 0) for (const p of this.parts) p.onChanges?.(cs);
     } catch (e) {
-      if (!isApiError(e, 'aborted')) this.refresh('graph', 'inbox');
+      if (!isAbort(e)) this.generation = null;
+    } finally {
+      this.changesBusy = false;
     }
   }
 
-  /** SSE `reset`: alles neu laden (z. B. nach `ariadne reparse`). */
-  async onReset(): Promise<void> {
-    this.generation = null;
-    this.fresh = {};
-    await this.loadAll();
-  }
-
-  setLayers(layers: GraphLayer[]): void {
-    this.layers = layers;
-    this.refresh('graph');
-  }
-
-  /** «Gesehen»: Neu-Markierungen zurücksetzen. */
-  acknowledgeFresh(): void {
-    this.fresh = {};
-    this.baseline = this.generation;
-    this.baselineTs = new Date().toISOString();
-  }
-
-  /** Bild aus /blobs als blob:-URL (CSP erlaubt img-src blob:). Wird bei dispose freigegeben. */
-  async blobUrl(blobId: string): Promise<string> {
-    const known = this.blobUrls.get(blobId);
-    if (known) return known;
-    const blob = await this.backend.blob(this.pid, blobId, this.signal);
-    if (!/^image\/(png|jpeg|webp)$/.test(blob.type)) throw new Error('Kein erlaubtes Bildformat');
-    if (this.disposed) throw new Error('Projekt verworfen');
-    const url = URL.createObjectURL(blob);
-    this.blobUrls.set(blobId, url);
-    return url;
-  }
-
-  get blobUrlCount(): number {
-    return this.blobUrls.size;
-  }
-
   dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.ctrl.abort();
-    if (this.flushTimer) clearTimeout(this.flushTimer);
-    this.flushTimer = null;
-    this.pending.clear();
-    for (const url of this.blobUrls.values()) URL.revokeObjectURL(url);
-    this.blobUrls.clear();
-    this.graph = null;
-    this.hosts = [];
-    this.inbox = null;
-    this.suggestions = [];
-    this.findings = [];
-    this.timeline = [];
-    this.terminals = [];
-    this.credentials = [];
-    this.fresh = {};
-    this.generation = null;
+    if (this.changesTimer) clearTimeout(this.changesTimer);
+    this.abort.abort();
+    for (const p of this.parts) p.dispose();
   }
 }

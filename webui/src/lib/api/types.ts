@@ -1,268 +1,286 @@
 /**
- * Typen der HTTP-API /api/v1 (Entwurf, siehe docs/web-api.md).
+ * Typen der HTTP-API /api/v1 (API v2, docs/web-api.md, mit Abschnitt 18 «Ergänzungen für die
+ * Oberfläche v0.1»). Diese Datei ist der Vertrag auf der UI-Seite (Vertrag v0.1-Oberfläche,
+ * Abschnitt 3). Besitzer: ui-fundament. Andere Teile melden Änderungen als contract_request.
  *
- * Später erzeugt `openapi-typescript` diese Typen aus dem OpenAPI-Schema des
- * Daemons (Architektur 7.1). Bis dahin ist diese Datei der Vertrag auf der
- * UI-Seite. Namen und Literale folgen src/ariadne/events.py, ontology.py,
- * parsers/api.py und scope/api.py.
- *
- * Konventionen:
- * - Zeitpunkte sind ISO-8601-Strings in UTC (`2026-10-08T12:02:11.123456Z`).
- *   Nanosekunden aus dem Journal gehen nie als JSON-Zahl über die Leitung
- *   (über 2^53), sondern höchstens als Dezimalstring (`ts_ns`).
- * - Alle Strings, die aus Zieldaten stammen können, sind feindlich und werden
- *   in der UI nur über displaySafe() angezeigt.
+ * Konventionen (web-api.md 1.2, 1.3):
+ * - Zeitpunkte sind ISO-8601 in UTC mit Mikrosekunden. Wo die Ordnung zählt, kommt `ts_ns` als
+ *   Dezimalstring (Nanosekunden liegen über 2^53).
+ * - Felder, die es nicht gibt, sind `null`, nie weggelassen.
+ * - Jeder String aus Zieldaten ist feindlich. Der Server macht Steuerzeichen sichtbar und setzt
+ *   `ctrl`; die UI zeigt ihn trotzdem nur über `Txt`/`displaySafe` (zweite Schicht).
+ * - Secrets stehen als '••••••••' da. Klartext nur über `secrets/reveal` (einzeln, nie im
+ *   Präsentationsmodus); «in die Kali» über `secrets/copy`, nie über den Browser.
  */
 
-// ---------------------------------------------------------------- Literale aus events.py
-export type StageKind =
-  | 'local' | 'su' | 'ssh' | 'winrm' | 'remote' | 'revshell' | 'msf' | 'meterpreter' | 'db' | 'unknown';
-export type StageState = 'active' | 'suspended';
+// ------------------------------------------------------------------ Literale (2)
+export type TermState = 'paused' | 'held' | 'on' | 'locked' | 'preroll' | 'off';
+export type StageKind = 'local' | 'su' | 'ssh' | 'winrm' | 'remote' | 'revshell' | 'msf' | 'meterpreter' | 'db' | 'unknown';
 export type StageSource = 'auto' | 'hotkey' | 'webui' | 'cli' | 'suggestion';
+export type GapReason =
+  | 'pause' | 'no_project' | 'daemon_down' | 'project_switch' | 'sensitive_output' | 'locked'
+  | 'disk_low' | 'shim_error' | 'multiplexer' | 'buffer_overflow' | 'rec_off';
 export type Keystep = 'foothold' | 'privesc' | 'pivot' | 'loot';
 export type WorkStatus = 'open' | 'in_progress' | 'dead_end' | 'done' | 'out_of_scope';
 export type AccessLevel = 'none' | 'user' | 'admin';
-export type GapReason =
-  | 'rec_off' | 'buffer_overflow' | 'daemon_down' | 'project_switch'
-  | 'sensitive_output' | 'locked' | 'disk_low' | 'shim_error';
-export type RecSource = 'webui' | 'cli' | 'hotkey' | 'system';
 export type Profile = 'lab' | 'customer';
-
-// ---------------------------------------------------------------- parsers/api.py, scope/api.py
 export type Trust = 'user' | 'structured' | 'tool_text' | 'heuristic' | 'ai' | 'ocr';
-export type VerdictKind = 'in' | 'out' | 'excluded' | 'outside_window' | 'unknown';
+export type Verdict = 'in' | 'out' | 'excluded' | 'outside_window' | 'unknown';
 export type ClaimState = 'candidate' | 'auto' | 'confirmed' | 'rejected';
-/** Drei Konfidenz-Stufen in der UI (Architektur 5.7). */
+export type Lane = 'auto' | 'quiet' | 'decide' | 'user';
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
-/** Architektur 5.9: entdeckt, gescannt, Versionen bekannt. */
-export type Knowledge = 'discovered' | 'scanned' | 'versions';
-/** 0 bis 5, reine Funktion aus knowledge und access (siehe progressOf). */
+export type Knowledge = 'mentioned' | 'discovered' | 'scanned' | 'versions';
 export type Progress = 0 | 1 | 2 | 3 | 4 | 5;
-/** Kartenebenen aus ontology.py, plus UI-Ebenen. */
-export type MapLayer = 'topology' | 'services' | 'creds' | 'attack' | 'web' | 'ad';
-export type GraphLayer = MapLayer | 'oos' | 'fog';
-export type Lens = 'karte' | 'faden';
+export type ServiceClass = 'web' | 'smb' | 'db' | 'remote' | 'file' | 'mail' | 'other';
+export type GraphLayer = 'topology' | 'services' | 'thread' | 'oos' | 'fog';
 
-// ---------------------------------------------------------------- Fehler und Sitzung
+// ------------------------------------------------------------------ Fehler (1.5, 18.10)
 export type ApiErrorCode =
-  | 'unauthorized' // 401: Token fehlt, abgelaufen oder widerrufen
-  | 'forbidden' // 403: Host/Origin/Sec-Fetch-Site falsch
-  | 'policy' // 403: Profil oder Policy verbietet die Aktion (z. B. Cloud-KI im Profil customer)
-  | 'budget' // 403: KI-Budget erschöpft
-  | 'not_found' // 404
-  | 'no_project' // 409: kein aktives Projekt
-  | 'project_mismatch' // 409: pid ist nicht das aktive Projekt
-  | 'conflict' // 409: Entscheid passt nicht mehr (verwaist, veraltet)
-  | 'locked' // 423: Projekt gesperrt, `ariadne unlock` nötig
-  | 'validation' // 422: Eingabe ungültig
-  | 'rate_limited' // 429: zu viele Codeversuche
-  | 'llm_unavailable' // 503: Provider nicht erreichbar
-  | 'internal'; // 500
+  | 'unauthorized' | 'forbidden' | 'policy' | 'not_found' | 'method' | 'no_project' | 'project_mismatch'
+  | 'conflict' | 'too_large' | 'host' | 'validation' | 'locked' | 'rate_limited' | 'not_implemented'
+  | 'unavailable' | 'internal' | 'clipboard_tool' | 'clipboard_session';
 
 export interface ApiErrorBody {
   error: {
     code: ApiErrorCode;
-    /** Deutscher Klartext ohne Zieldaten. Die UI übersetzt über `code`. */
+    /** fester deutscher Text pro Code; die UI übersetzt nur über `code` */
     message: string;
-    /** z. B. Pydantic-Fehlerliste bei 422 (nur Feldpfade, keine Werte). */
+    /** nur bei 422, ohne Werte */
     detail?: { loc: (string | number)[]; type: string }[];
-    request_id?: string;
   };
 }
 
-export interface SessionRequest {
-  code: string;
-}
-export interface SessionResponse {
-  token: string;
-  expires_at: string;
-}
-
-// ---------------------------------------------------------------- Status und REC
-export interface ProjectInfo {
-  id: string;
-  slug: string;
-  name: string;
-  profile: Profile;
-  created_at: string;
-  scope_version: number;
-  /** Leitplanken lab (Architektur 8.1). */
-  lab_guard: { public_targets: boolean; confirmed_not_customer: boolean } | null;
-}
-
-export type RecMode = 'off' | 'on' | 'waiting' | 'offline';
-export interface RecState {
-  on: boolean;
-  /** waiting = REC an, Projekt gesperrt (Shim puffert im RAM). */
-  mode: RecMode;
-  since: string | null;
-  source: RecSource | null;
-  terminals_recording: number;
-}
-
-export type LlmMode = 'off' | 'local' | 'cloud';
-export interface LlmState {
-  mode: LlmMode;
-  model: string | null;
-  available: boolean;
-  budget: { month_limit_usd: number; month_used_usd: number } | null;
-}
-
-export interface AutomodeState {
-  enabled: boolean;
-  parsers: string[];
-  auto_ctx: boolean;
-}
-
-export interface Status {
-  version: string;
-  api: 1;
-  operator_id: string;
-  server_time: string;
-  project: ProjectInfo | null;
-  locked: boolean;
-  rec: RecState;
-  llm: LlmState;
-  presentation: boolean;
-  automode: AutomodeState | null;
-  /** Lernmodus für Denkanstösse (im Profil lab Standard). */
-  learning_mode: boolean;
-  generation: number | null;
-}
-
-export interface RecRequest {
-  on: boolean;
-}
-export interface PresentationRequest {
-  on: boolean;
-}
-export interface Accepted {
-  accepted: true;
-}
-
-// ---------------------------------------------------------------- Terminals und Kontext
+// ------------------------------------------------------------------ Gemeinsame Typen (2, 18.1)
 export interface StageView {
   depth: number;
   kind: StageKind;
-  /** eingegebene Kennung (`ip:default/10.10.10.5`, `name:web01`) oder null */
-  host: string | null;
-  /** aufgelöstes Host-Label (Zieldaten!) */
-  host_label: string | null;
   host_id: string | null;
+  host_label: string | null;
   user: string | null;
-  state: StageState;
+  state: 'active' | 'suspended';
   source: StageSource;
+  auto: boolean;
   candidate: string | null;
   opened_at: number;
-  scope: VerdictKind | null;
 }
 
 export interface CommandRef {
   cmd_id: string;
+  cmd_ref: string;
   text: string | null;
   started_at: string;
   ended_at: string | null;
   exit: number | null;
   src_ip: string | null;
-  /** lokal | remote_confirmed | remote_reconstructed (Architektur 5.13) */
-  origin: 'local' | 'remote_confirmed' | 'remote_reconstructed';
+  origin: 'local' | 'remote_reconstructed';
 }
 
-export interface Terminal {
+export interface EvidenceRef {
+  claim_key: string | null;
+  unit_id: string | null;
+  lines: [number, number] | null;
+  label: string;
+}
+
+export interface QuietCounts {
+  heuristic: number;
+  out_of_scope: number;
+  mentions: number;
+  system_accounts: number;
+  own_address?: number;
+}
+
+/** Terminal-Bezug: «T1 scan» (18.1). */
+export interface TermRef {
   terminal_id: string;
+  ordinal: number | null;
   label: string | null;
+}
+
+/** Text in Teilen; `target` = stammt aus Zieldaten (gepunktet unterstrichen). */
+export interface TextPart {
+  text: string;
+  target: boolean;
+}
+
+// ------------------------------------------------------------------ Anmeldung (3)
+export interface SessionView {
+  session_id: string;
+  origin: 'local' | 'sshd';
+  created_at: string;
+  expires_at: string;
+}
+export interface SessionResponse {
+  token: string;
+  expires_at: string;
+  session: SessionView;
+}
+
+// ------------------------------------------------------------------ Status (4, 18.4, 18.8)
+export interface ProjectBrief {
+  id: string;
+  slug: string;
+  name: string;
+  profile: Profile;
+  chain_head_ok: boolean;
+}
+
+export interface TerminalState {
+  terminal_id: string;
+  short_id: string;
   tty: string | null;
-  shell: string;
-  alive: boolean;
-  project_id: string | null;
-  recording: boolean;
-  paused_reason: GapReason | null;
-  opened_at: string;
-  last_activity: string | null;
-  last_command: CommandRef | null;
+  state: TermState;
+  pause_until: string | null;
+  held_slug: string | null;
+  preroll_s: number;
+  mux: boolean;
+  context_label: string | null;
+  ctrl: boolean;
+  /** 18.8 */
+  ordinal: number | null;
+  label: string | null;
+  opened_at: string | null;
+  /** restliches Web-Pausenbudget in der gleitenden Stunde (E117), höchstens 1800 */
+  web_pause_left_s: number | null;
+}
+
+export interface ScopeWarning {
+  cmd_id: string;
+  cmd_ref: string;
+  terminal_id: string;
+  ts: string;
+  terminal: TermRef;
+  text: string | null;
+  ctrl: boolean;
+  targets: { value: string; verdict: Verdict; ctrl: boolean }[];
+  scope: string[];
+  acked: boolean;
+}
+
+export type LlmMode = 'off' | 'local' | 'cloud';
+
+export interface Status {
+  version: string;
+  api_version: 2;
+  server_time: string;
+  session: SessionView;
+  operator: { exists: boolean; unlocked: boolean; own_secrets: number | null };
+  project: ProjectBrief | null;
+  active: { slug: string; stopped: boolean; end_reason: 'stop' | 'idle' | 'missing' | null } | null;
+  locked: boolean;
+  recording: { connected: number; on: number; paused: number; held: number; mux: number };
+  terminals: TerminalState[];
+  idle: { idle_s: number; end_after_s: number | null } | null;
+  preroll: {
+    terminals: number;
+    seconds: number;
+    window_s: number;
+    ask_terminals: number;
+    ask_seconds: number;
+    outage_terminals: number;
+    outage_seconds: number;
+  };
+  presentation: boolean;
+  llm: {
+    mode: LlmMode;
+    model: string | null;
+    available: boolean;
+    budget: { month_limit_usd: number; month_used_usd: number } | null;
+  };
+  generation: number | null;
+  ingest: { active: boolean; last_error: string | null } | null;
+  disk_low: boolean;
+  scope_warning: ScopeWarning | null;
+}
+
+export interface PauseRequest {
+  minutes?: number;
+}
+export interface Accepted {
+  accepted: true;
+}
+
+// ------------------------------------------------------------------ Terminals (5)
+export interface ContextSuggestion {
+  item_key: string;
+  from_off: number;
+  host_id: string;
+  host_label: string;
+  reason: string;
+}
+
+export interface Terminal extends TerminalState {
+  shell: string | null;
+  connected: boolean;
   stack: StageView[];
-  /** Kontext-Vorschlag (ab v0.2) */
-  suggestion: { suggestion_key: string; host: string; user: string | null; reason: string } | null;
+  last_command: CommandRef | null;
+  remote_segment: { since: string; lines: number } | null;
+  suggestion: ContextSuggestion | null;
 }
 
 export type ContextOp =
-  | { op: 'set'; depth?: number; host?: string | null; user?: string | null; kind?: StageKind; from_off?: number; to_off?: number | null }
+  | { op: 'set'; host?: string | null; user?: string | null; kind?: StageKind; from_off?: number }
   | { op: 'push'; kind?: StageKind; host?: string | null; user?: string | null }
   | { op: 'pop' }
-  | { op: 'accept'; suggestion_key: string };
+  | { op: 'accept'; item_key: string };
 
 export interface ContextResult {
-  decision_id: string;
-  /** z. B. Scope-Warnung, wenn der Host nicht `in` ist */
-  warnings: { code: 'scope_out' | 'scope_excluded' | 'scope_unknown' | 'host_unknown'; identifier: string }[];
+  stored: boolean;
+  stack: StageView[] | null;
+  warnings: { code: 'scope_out' | 'scope_excluded' | 'scope_unknown' | 'host_unknown'; host: string }[];
 }
 
-// ---------------------------------------------------------------- Karte
-export interface ServiceCounts {
-  web: number;
-  smb: number;
-  db: number;
-  remote: number;
-  file: number;
-  mail: number;
-  other: number;
-}
-export type ServiceClass = keyof ServiceCounts;
-
-export interface IdentifierView {
-  key: string;
-  scope: VerdictKind;
-  /** Regel, die gegriffen hat, z. B. `include:10.10.10.0/24` */
-  rule: string | null;
+// ------------------------------------------------------------------ Projekt (6)
+export interface ProjectView extends ProjectBrief {
+  created_at: string;
+  scope: { include: string[]; exclude: string[]; version: number };
+  lab_guard: { public_targets: boolean; confirmed_not_customer: boolean } | null;
+  started_at: string | null;
+  chain: { head_seq: number; head_hash: string; head_ok: boolean };
+  ctrl: boolean;
 }
 
+// ------------------------------------------------------------------ Karte (7, 18.8)
 export interface KaliNode {
   kind: 'kali';
   id: 'kali';
-  label: string;
+  label: 'Kali';
   addresses: string[];
 }
-
 export interface SegmentNode {
   kind: 'segment';
   id: string;
-  label: string;
   cidr: string;
-  scope: VerdictKind;
-  /** scope = aus dem Scope gezeichnet, observed = aus Funden */
+  label: string;
   origin: 'scope' | 'observed';
-  via_pivot: string | null;
 }
-
 export interface HostNode {
   kind: 'host';
-  /** stabiler Schlüssel: stärkste Kennung, z. B. `ip:default/10.10.10.3` */
   id: string;
   segment: string | null;
   label: string;
+  ctrl: boolean;
   addresses: string[];
   names: string[];
-  identifiers: IdentifierView[];
-  /** Urteil der Hauptkennung, für die Darstellung */
-  scope: VerdictKind;
   claim_state: ClaimState;
-  confidence: ConfidenceLevel;
   knowledge: Knowledge;
   access: AccessLevel;
   work: WorkStatus;
   work_reason: string | null;
   progress: Progress;
   os: string | null;
-  service_counts: ServiceCounts;
   services_total: number;
+  service_classes: Record<ServiceClass, number>;
   conflicts: number;
-  findings: number;
-  hints: { total: number; high: number };
+  auto: boolean;
   ai: boolean;
   on_thread: boolean;
+  hint: 'conflict' | 'ai' | 'services' | null;
   tags: string[];
+  /** 18.8 */
+  ports: number[];
+  conflict_brief: { predicate: string; port: number | null } | null;
 }
-
 export interface ServiceNode {
   kind: 'service';
   id: string;
@@ -272,203 +290,127 @@ export interface ServiceNode {
   name: string | null;
   product: string | null;
   version: string | null;
+  ctrl: boolean;
   class: ServiceClass;
-  state: 'open' | 'filtered' | 'closed';
+  state: 'open' | 'filtered' | 'closed' | null;
   claim_state: ClaimState;
-  confidence: ConfidenceLevel;
-  work: WorkStatus;
   conflicts: number;
-  ai: boolean;
-  cves: string[];
 }
-
 export type GraphNode = KaliNode | SegmentNode | HostNode | ServiceNode;
 
 export interface ThreadEdge {
   kind: 'thread';
   id: string;
-  /** Nummer des Schlüsselschritts, ab 1 */
   seq: number;
   step: Keystep;
   source: string;
   target: string;
   ts: string;
-  decision_id: string;
   note: string | null;
-  evidence: EvidenceRef | null;
+  decision_id: string | null;
 }
-
-export interface ReachEdge {
-  kind: 'reach';
+export interface MemberEdge {
+  kind: 'member';
   id: string;
   source: string;
   target: string;
-  /** direct | pivot | tunnel (ab v0.2) */
-  via: 'direct' | 'pivot' | 'tunnel';
 }
+export type GraphEdge = ThreadEdge | MemberEdge;
 
-export type GraphEdge = ThreadEdge | ReachEdge;
+export interface UnitBrief {
+  unit_id: string;
+  kind: 'command' | 'segment' | 'file';
+  cmd_id: string | null;
+  cmd_ref: string | null;
+  title: string;
+  ctrl: boolean;
+  terminal_id: string | null;
+  parser: string | null;
+  ts: string | null;
+}
 
 export interface OosItem {
   identifier: string;
   label: string;
-  verdict: Exclude<VerdictKind, 'in'>;
+  ctrl: boolean;
+  verdict: 'out' | 'excluded' | 'outside_window' | 'unknown';
   rule: string | null;
   mentions: number;
+  first_unit: string | null;
+  /** 18.8 */
+  source: UnitBrief | null;
+  punycode: string | null;
+  note: 'same_mac' | 'forged_callback' | null;
+  related: string | null;
 }
 
 export interface GraphView {
   project_id: string;
   generation: number;
-  lens: Lens;
-  layers: GraphLayer[];
   nodes: GraphNode[];
   edges: GraphEdge[];
-  /** Out-of-Scope, am Rand zu einer Zahl zusammengefasst */
-  oos: { out: number; excluded: number; unknown: number; items: OosItem[] };
+  oos: { total: number; items: OosItem[] };
+  summary: { hosts: number; fog: number; with_access: number; services: number; conflicts: number };
+  table_only: boolean;
+  /** 18.8: Zeit der Generation («Stand 16:54») */
+  as_of: string;
 }
 
-export interface GraphQuery {
-  layers: GraphLayer[];
-  lens: Lens;
-}
-
-export interface Positions {
-  lens: Lens;
-  positions: Record<string, { x: number; y: number }>;
-  updated_at: string | null;
-}
-
-// ---------------------------------------------------------------- Änderungsfeed
-export type ChangeEntity =
-  | 'host' | 'service' | 'claim' | 'credential' | 'suggestion' | 'finding'
-  | 'terminal' | 'timeline' | 'inbox' | 'thread' | 'note';
-export interface Change {
-  generation: number;
-  entity: ChangeEntity;
-  entity_key: string;
-  change: 'added' | 'updated' | 'removed';
-}
+export type ChangeEntity = 'host' | 'service' | 'claim' | 'inbox' | 'keystep' | 'unit' | 'finding';
 export interface ChangeSet {
   project_id: string;
   from: number;
   to: number;
-  /** true: `since` liegt ausserhalb des Ringpuffers, Client lädt alles neu */
   reset: boolean;
-  changes: Change[];
+  changes: { generation: number; entity: ChangeEntity; entity_key: string; change: 'added' | 'updated' | 'removed' }[];
 }
 
-// ---------------------------------------------------------------- Fakten und Belege
+export interface PositionsView {
+  positions: Record<string, { x: number; y: number }>;
+  updated_at: string | null;
+}
+
+// ------------------------------------------------------------------ Hosts und Services (8, 18.8)
+export interface HostSummary extends Omit<HostNode, 'kind'> {
+  first_seen: string | null;
+  last_seen: string | null;
+  quiet: QuietCounts;
+}
+
 export interface Fact {
-  /** = claim_key (natürlicher Schlüssel, übersteht Reparse) */
-  fact_id: string;
   claim_key: string;
   subject: string;
   subject_label: string;
   predicate: string;
-  value: string | number | boolean;
+  value: string;
+  ctrl: boolean;
+  is_secret: boolean;
   state: ClaimState;
-  confidence: number;
-  confidence_level: ConfidenceLevel;
+  lane: Lane;
+  lane_reason: string | null;
+  confidence: ConfidenceLevel;
   trust: Trust;
   parser: string | null;
-  ai: boolean;
-  /** Credential-Kandidat aus Banner, HTML-Kommentar oder KI (Architektur 6.4.8) */
-  offered_by_target: boolean;
-  scope: VerdictKind;
-  sources_count: number;
-  first_seen: string;
-  last_seen: string;
+  from_target: boolean;
+  suspect: boolean;
+  verdict: Verdict | null;
+  sources: number;
+  first_seen: string | null;
+  last_seen: string | null;
   conflict_key: string | null;
-  injection_suspect: boolean;
+  history: boolean;
 }
 
-export interface EvidenceRef {
-  fact_id: string | null;
-  label: string;
+export interface Conflict {
+  conflict_key: string;
+  subject: string;
+  subject_label: string;
+  predicate: string;
+  state: 'open' | 'resolved' | 'kept_open';
+  values: { claim_key: string; value: string; ctrl: boolean; sources: number; trust: Trust; state: ClaimState }[];
+  choice: string | null;
 }
 
-export type SourceView =
-  | {
-      t: 'stream';
-      terminal_id: string;
-      terminal_label: string | null;
-      unit_id: string;
-      cmd: CommandRef | null;
-      context: StageView[];
-      off: [number, number];
-      /** Zeilen in der Einheit, 0-basiert, Ende inklusiv (parsers/api.py Span) */
-      lines: [number, number];
-      parser: string;
-      trust: Trust;
-      truncated: boolean;
-      partial: boolean;
-    }
-  | {
-      t: 'file';
-      blob_id: string | null;
-      path: string;
-      sha256: string;
-      lines: [number, number] | null;
-      xpath: string | null;
-      parser: string;
-      trust: Trust;
-    }
-  | {
-      t: 'image';
-      blob_id: string;
-      bbox: [number, number, number, number];
-      width: number;
-      height: number;
-      taken_at: string;
-      window_title: string | null;
-    }
-  | { t: 'ai'; call_id: string; model: string; quote_in: SourceView | null }
-  | { t: 'user'; decision_id: string; ts: string; operator_id: string };
-
-export interface FactSources {
-  fact: Fact;
-  sources: SourceView[];
-}
-
-export interface SgrSpan {
-  col_start: number;
-  col_end: number;
-  fg: string | null;
-  bg: string | null;
-  bold: boolean;
-  concealed: boolean;
-}
-
-export interface LogLine {
-  /** Zeilennummer in der Einheit bzw. im Strom, 0-basiert */
-  n: number;
-  text: string;
-  sgr: SgrSpan[];
-  prompt_echo: boolean;
-  concealed: boolean;
-  overwritten: boolean;
-  /** Bereiche, die der Server maskiert hat (Präsentationsmodus, eigene Secrets) */
-  masked: { col_start: number; col_end: number; kind: string }[];
-}
-
-export interface LinesQuery {
-  unit?: string;
-  from: number;
-  count: number;
-  /** verdeckte und überschriebene Teile mitliefern */
-  reveal_hidden?: boolean;
-}
-
-export interface LinesPage {
-  terminal_id: string;
-  unit_id: string | null;
-  total: number;
-  from: number;
-  lines: LogLine[];
-}
-
-// ---------------------------------------------------------------- Listen
 export interface ServiceView {
   service_id: string;
   host_id: string;
@@ -478,201 +420,274 @@ export interface ServiceView {
   name: string | null;
   product: string | null;
   version: string | null;
+  ctrl: boolean;
   class: ServiceClass;
-  state: 'open' | 'filtered' | 'closed';
+  state: 'open' | 'filtered' | 'closed' | null;
   claim_state: ClaimState;
-  confidence_level: ConfidenceLevel;
-  scope: VerdictKind;
-  work: WorkStatus;
-  auth_capable: boolean;
+  verdict: Verdict | null;
+  work: WorkStatus | null;
   conflicts: number;
-  ai: boolean;
   cves: string[];
-  fact_id: string | null;
+  history: {
+    predicate: 'service.state' | 'service.version' | 'service.product' | 'service.name';
+    value: string;
+    ctrl: boolean;
+    until: string | null;
+    claim_key: string;
+  }[];
+  /** 18.8 */
+  banner: string | null;
+  from_target: boolean;
+  suspect: boolean;
 }
 
-export type SecretKind = 'password' | 'ntlm' | 'crypt' | 'hash' | 'key' | 'ticket' | 'token' | 'empty';
-export interface CredentialView {
-  credential_id: string;
-  identity: { realm: string; name: string };
-  secret_kind: SecretKind;
-  /** immer maskiert; Klartext nur über /reveal (Profil lab, nicht im Präsentationsmodus) */
-  secret_masked: string;
-  origin: 'target_offered' | 'cracked' | 'dumped' | 'observed' | 'user';
-  claim_state: ClaimState;
-  ai: boolean;
-  valid_on: { service_id: string; label: string; result: 'ok' | 'admin' }[];
-  untested: number;
-  fact_id: string | null;
+/** Im Detail ist `conflicts` die Liste (web-api.md 17), in Karte und Tabelle die Zahl. */
+export interface HostDetail extends Omit<HostSummary, 'conflicts'> {
+  conflicts: Conflict[];
+  identifiers: {
+    key: string;
+    label: string;
+    type: string;
+    verdict: Verdict;
+    rule: string | null;
+    ctrl: boolean;
+    punycode: string | null;
+  }[];
+  services: ServiceView[];
+  facts: Fact[];
+  facts_truncated: boolean;
+  open_items: string[];
+  thread: ThreadEdge[];
+  note: string | null;
+  commands: (CommandRef & { terminal_id: string; unit_id: string })[];
+  /** 18.8 */
+  candidate_claims: string[];
+  access_by: { source: 'decision' | 'keystep' | 'value'; decision_id: string | null; ts: string | null } | null;
+  first_source: UnitBrief | null;
 }
 
-export interface HostSummary extends Omit<HostNode, 'kind' | 'segment'> {
-  segment: string | null;
-  first_seen: string;
-  last_seen: string;
-}
-
-export interface Conflict {
-  conflict_key: string;
-  subject: string;
-  predicate: string;
-  values: { value: string; claim_key: string; fact_id: string; sources_count: number; trust: Trust }[];
-  resolved: { choice: string | null; keep_open: boolean } | null;
-}
-
-export interface Shot {
-  blob_id: string;
-  taken_at: string;
-  mode: 'window' | 'monitor' | 'region';
-  window_title: string | null;
-  terminal_id: string | null;
+// ------------------------------------------------------------------ Als Nächstes (9, 18.6, 18.8)
+export interface CtxExcerpt {
+  unit_id: string;
+  lines: [number, number];
+  text: string[];
+  ctrl: boolean;
   note: string | null;
 }
 
-export interface HostDetail extends HostSummary {
-  services: ServiceView[];
-  credentials: CredentialView[];
-  facts: Fact[];
-  conflicts_detail: Conflict[];
-  note: { text: string; updated_at: string } | null;
-  shots: Shot[];
-  commands: (CommandRef & { terminal_id: string; unit_id: string })[];
-}
+export type NextItem =
+  | {
+      kind: 'decide_value';
+      item_key: string;
+      group_ref: string;
+      ts: string;
+      fact: Fact;
+      reason: string;
+      unit: UnitBrief | null;
+      ctrl?: boolean;
+    }
+  | { kind: 'conflict'; item_key: string; ts: string; conflict: Conflict; ctrl?: boolean }
+  | {
+      kind: 'ctx_unknown';
+      item_key: string;
+      ts: string;
+      terminal_id: string | null;
+      from_off: number | null;
+      stage_kind: StageKind | null;
+      candidate: string | null;
+      units: number;
+      unit: UnitBrief | null;
+      terminal: TermRef | null;
+      from_ts: string | null;
+      excerpt: CtxExcerpt | null;
+      ctrl?: boolean;
+    }
+  | {
+      kind: 'ctx_suggestion';
+      item_key: string;
+      ts: string;
+      terminal_id: string;
+      from_off: number;
+      stage_kind: StageKind | null;
+      units: number;
+      suggested_host: string;
+      suggested_label: string;
+      reason: string;
+      claim_key: string | null;
+      terminal: TermRef | null;
+      from_ts: string | null;
+      excerpt: CtxExcerpt | null;
+      ctrl?: boolean;
+    }
+  | {
+      kind: 'merge_suggestion';
+      item_key: string;
+      ts: string;
+      identifiers: { key: string; label: string; verdict: Verdict | null }[];
+      shared: string;
+      reason: string;
+      ctrl?: boolean;
+    }
+  | {
+      kind: 'orphan_decision';
+      item_key: string;
+      ts: string;
+      decision_id: string;
+      decision_kind: string;
+      reason: string;
+      ref: string | null;
+      ctrl?: boolean;
+    }
+  | { kind: 'mass_find'; item_key: string; ts: string; unit: UnitBrief; hosts: number; candidates: number; ctrl?: boolean };
 
-// ---------------------------------------------------------------- Inbox
-export type InboxGroupKind = 'unit' | 'context' | 'conflict' | 'merge' | 'orphan' | 'mass';
+export type NextItemKind = NextItem['kind'];
 
-export interface InboxItem {
-  item_id: string;
-  type: 'claim' | 'conflict' | 'context' | 'merge' | 'orphan';
-  claim_key: string | null;
-  fact_id: string | null;
-  subject: string;
-  subject_label: string;
-  predicate: string;
-  value: string | number | boolean | null;
-  confidence_level: ConfidenceLevel;
-  scope: VerdictKind;
-  trust: Trust;
-  parser: string | null;
-  ai: boolean;
-  offered_by_target: boolean;
-  state: ClaimState;
-  conflict: Conflict | null;
-  context: { terminal_id: string; terminal_label: string | null; from_off: number; candidate: string | null; kind: StageKind } | null;
-  merge: { identifiers: string[]; reason: string } | null;
-  orphan: { decision_id: string; kind: string; reason: string } | null;
-}
-
-export interface InboxGroup {
-  group_id: string;
-  kind: InboxGroupKind;
+export interface NextGroup {
+  group_ref: string;
   title: string;
-  ts: string;
-  unit: { unit_id: string; cmd_id: string | null; text: string | null; terminal_id: string | null; parser: string | null } | null;
-  items: InboxItem[];
-  summary: {
-    hosts: number;
-    services: number;
-    credentials: number;
-    other: number;
-    out_of_scope: number;
-    low_confidence: number;
-  };
+  unit: UnitBrief | null;
+  items: Extract<NextItem, { kind: 'decide_value' }>[];
+  summary: { hosts: number; services: number; other: number; out_of_scope: number; low_confidence: number };
 }
 
-export interface InboxView {
-  open: number;
-  groups: InboxGroup[];
-  automode: AutomodeState;
-}
+export type PlaceholderType = 'ip' | 'port' | 'hostname' | 'cidr' | 'url' | 'word' | 'words' | 'path' | 'user' | 'share';
 
-// ---------------------------------------------------------------- Denkanstösse
-export type SuggestionKind = 'question' | 'hypothesis' | 'goal' | 'hint';
-export type SuggestionOrigin =
-  | { type: 'rule'; rule_id: string }
-  | { type: 'ai'; model: string; call_id: string; prompt_version: string };
-
-export interface CommandTemplateView {
+export interface CommandTemplate {
   template_id: string;
-  title: string;
-  /** false: ein Wert enthält Sonderzeichen, der Befehl wird nicht gerendert */
-  renderable: boolean;
-  reason: string | null;
-  /** Befehl in Teilen, Anteile aus Zieldaten markiert (Architektur 6.1.6) */
-  parts: { text: string; from_target: boolean }[];
-  /** exakt der Text für die Zwischenablage, ohne Zeilenumbruch am Ende */
-  copy_text: string | null;
-  /** Werte, die sich nicht sicher rendern liessen, einzeln kopierbar */
-  values: { name: string; value: string }[];
+  tool: string;
+  label: string;
+  rendered: boolean;
+  command: string | null;
+  parts: TextPart[];
+  values: {
+    slot: string;
+    type: PlaceholderType;
+    label: string;
+    value: string;
+    ctrl: boolean;
+    target: boolean;
+    safe: boolean;
+  }[];
+  blocked_reason: 'shell_meta' | 'control' | 'newline' | 'non_ascii' | 'invalid' | 'out_of_scope' | null;
 }
 
-export interface SuggestionStage {
-  level: 1 | 2 | 3;
-  kind: 'question' | 'direction' | 'commands';
-  text: string | null;
-  commands: CommandTemplateView[];
-}
+export type SuggestionState = 'open' | 'done' | 'dismissed';
 
 export interface Suggestion {
   suggestion_key: string;
-  origin: SuggestionOrigin;
-  kind: SuggestionKind;
+  origin: 'rule';
+  rule_id: string;
   goal_id: string | null;
+  kind: 'goal' | 'question' | 'hypothesis' | 'hint';
   title: string;
-  reasoning: string;
-  subjects: { id: string; label: string; kind: 'host' | 'service' | 'credential' }[];
+  ctrl: boolean;
+  title_parts: TextPart[];
+  host_id: string | null;
+  service_id: string | null;
+  host_label: string | null;
+  reason: string;
+  ctrl_reason: boolean;
   evidence: EvidenceRef[];
-  criteria: { confirmed: string; refuted: string } | null;
-  stages: SuggestionStage[];
-  status: 'open' | 'done' | 'dismissed';
-  created_at: string;
-  injection_suspect: boolean;
+  stages: { question: string; direction: string };
+  templates: CommandTemplate[];
+  state: SuggestionState;
+  decision_id: string | null;
+  basis: string;
+  flags: ('from_target' | 'injection_suspect')[];
+  ts: string | null;
+  ai: null;
 }
 
-export interface DenkanstossRequest {
-  /** optionaler Fokus, sonst ganzes Lagebild */
-  host_ids?: string[];
+export interface NextView {
+  clarify: NextItem[];
+  confirm: NextGroup[];
+  suggestions: Suggestion[];
+  suggestions_available: boolean;
+  quiet: QuietCounts;
+  open: number;
 }
 
-export interface Job {
-  job_id: string;
-  kind: 'ai.denkanstoss' | 'ai.frage' | 'export' | 'screenshot' | 'reparse';
-  status: 'queued' | 'running' | 'done' | 'failed' | 'refused';
+export interface SuggestionsResponse {
+  suggestions: Suggestion[];
+  truncated: boolean;
 }
 
-// ---------------------------------------------------------------- Findings und Zeitachse
-export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
-export interface Finding {
-  finding_id: string;
-  title: string;
-  severity: Severity;
-  assets: { id: string; label: string; kind: 'host' | 'service' }[];
-  description: string;
-  evidence: EvidenceRef[];
-  mitigation: string;
-  attack_ids: string[];
-  cves: string[];
-  status: 'draft' | 'final';
-  created_at: string;
-  updated_at: string;
+// ------------------------------------------------------------------ Zeitachse (10, 18.8)
+export interface InputView {
+  seq: number;
+  terminal_id: string;
+  stream_off: number;
+  out_end: number;
+  ts: string;
+  ts_ns: string;
+  length: number | null;
+  paste: boolean;
+  redacted: boolean;
+  hidden: boolean;
+  reason: 'tty_no_echo' | 'no_echo_seen' | 'no_output' | null;
+  revealed: boolean;
+  text: string;
 }
 
-export type TimelineType =
-  | 'command' | 'segment' | 'rec' | 'context' | 'screenshot' | 'decision' | 'keystep' | 'file' | 'gap' | 'ai';
-export interface TimelineItem {
+export type TimelineType = 'command' | 'segment' | 'file' | 'keystep' | 'context' | 'decision' | 'gap' | 'project' | 'input';
+
+interface TimelineBase {
   id: string;
   ts: string;
-  type: TimelineType;
+  ts_ns: string;
   terminal_id: string | null;
+  context_label: string | null;
   host_id: string | null;
-  host_label: string | null;
-  title: string;
-  detail: string | null;
-  exit: number | null;
-  facts: number;
-  evidence: EvidenceRef | null;
+  ctrl: boolean;
+  /** 18.8 */
+  terminal: TermRef | null;
 }
+
+export type TimelineItem = TimelineBase &
+  (
+    | {
+        type: 'command';
+        cmd: CommandRef;
+        unit_id: string;
+        adopted: number;
+        distrusted: { decision_id: string; rejected: number; weakened: number } | null;
+        scope_warning: { targets: { value: string; verdict: Verdict }[] } | null;
+        flags: ('partial' | 'truncated' | 'gap' | 'altscreen' | 'marker_forged')[];
+        files: { unit_id: string; path: string }[];
+        lines: number;
+        result: { hosts_new: number; services: number; values: number; out_of_scope: number; conflicts: number };
+      }
+    | { type: 'segment'; unit_id: string; lines: number; state: 'open' | 'provisional' | 'final'; evaluate_after: string | null }
+    | { type: 'file'; unit_id: string; path: string; cmd_id: string | null }
+    | {
+        type: 'keystep';
+        step: Keystep;
+        host_label: string | null;
+        note: string | null;
+        ordinal: number;
+        decision_id: string;
+      }
+    | { type: 'context'; change: 'set' | 'push' | 'pop' | 'auto'; stack_label: string; source: StageSource }
+    | {
+        type: 'decision';
+        decision_id: string;
+        kind: string;
+        summary: string;
+        detail: string | null;
+        reason: string | null;
+        ref: string | null;
+        effect: { rejected: number; weakened: number } | null;
+      }
+    | { type: 'gap'; reason: GapReason; until: string | null; bytes_lost: number }
+    | { type: 'project'; change: 'start' | 'end' | 'preroll'; reason: string | null; detail: string | null }
+    | { type: 'input'; input: InputView }
+  );
+
+export interface TimelinePage {
+  items: TimelineItem[];
+  next_cursor: string | null;
+}
+
 export interface TimelineQuery {
   types?: TimelineType[];
   terminal?: string;
@@ -680,148 +695,253 @@ export interface TimelineQuery {
   cursor?: string;
   limit?: number;
 }
-export interface TimelinePage {
-  items: TimelineItem[];
-  next_cursor: string | null;
+
+// ------------------------------------------------------------------ Belege (11, 18.8)
+export type SourceView =
+  | {
+      t: 'stream';
+      unit_id: string;
+      terminal_id: string;
+      cmd: CommandRef | null;
+      context: StageView[];
+      lines: [number, number] | null;
+      parser: string;
+      trust: Trust;
+      confidence: ConfidenceLevel;
+      flags: string[];
+      distrusted: boolean;
+    }
+  | {
+      t: 'file';
+      unit_id: string;
+      path: string;
+      sha256: string | null;
+      lines: [number, number] | null;
+      parser: string;
+      trust: Trust;
+      produced_by_cmd: string | null;
+    }
+  | { t: 'user'; decision_id: string; kind: string; ts: string };
+
+export interface FactSources {
+  fact: Fact;
+  sources: SourceView[];
 }
 
-// ---------------------------------------------------------------- Entscheide (events.py, Präfix d.)
-export interface DClaim { claim_key: string; reason?: string | null }
-export interface DClaimEdit { claim_key: string; value: string }
-export interface DEntityIds { identifiers: string[]; reason?: string | null }
-export interface DKeystepMark { terminal_id?: string | null; stream_off?: number | null; step: Keystep; host?: string | null; note?: string | null }
-export interface DStatusWork { subject: string; value: WorkStatus; reason?: string | null }
-export interface DStatusAccess { subject: string; value: AccessLevel }
-export interface DNoteSet { subject: string; text: string }
-export interface DTag { subject: string; tag: string }
-export interface DScopeUpdate { version: number; toml: string }
-export interface DAutomodeSet { enabled: boolean; parsers?: string[]; auto_ctx?: boolean }
-export interface DConflictResolve { conflict_key: string; choice?: string | null; keep_open?: boolean }
-export interface DTerminalLabel { terminal_id: string; label: string }
-export interface DRevoke { decision_id: string; reason?: string | null }
-export interface DSuggestion { suggestion_key: string; reason?: string | null }
-export interface DLabNotCustomer { scope_version: number }
-/** Vorschlag für d.finding (in events.py noch DGeneric) */
-export interface DFinding {
-  finding_id: string;
-  action: 'create' | 'update' | 'delete';
-  title?: string;
-  severity?: Severity;
-  assets?: string[];
-  description?: string;
-  mitigation?: string;
-  attack_ids?: string[];
-  evidence?: string[];
+export interface UnitView extends UnitBrief {
+  exit: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_ms: number | null;
+  src_ip: string | null;
+  context: StageView[];
+  line_count: number;
+  flags: string[];
+  chain_ok: boolean;
+  /** 18.8 */
+  terminal: TermRef | null;
+  chain_break_line: number | null;
 }
 
-/** Abbildung Entscheid-Art -> Nutzlast. Entscheide zu Terminals laufen über /terminals/{tid}/context. */
-export interface DecisionPayloads {
-  'd.claim.confirm': DClaim;
-  'd.claim.reject': DClaim;
-  'd.claim.edit': DClaimEdit;
-  'd.entity.merge': DEntityIds;
-  'd.entity.split': DEntityIds;
-  'd.keystep.mark': DKeystepMark;
-  'd.status.work': DStatusWork;
-  'd.status.access': DStatusAccess;
-  'd.note.set': DNoteSet;
-  'd.tag.add': DTag;
-  'd.tag.remove': DTag;
-  'd.scope.update': DScopeUpdate;
-  'd.automode.set': DAutomodeSet;
-  'd.conflict.resolve': DConflictResolve;
-  'd.terminal.label': DTerminalLabel;
-  'd.revoke': DRevoke;
-  'd.suggestion.done': DSuggestion;
-  'd.suggestion.dismiss': DSuggestion;
-  'd.lab.not_customer': DLabNotCustomer;
-  'd.finding': DFinding;
+export interface SgrSpan {
+  col_start: number;
+  col_end: number;
+  fg: string | null;
+  bg: string | null;
+  bold: boolean;
 }
-export type DecisionKind = keyof DecisionPayloads;
-export type DecisionInput = { [K in DecisionKind]: { kind: K; payload: DecisionPayloads[K]; client_ref?: string } }[DecisionKind];
 
-export interface DecisionRequest {
-  decisions: DecisionInput[];
+export interface LogLine {
+  n: number;
+  text: string;
+  ctrl: boolean;
+  sgr: SgrSpan[];
+  prompt_echo: boolean;
+  concealed: boolean;
+  overwritten: boolean;
+  masked: { col_start: number; col_end: number; kind: string }[];
 }
+
+export interface LinesPage {
+  unit_id: string;
+  total: number;
+  from: number;
+  lines: LogLine[];
+}
+
+export interface LinesQuery {
+  from?: number;
+  count?: number;
+  reveal_hidden?: boolean;
+}
+
+// ------------------------------------------------------------------ Entscheide (12, 18.5, 18.6)
+export interface DecisionInput {
+  kind: DecisionKind;
+  payload: Record<string, unknown>;
+  client_ref?: string;
+}
+export type DecisionKind =
+  | 'd.claim.confirm' | 'd.claim.reject' | 'd.claim.edit' | 'd.conflict.resolve' | 'd.entity.merge'
+  | 'd.entity.split' | 'd.status.work' | 'd.status.access' | 'd.note.set' | 'd.tag.add' | 'd.tag.remove'
+  | 'd.terminal.label' | 'd.keystep.mark' | 'd.revoke' | 'd.unit.distrust' | 'd.suggestion.done'
+  | 'd.suggestion.dismiss' | 'd.finding.create' | 'd.finding.update' | 'd.finding.evidence.add'
+  | 'd.finding.evidence.remove' | 'd.finding.delete';
+
 export interface DecisionResult {
-  decision_id: string;
-  seq: number;
-  ts: string;
+  decision_id: string | null;
+  seq: number | null;
   client_ref: string | null;
+  effect: { rejected: number; weakened: number } | null;
 }
 export interface DecisionResponse {
   results: DecisionResult[];
 }
 
-// ---------------------------------------------------------------- Abfrage-DSL (Architektur 5.12)
-export type QueryFrom = 'hosts' | 'services' | 'endpoints' | 'identities' | 'credentials' | 'cred_tests' | 'hints' | 'activity' | 'mentions' | 'findings' | 'goals';
-export type QueryOp = 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'in' | 'contains' | 'prefix' | 'is_null';
-export type QueryCond =
-  | { field: string; op: QueryOp; value?: string | number | boolean | (string | number)[] }
-  | { all: QueryCond[] }
-  | { any: QueryCond[] }
-  | { not: QueryCond };
-export interface QueryDsl {
-  from: QueryFrom;
-  where?: QueryCond;
-  select?: string[];
-  order?: { field: string; dir: 'asc' | 'desc' }[];
-  limit?: number;
+export interface ConfirmGroupResult {
+  confirmed: number;
+  excluded: Record<'own_address' | 'context' | 'out_of_scope' | 'conflict' | 'merge' | 'ai' | 'suspect' | 'low_confidence', number>;
 }
-export interface QueryResult {
-  columns: string[];
-  rows: (string | number | boolean | null)[][];
+
+// ------------------------------------------------------------------ Suche, Warteliste, Secrets (13, 18.7, 18.8)
+export interface SearchResult {
+  items: {
+    unit_id: string;
+    line: number;
+    text: string;
+    ctrl: boolean;
+    kind: string;
+    context_label: string;
+    host_id: string | null;
+    cmd: string | null;
+    ts: string;
+  }[];
   truncated: boolean;
-  /** rein informativ, nie ausführbar */
-  sql_preview: string;
 }
 
-// ---------------------------------------------------------------- SSE
-export type StreamEventName =
-  | 'changes' | 'rec' | 'terminal' | 'inbox' | 'suggestion' | 'progress' | 'presentation' | 'project' | 'reset';
+export type PendingReason =
+  | 'outside_workspace' | 'symlink' | 'hardlink' | 'owner' | 'not_regular' | 'other_fs' | 'path' | 'too_large';
 
+export interface PendingFile {
+  path: string;
+  reason: PendingReason | string;
+  cmd_id: string | null;
+  terminal_id: string | null;
+  ts: string;
+  ctrl: boolean;
+  size: number | null;
+}
+export interface PendingResponse {
+  files: PendingFile[];
+  truncated: boolean;
+}
+
+export type SecretRef = { ref: 'input'; seq: number } | { ref: 'claim'; claim_key: string };
+export interface RevealResponse {
+  value: string;
+  ctrl: boolean;
+}
+export interface CopyResult {
+  copied: true;
+  target: 'kali';
+  clear_after_s: 30;
+  tool: 'xclip' | 'xsel' | 'wl-copy';
+}
+
+// ------------------------------------------------------------------ Vorlieben, Neu seit (18.2, 18.3)
+export type Theme = 'system' | 'light' | 'dark';
+export type Density = 'comfortable' | 'compact';
+export interface Prefs {
+  theme: Theme;
+  density: Density;
+  learning: boolean;
+}
+export interface PrefsView {
+  prefs: Prefs;
+  updated_at: string | null;
+}
+
+export interface NewSince {
+  since: string;
+  count: number;
+  hosts: string[];
+  access: string[];
+  services: string[];
+  items: string[];
+  keysteps: string[];
+}
+export interface SeenView {
+  seen_at: string | null;
+  new: NewSince | null;
+}
+
+// ------------------------------------------------------------------ Findings (18.5)
+export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+export type FindingStatus = 'draft' | 'final';
+export type FindingWarning = 'evidence_distrusted' | 'evidence_missing' | 'no_evidence' | 'no_severity';
+
+export interface FindingSummary {
+  finding_id: string;
+  ordinal: number;
+  title: string;
+  ctrl: boolean;
+  severity: Severity | null;
+  status: FindingStatus;
+  affected: { subject: string; label: string; ctrl: boolean }[];
+  evidence_count: number;
+  warnings: FindingWarning[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FindingEvidence {
+  evidence_id: string;
+  ref: EvidenceRef;
+  label: string;
+  ctrl: boolean;
+  terminal: TermRef | null;
+  ts: string | null;
+  state: 'ok' | 'distrusted' | 'missing';
+  added_at: string;
+  decision_id: string;
+}
+
+export interface FindingDetail extends FindingSummary {
+  description: string;
+  remediation: string;
+  attack: { id: string; supported: boolean; hypothesis: boolean }[];
+  cves: { id: string; supported: boolean; hypothesis: boolean }[];
+  evidence: FindingEvidence[];
+  created_from: EvidenceRef | null;
+  history: { decision_id: string; kind: string; ts: string }[];
+}
+
+export interface FindingsResponse {
+  findings: FindingSummary[];
+}
+
+/** Eingaben für d.finding.* (events.py DFinding*). */
+export interface FindingRefIn {
+  id: string;
+  supported?: boolean;
+}
+export interface EvidenceRefIn {
+  claim_key?: string;
+  unit_id?: string;
+  lines?: [number, number];
+}
+
+// ------------------------------------------------------------------ Ereignisstrom (14, 18.9)
 export interface StreamPayloads {
-  changes: { generation: number; entities: Partial<Record<ChangeEntity, number>> };
-  rec: RecState;
-  terminal: { terminal_id: string; change: 'opened' | 'closed' | 'context' | 'command' | 'label' | 'bind' | 'gap' };
-  inbox: { open: number };
-  suggestion: { suggestion_key: string; change: 'added' | 'updated' | 'removed'; open: number };
-  progress: {
-    job_id: string;
-    kind: Job['kind'];
-    status: Job['status'];
-    pct: number | null;
-    /** fester Text des Daemons, nie Modell- oder Zieltext */
-    message: string | null;
-    result?: Record<string, unknown> | null;
-  };
+  changes: { project_id: string; generation: number; entities?: Partial<Record<ChangeEntity, number>> };
+  terminal: { terminal_id: string; change: 'opened' | 'closed' | 'state' | 'context' | 'command' };
+  inbox: { project_id: string; open: number };
+  suggestion: { project_id: string; open: number };
+  project: { project_id: string | null; change: 'opened' | 'closed' | 'locked' | 'unlocked'; locked: boolean };
+  reset: { reason: 'reparse' | 'buffer' | 'restart' };
   presentation: { on: boolean };
-  project: { project_id: string | null; locked: boolean };
-  reset: { reason: 'reparse' | 'buffer' | 'restart'; generation: number | null };
+  progress: { job_id: string; kind: string; status: string; pct: number | null; message: string | null };
+  prefs: Record<string, never>;
 }
-
+export type StreamEventName = keyof StreamPayloads;
 export type StreamEvent = { [K in StreamEventName]: { name: K; id: string | null; data: StreamPayloads[K] } }[StreamEventName];
-
-// ---------------------------------------------------------------- Hilfsfunktionen
-/** Architektur 5.9: progress ist eine reine Funktion aus knowledge und access. */
-export function progressOf(knowledge: Knowledge | null, access: AccessLevel): Progress {
-  if (access === 'admin') return 5;
-  if (access === 'user') return 4;
-  switch (knowledge) {
-    case 'versions':
-      return 3;
-    case 'scanned':
-      return 2;
-    case 'discovered':
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-/** Grenzen der drei Konfidenz-Stufen (Server liefert die Stufe mit). */
-export function confidenceLevel(c: number): ConfidenceLevel {
-  if (c >= 0.9) return 'high';
-  if (c >= 0.6) return 'medium';
-  return 'low';
-}

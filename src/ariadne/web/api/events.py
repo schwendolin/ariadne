@@ -14,6 +14,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from ariadne.rules import api as rules_api
 from ariadne.web.ctx import WebContext
 
 __all__ = ["attach_sources", "JOB_TEXT"]
@@ -28,6 +29,13 @@ def _count_open(conn: Any) -> int:
     return int(conn.execute("SELECT COUNT(*) FROM v_inbox").fetchone()[0])
 
 
+def _count_suggestions(conn: Any, profile: str) -> int | None:
+    """Zahl offener Denkanstösse (web-api.md 18.9); ``None``, solange die Regel-Engine ein Stub ist."""
+    if rules_api.STUB:
+        return None
+    return int(rules_api.open_count(conn, profile=profile))
+
+
 class _Sources:
     def __init__(self, ctx: WebContext) -> None:
         self.ctx = ctx
@@ -36,6 +44,7 @@ class _Sources:
         self.pid: str | None = None  # Projekt, zu dem gen und open gehören
         self.gen: int | None = None
         self.open: int | None = None
+        self.sugg: int | None = None  # offene Denkanstösse (Ereignis «suggestion»)
         self.task: asyncio.Task[None] | None = None
         self.again = False
         self.closed = False
@@ -47,7 +56,7 @@ class _Sources:
             log.error("SSE-Ereignis nicht veröffentlicht (%s)", type(exc).__name__)
 
     def _reset_project(self, pid: str | None) -> None:
-        self.pid, self.gen, self.open = pid, None, None
+        self.pid, self.gen, self.open, self.sugg = pid, None, None, None
 
     # ------------------------------------------------------------------ Daemon
     def on_daemon(self, kind: str, data: dict[str, Any]) -> None:
@@ -127,11 +136,17 @@ class _Sources:
             ing = self.d.ingest
             if p is None or ing is None or not ing.active:
                 return
+            profile = p.info.profile
             try:
                 n = await ing.query(_count_open)
             except Exception as exc:
                 log.error("Zahl der offenen Einträge nicht lesbar (%s)", type(exc).__name__)
                 return
+            try:
+                sugg = await ing.query(lambda c, prof=profile: _count_suggestions(c, prof))
+            except Exception as exc:  # Regel-Engine darf das Ereignis «inbox» nie verhindern
+                log.error("Zahl der Denkanstösse nicht lesbar (%s)", type(exc).__name__)
+                sugg = None
             if self.closed or self.d.project is not p:
                 return
             if self.pid != p.info.id:
@@ -139,6 +154,9 @@ class _Sources:
             if n != self.open:
                 self.open = n
                 self._pub("inbox", {"project_id": p.info.id, "open": n})
+            if sugg is not None and sugg != self.sugg:
+                self.sugg = sugg
+                self._pub("suggestion", {"project_id": p.info.id, "open": sugg})
             if not self.again:
                 return
 

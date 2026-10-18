@@ -97,6 +97,7 @@ import logging
 import math
 import os
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Protocol
 
@@ -116,6 +117,7 @@ from ariadne.crypto.vault import (
 from ariadne.ctxrules import ContextStack
 from ariadne.daemon import hardening, ops_eval
 from ariadne.daemon.active import read_active, write_active
+from ariadne.daemon.clipboard import Clipboard, ClipboardError
 from ariadne.daemon.config import RecordingConfig, load_recording
 from ariadne.daemon.ingest import IngestService, IngestUpdate
 from ariadne.daemon.ops_util import OpError
@@ -286,6 +288,8 @@ class Daemon:
         self.daemon_id = os.urandom(8).hex()  # STATE: der Shim erkennt daran einen Neustart
         self.terminals: dict[str, Terminal] = {}
         self.redactor = Redactor()
+        # Zwischenablage der Kali für «in die Kali kopieren» (E111, ctl clip.copy); austauschbar für Tests
+        self.clipboard = Clipboard()
         self.writer = Writer(self, interval=batch_interval, max_bytes=batch_bytes)
         self.pause_timeout = pause_timeout
         self._wall = wall_clock or time.time_ns
@@ -459,6 +463,8 @@ class Daemon:
                 log.error("Erweiterung %s nicht sauber beendet (%s)", getattr(ext, "name", "?"),
                           type(exc).__name__)
         self._stopping = True  # ab hier nichts mehr annehmen: der Shim behält es im Ring
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self.clipboard.close(), 10)  # kopierte Secrets nicht liegen lassen
         for srv in self._servers:
             srv.close()
         if self.project is not None:
@@ -1243,6 +1249,35 @@ class Daemon:
         used = sum(max(0, min(b, now, end) - max(a, lo)) for a, b in t.web_pauses)
         return used + want <= WEB_PAUSE_MAX_MIN * 60_000_000_000
 
+    def web_pause_left_s(self, t: Terminal, state: str | None = None) -> int | None:
+        """Restliches Web-Pausenbudget in Sekunden (E117, web-api.md 18.8): die längste Web-Pause,
+        die :meth:`_web_pause_ok` jetzt noch erlaubte (höchstens 1800). ``None`` bei ``held``,
+        ``off`` und ohne offenes Projekt."""
+        state = state or self.state_of(t)
+        if self.project is None or state in ("held", "off"):
+            return None
+        now = self._mono()
+        cap = WEB_PAUSE_MAX_MIN * 60
+        window = WEB_PAUSE_WINDOW_MIN * 60_000_000_000
+
+        def need(x: int) -> int:  # Budget, das eine Pause von x Sekunden verbraucht (in ns)
+            want = x * 1_000_000_000
+            lo = now + want - window
+            used = sum(max(0, min(b, now, now + want) - max(a, lo)) for a, b in t.web_pauses)
+            return used + want
+
+        limit = cap * 1_000_000_000
+        if need(0) > limit:
+            return 0
+        lo_s, hi_s = 0, cap  # need() steigt mit x (das Fenster rückt höchstens so schnell vor)
+        while lo_s < hi_s:
+            mid = (lo_s + hi_s + 1) // 2
+            if need(mid) <= limit:
+                lo_s = mid
+            else:
+                hi_s = mid - 1
+        return lo_s
+
     def _note_web_pause(self, t: Terminal, minutes: int, source: str) -> None:
         now = self._mono()
         if source != "webui":
@@ -1760,7 +1795,8 @@ class Daemon:
         return {"terminal_id": t.terminal_id, "tty": t.tty, "state": state,
                 "pause_until_ns": t.pause_until_ns if state == "paused" else None,
                 "bound_slug": t.bound_slug, "label": t.stack.label(), "mux": t.mux,
-                "preroll_s": self.preroll.seconds(t.terminal_id), "proto": t.proto}
+                "preroll_s": self.preroll.seconds(t.terminal_id), "proto": t.proto,
+                "web_pause_left_s": self.web_pause_left_s(t, state)}
 
     def _connected(self) -> list[Terminal]:
         return [t for t in self.terminals.values() if t.conn is not None]
@@ -1780,6 +1816,8 @@ class Daemon:
                 "exists": self.vault.exists,
                 "unlocked": self.operator is not None,
                 "handle": self.operator.handle if self.operator else None,
+                # Zahl der eigenen Secrets (Einstellungen der Oberfläche), nie Werte oder Labels
+                "own_secrets": len(self.operator.secret_labels()) if self.operator else None,
             },
             "project": self._project_info(),
             "rec": self.project is not None,
@@ -2328,6 +2366,49 @@ class Daemon:
                 self._notify("presentation", on=on, source=source)
         return {"on": self.presentation}
 
+    async def op_clip_copy(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Einen Secret-Wert in die Zwischenablage der Kali (E111, web-api.md 18.7). Nur Profil lab,
+        nie im Präsentationsmodus, nie ein eigenes Secret. Der Wert geht nie zurück an den Aufrufer
+        und nie ins Log; die Antwort nennt nur das Werkzeug."""
+        p = self._require_project()
+        if getattr(p.info, "profile", "lab") != "lab" or self.presentation:
+            raise OpError("policy", "Kopieren nur im Profil lab und nicht im Präsentationsmodus")
+        ref = args.get("ref")
+        ing = await self._sync_ingest()
+        if ref == "input":
+            seq = args.get("seq")
+            if not isinstance(seq, int) or isinstance(seq, bool) or seq < 1:
+                raise OpError("invalid", "seq ungültig")
+            value = await ing.query_journal(lambda c, j: _hidden_input_value(j, seq))
+        elif ref == "claim":
+            key = args.get("claim_key")
+            if not isinstance(key, str) or len(key) != 64 or not all(ch in "0123456789abcdef" for ch in key):
+                raise OpError("invalid", "claim_key ungültig")
+            value = await ing.query(lambda c: _claim_secret_value(c, key))
+        else:
+            raise OpError("invalid", "ref muss input oder claim sein")
+        if value is None:
+            raise OpError("not_found", "kein Secret mit diesem Bezug")
+        if not value or any(_is_control(ch) for ch in value):
+            raise OpError("invalid", "Wert enthält Steuerzeichen und wird nicht kopiert")
+        _red, labels = self.redactor.redact_for_exit(value)
+        if labels:
+            raise OpError("policy", "eigene Secrets werden nie kopiert")
+        if self.project is not p:
+            raise OpError("project_changed", "Projekt wurde währenddessen gewechselt")
+        if self.presentation:  # während der Abfrage eingeschaltet
+            raise OpError("policy", "im Präsentationsmodus gesperrt")
+        try:
+            tool = await self.clipboard.copy(value)
+        except ClipboardError as exc:
+            raise OpError(exc.code, "Zwischenablage der Kali nicht erreichbar") from None
+        except OSError:
+            raise OpError("clipboard_session", "Zwischenablage der Kali nicht erreichbar") from None
+        finally:
+            value = ""
+        clear_s = max(1, round(self.clipboard.clear_after_s))
+        return {"copied": True, "target": "kali", "clear_after_s": clear_s, "tool": tool}
+
     def op_shutdown(self, args: dict[str, Any]) -> dict[str, Any]:
         asyncio.get_running_loop().call_soon(self._stop.set)
         return {"stopping": True}
@@ -2350,6 +2431,63 @@ _UNSAFE = {
     "project_changed": "Projekt wurde während des Imports gewechselt",
     "open_failed": "Datei lässt sich nicht öffnen",
 }
+
+
+def _is_control(ch: str) -> bool:
+    """Steuer-, Format- (Bidi, Zero-Width) und Trennzeichen: nie in die Zwischenablage."""
+    cat = unicodedata.category(ch)
+    return cat in ("Cc", "Cf", "Zl", "Zp") or ch == "\x7f"
+
+
+def _line_edit(text: str) -> str:
+    """Einfache Zeilenbearbeitung einer getippten Eingabe: Backspace/DEL löschen das letzte
+    Zeichen, Ctrl-U die Zeile; das abschliessende Enter fällt weg."""
+    while text.endswith(("\r", "\n")):
+        text = text[:-1]
+    out: list[str] = []
+    for ch in text:
+        if ch in ("\x7f", "\x08"):
+            if out:
+                out.pop()
+        elif ch == "\x15":
+            out.clear()
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _hidden_input_value(journal: Any, seq: int) -> str | None:
+    """Klartext einer verdeckten Eingabe (ohne Echo, E104) für ``clip.copy``; ``None``, wenn es
+    keine verdeckte Eingabe mit dieser Nummer gibt (eine sichtbare Eingabe ist kein Secret)."""
+    from ariadne.ingest import inputs
+
+    view = inputs.input_by_seq(journal, seq, reveal=False)
+    if view is None or not view.get("hidden") or view.get("redacted"):
+        return None
+    rec = journal.get(int(seq))
+    raw = rec.body if rec is not None else None
+    if not raw:
+        return None
+    try:
+        return _line_edit(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
+
+
+def _claim_secret_value(conn: Any, claim_key: str) -> str | None:
+    """Klartext eines Secret-Werts eines Claims (``secret_value``) oder ``None``."""
+    row = conn.execute("SELECT value_json, is_secret FROM claim WHERE claim_key = ?", (claim_key,)).fetchone()
+    if row is None or not row[1]:
+        return None
+    try:
+        value = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    ref = value.get("ref") if isinstance(value, dict) else None
+    if not isinstance(ref, str):
+        return None
+    hit = conn.execute("SELECT value FROM secret_value WHERE secret_ident = ?", (ref,)).fetchone()
+    return str(hit[0]) if hit and isinstance(hit[0], str) else None
 
 
 def _decided_host(t: Terminal) -> str | None:
@@ -2425,6 +2563,7 @@ _OPS: dict[str, Callable[[Daemon, dict[str, Any]], Any]] = {
     "import": Daemon.op_import,
     "shutdown": Daemon.op_shutdown,
     "presentation": Daemon.op_presentation,
+    "clip.copy": Daemon.op_clip_copy,
 }
 # Operationen der Auswertung (Ansichten, Suche, Claims, Reparse) liegen in ops_eval.
 _OPS.update(ops_eval.OPS)

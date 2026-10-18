@@ -16,7 +16,11 @@
     "preview:mock": "vite preview --outDir dist",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:e2e": "ARIADNE_E2E=mock playwright test --project=mock",
+    "test:e2e:daemon": "ARIADNE_E2E=daemon playwright test --project=daemon",
+    "test:e2e:all": "ARIADNE_E2E=all playwright test --project=mock --project=daemon",
+    "shots": "ARIADNE_E2E=mock playwright test --project=shots"
   },
   "dependencies": {
     "cytoscape": "3.34.3",

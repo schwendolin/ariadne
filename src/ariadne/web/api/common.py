@@ -48,6 +48,7 @@ ALLOWED_OPS = frozenset(
         "claim.reject",
         "unit.distrust",
         "input.reveal",
+        "clip.copy",  # Bau v0.1-Oberfläche: Secret in die Zwischenablage der Kali (E111), Wert nie zurück
     }
 )
 
@@ -126,6 +127,16 @@ class Api:
             raise self._failed(p, exc) from None
         self.same(p)
         return res
+
+    async def sync(self, p: OpenProject) -> None:
+        """Wartet, bis die Auswertung alles Gespeicherte verarbeitet hat (``IngestService.sync``).
+        Für Prüfungen, die frühere Entscheide in der Projektion sehen müssen (Denkanstösse)."""
+        ing = self._ingest()
+        try:
+            await ing.sync()
+        except Exception as exc:
+            raise self._failed(p, exc) from None
+        self.same(p)
 
     async def query_journal(self, p: OpenProject, fn: Callable[[Any, Any], T]) -> T:
         """``fn(conn, journal)`` im Thread der Auswertung (nur lesend)."""

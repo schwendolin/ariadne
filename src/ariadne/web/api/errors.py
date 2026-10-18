@@ -49,6 +49,10 @@ MESSAGES: dict[str, str] = {
     "rate_limited": "Zu viele Versuche: neuen Code holen.",
     "not_implemented": "Kommt in einer späteren Version.",
     "unavailable": "Auswertung nicht bereit, bitte später erneut.",
+    "clipboard_tool": (
+        "In der Kali fehlt ein Werkzeug für die Zwischenablage: xclip, xsel oder wl-copy installieren."
+    ),
+    "clipboard_session": "Keine grafische Sitzung in der Kali gefunden. Am Kali-Desktop anmelden.",
     "internal": "Interner Fehler.",
 }
 
@@ -68,6 +72,8 @@ STATUS: dict[str, int] = {
     "rate_limited": 429,
     "not_implemented": 501,
     "unavailable": 503,
+    "clipboard_tool": 503,
+    "clipboard_session": 503,
     "internal": 500,
 }
 
@@ -82,6 +88,8 @@ _CTL: dict[str, str] = {
     "conflict": "conflict",
     "project_changed": "conflict",
     "no_ingest": "unavailable",
+    "clipboard_tool": "clipboard_tool",
+    "clipboard_session": "clipboard_session",
 }
 
 _DETAIL_MAX = 50  # höchstens so viele Einträge in ``detail`` (422)

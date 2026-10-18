@@ -34,13 +34,19 @@ const securityRules = {
     { object: 'document', property: 'write', message: HTML_SINK },
     { object: 'document', property: 'writeln', message: HTML_SINK },
     { object: 'window', property: 'open', message: 'Ziel-URLs werden nie direkt geöffnet (Architektur 7.7).' },
-    { object: 'window', property: 'localStorage', message: 'localStorage nur über src/lib/util/prefs.ts (nie für Tokens).' },
-    { object: 'globalThis', property: 'localStorage', message: 'localStorage nur über src/lib/util/prefs.ts (nie für Tokens).' },
+    { object: 'window', property: 'localStorage', message: 'Kein localStorage (E112): Vorlieben auf dem Server, Ansicht in der URL.' },
+    { object: 'globalThis', property: 'localStorage', message: 'Kein localStorage (E112): Vorlieben auf dem Server, Ansicht in der URL.' },
+    { object: 'window', property: 'sessionStorage', message: 'sessionStorage nur in src/lib/api/auth.ts (Token dieses Tabs).' },
+    { object: 'navigator', property: 'clipboard', message: 'Zwischenablage nur über src/lib/util/clipboard.ts (nie Secrets, E111).' },
+    { object: 'console', property: 'log', message: 'Kein console.log: nie Token, Code oder Zieldaten in der Konsole.' },
+    { object: 'console', property: 'info', message: 'Kein console.info: nie Token, Code oder Zieldaten in der Konsole.' },
+    { object: 'console', property: 'debug', message: 'Kein console.debug: nie Token, Code oder Zieldaten in der Konsole.' },
   ],
   'no-restricted-globals': [
     'error',
-    { name: 'localStorage', message: 'localStorage nur über src/lib/util/prefs.ts (nie für Tokens).' },
-    { name: 'sessionStorage', message: 'sessionStorage nur über src/lib/api/auth.ts und src/lib/util/prefs.ts.' },
+    { name: 'localStorage', message: 'Kein localStorage (E112): Vorlieben auf dem Server, Ansicht in der URL.' },
+    { name: 'sessionStorage', message: 'sessionStorage nur in src/lib/api/auth.ts (Token dieses Tabs).' },
+    { name: 'indexedDB', message: 'Kein IndexedDB: nichts im Browser speichern (Briefing 9.12).' },
   ],
   'no-restricted-syntax': [
     'error',
@@ -69,7 +75,7 @@ const securityRules = {
 };
 
 export default defineConfig([
-  globalIgnores(['node_modules/', 'dist/', '../src/']),
+  globalIgnores(['node_modules/', 'dist/', '../src/', '.e2e/', 'test-results/', 'playwright-report/']),
   js.configs.recommended,
   ...ts.configs.recommended,
   ...svelte.configs.recommended,
@@ -114,10 +120,21 @@ export default defineConfig([
     },
   },
   {
-    // Einziger Zugang zu den Web-Storages.
-    files: ['src/lib/api/auth.ts', 'src/lib/util/prefs.ts'],
+    // Einziger Zugang zu sessionStorage (Token dieses Tabs). localStorage bleibt auch hier verboten.
+    files: ['src/lib/api/auth.ts'],
     rules: {
-      'no-restricted-globals': 'off',
+      'no-restricted-globals': [
+        'error',
+        { name: 'localStorage', message: 'Kein localStorage (E112).' },
+        { name: 'indexedDB', message: 'Kein IndexedDB.' },
+      ],
+      'no-restricted-properties': ['error', ...htmlSinks],
+    },
+  },
+  {
+    // Einzige Stelle mit navigator.clipboard (nur Befehle, Werte, Belege; nie Secrets).
+    files: ['src/lib/util/clipboard.ts'],
+    rules: {
       'no-restricted-properties': ['error', ...htmlSinks],
     },
   },
