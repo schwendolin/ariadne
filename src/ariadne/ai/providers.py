@@ -4,11 +4,16 @@ Kein Modellaufruf bekommt Werkzeuge (Architektur 6). Ein Anbieter liefert nur Te
 
 * :class:`CloudProvider`: eigener ``http_client`` ohne Umgebungs-Proxy (``trust_env=False``), feste
   ``base_url`` (``ANTHROPIC_BASE_URL`` aus der Umgebung gilt nicht), API-Key nur als Argument aus dem
-  Operator-Tresor, nie in der Umgebung. Adaptive Thinking, Effort ``high``, strukturierte Ausgabe über
-  ``output_config.format``, serverseitiger Fallback bei Ablehnung. ``stop_reason`` wird vor dem Inhalt
-  geprüft; bei ``refusal`` wird Teil-Output verworfen und nur die Ablehnung wörtlich übernommen.
+  Operator-Tresor, nie in der Umgebung. TLS nur gegen die Mozilla-Liste (``certifi``), nie gegen den
+  Zertifikatsspeicher des Systems: Eine dort installierte CA (Burp, Schule, Firma) bricht die Verbindung
+  ab, statt sie aufbrechen zu lassen (E98). Fehlt ``certifi``, gibt es keine Verbindung (Fehler ``tls``).
+  Adaptive Thinking, Effort ``high``, strukturierte Ausgabe über ``output_config.format``, serverseitiger
+  Fallback bei Ablehnung. ``stop_reason`` wird vor dem Inhalt geprüft; bei ``refusal`` wird Teil-Output
+  verworfen und nur die Ablehnung wörtlich übernommen. Nach einem Fallback zählt nur der Text nach dem
+  letzten ``fallback``-Block (Teil-Output des ablehnenden Modells fällt weg).
 * :class:`LocalProvider`: ``POST /api/chat`` an Ollama, nur auf ``127.0.0.1`` (ohne Proxy, über
-  ``http.client``). Nicht erreichbar: klare Meldung, kein stiller Rückfall auf die Cloud.
+  ``http.client``). Nicht erreichbar: klare Meldung, kein stiller Rückfall auf die Cloud. Modell nicht
+  geladen (404): Fehler ``model``.
 
 Für Tests nimmt :class:`CloudProvider` einen ``transport`` (``httpx2``-Transport) entgegen.
 """
@@ -18,6 +23,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import ssl
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -34,7 +40,8 @@ _TIMEOUT_S = 300.0
 _REFUSAL_MAX = 2000
 
 Status = Literal["ok", "refused", "truncated", "error"]
-ErrorKind = Literal["unreachable", "auth", "schema", "truncated", "internal"]
+ErrorKind = Literal["unreachable", "auth", "schema", "truncated", "internal", "model", "overloaded", "tls"]
+_OVERLOADED = (429, 503, 529)
 
 
 class ProviderError(Exception):
@@ -60,6 +67,41 @@ def _int(v: Any) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
 
 
+def mozilla_tls_context() -> ssl.SSLContext:
+    """TLS-Kontext nur mit der Mozilla-Liste (``certifi``), ohne Zertifikatsspeicher des Systems.
+
+    Fehlt ``certifi``: :class:`ProviderError` ``tls`` (lieber keine Verbindung als eine, die eine lokal
+    installierte CA aufbrechen kann)."""
+    try:
+        import certifi
+    except ImportError:
+        raise ProviderError("tls") from None
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _tls_failure(exc: BaseException) -> bool:
+    """Steckt in der Kette der Ausnahme ein gescheiterter Zertifikatsabgleich?"""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        if isinstance(cur, ssl.SSLCertVerificationError):
+            return True
+        seen.add(id(cur))
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
+def _final_text(content: Any) -> str:
+    """Text der Antwort; nach einem serverseitigen Fallback nur der Teil nach dem letzten
+    ``fallback``-Block (davor steht Teil-Output des Modells, das abgelehnt hat)."""
+    blocks = list(content or [])
+    last = -1
+    for i, b in enumerate(blocks):
+        if getattr(b, "type", None) == "fallback":
+            last = i
+    return "".join(getattr(b, "text", "") for b in blocks[last + 1 :] if getattr(b, "type", None) == "text")
+
+
 class CloudProvider:
     """Anthropic-API (Python-SDK ``anthropic``)."""
 
@@ -72,6 +114,8 @@ class CloudProvider:
         kw: dict[str, Any] = {"trust_env": False}
         if transport is not None:
             kw["transport"] = transport
+        else:
+            kw["verify"] = mozilla_tls_context()
         self.model = model
         self._client = anthropic.Anthropic(
             api_key=api_key,
@@ -107,10 +151,14 @@ class CloudProvider:
             raise ProviderError("auth") from None
         except anthropic.PermissionDeniedError:
             raise ProviderError("auth") from None
-        except (anthropic.APIConnectionError, anthropic.APITimeoutError):
+        except anthropic.APITimeoutError:
             raise ProviderError("unreachable") from None
-        except anthropic.APIStatusError:
-            raise ProviderError("internal") from None
+        except anthropic.APIConnectionError as exc:
+            raise ProviderError("tls" if _tls_failure(exc) else "unreachable") from None
+        except anthropic.NotFoundError:
+            raise ProviderError("model") from None  # Modell-ID unbekannt
+        except anthropic.APIStatusError as exc:
+            raise ProviderError("overloaded" if exc.status_code in _OVERLOADED else "internal") from None
         u = getattr(r, "usage", None)
         usage = Usage(
             input_tokens=_int(getattr(u, "input_tokens", 0)),
@@ -125,9 +173,7 @@ class CloudProvider:
             det = getattr(r, "stop_details", None)
             cat = getattr(det, "category", None) if det is not None else None
             expl = getattr(det, "explanation", None) if det is not None else None
-            text = "".join(
-                getattr(b, "text", "") for b in (r.content or []) if getattr(b, "type", None) == "text"
-            )
+            text = _final_text(r.content)
             refusal = (expl if isinstance(expl, str) and expl else text) or ""
             return ProviderResult(
                 "refused",
@@ -139,10 +185,7 @@ class CloudProvider:
             )
         if stop == "max_tokens":
             return ProviderResult("truncated", None, served, usage, error="truncated")
-        text = "".join(
-            getattr(b, "text", "") for b in (r.content or []) if getattr(b, "type", None) == "text"
-        )
-        return ProviderResult("ok", text, served, usage)
+        return ProviderResult("ok", _final_text(r.content), served, usage)
 
 
 def is_loopback(host: str) -> bool:
@@ -201,7 +244,8 @@ class LocalProvider:
         except (OSError, http.client.HTTPException):
             raise ProviderError("unreachable") from None
         if status != 200:
-            raise ProviderError("unreachable" if status >= 500 else "internal")
+            # Ollama läuft (es hat geantwortet): 404 heisst Modell nicht geladen, sonst interner Fehler
+            raise ProviderError("model" if status == 404 else "internal")
         try:
             data = json.loads(raw)
         except ValueError:

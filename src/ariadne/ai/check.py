@@ -2,9 +2,11 @@
 
 * Einstellungen gültig, Anbieter und Modell gesetzt.
 * Cloud: API erreichbar über eine direkte Verbindung (ohne Proxy der Umgebung) und TLS ohne Aufbruch:
-  Die Kette muss gegen die Mozilla-Liste (``certifi``, dieselbe Liste wie das SDK) gültig sein. Gilt sie
-  nur mit dem Zertifikatsspeicher des Systems, endet sie in einer lokal hinzugefügten CA (Burp, Firmen-
-  Proxy): ``fail``. Ein gesetzter Proxy in der Umgebung ist ``warn`` (Ariadne nutzt ihn nicht).
+  Die Kette muss gegen die Mozilla-Liste (``certifi``) gültig sein; genau diese Liste nutzt auch der
+  Anbieter ``cloud`` (:func:`ariadne.ai.providers.mozilla_tls_context`, nie den Speicher des Systems).
+  Gilt sie nur mit dem Zertifikatsspeicher des Systems, endet sie in einer lokal hinzugefügten CA (Burp,
+  Firmen-Proxy): ``fail``; der echte Aufruf scheitert dann ebenfalls (Fehler ``tls``). Ein gesetzter
+  Proxy in der Umgebung ist ``warn`` (Ariadne nutzt ihn nicht).
 * Lokal: Ollama antwortet auf ``127.0.0.1``.
 
 Die Prüfung sendet keine Secrets und keine Projektdaten; nur ein TLS-Handshake und ``HEAD /``.

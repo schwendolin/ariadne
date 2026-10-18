@@ -73,6 +73,10 @@ JOB_TEXT: dict[str, str] = {
     "unreachable": "Anbieter nicht erreichbar.",
     "unreachable_local": "Ollama auf 127.0.0.1 nicht erreichbar: ollama serve starten oder ariadne ai check.",
     "auth": "API-Key abgelehnt: im Terminal ariadne ai setup.",
+    "model": "Modell-ID beim Anbieter unbekannt: im Terminal ariadne ai setup --model <ID>.",
+    "model_local": "Modell in Ollama nicht geladen: ollama pull <ID> oder ariadne ai setup --model <ID>.",
+    "overloaded": "Anbieter ausgelastet oder Ratenlimit erreicht: später erneut versuchen.",
+    "tls": "TLS-Verbindung abgelehnt (fremde CA oder Aufbruch): im Terminal ariadne ai check.",
     "schema": "Antwort hat nicht das verlangte Format.",
     "truncated": "Antwort abgeschnitten (zu lang).",
     "project_changed": "Projekt wurde gewechselt; nichts gespeichert.",
@@ -396,8 +400,10 @@ class Gateway:
         except ProviderError as exc:
             status = "offline" if exc.kind == "unreachable" else "error"
             self._journal_call(p, cfg, job, call_id, None, status)
-            local = cfg.provider == "local" and exc.kind == "unreachable"
-            self._finish(job, "failed", "unreachable_local" if local else exc.kind, exc.kind)
+            text_key: str = exc.kind
+            if cfg.provider == "local" and exc.kind in ("unreachable", "model"):
+                text_key = f"{exc.kind}_local"
+            self._finish(job, "failed", text_key, exc.kind)
             return
         finally:
             key = None

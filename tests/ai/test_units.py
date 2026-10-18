@@ -314,3 +314,119 @@ def test_checks_tls_interception_proxy_and_local():
     assert worst(run_checks(local, key_present=None, env={}, ollama_ping=lambda: False)) == "fail"
     assert worst(run_checks(local, key_present=None, env={}, ollama_ping=lambda: True)) == "ok"
     assert worst(run_checks(None, key_present=None, env={})) == "fail"
+
+
+# --------------------------------------------------------------------------- Befunde der Prüfung (Etappe 4)
+
+
+def _tls_server(tmp_path: Any) -> tuple[int, str, Any]:
+    """TLS-Server auf 127.0.0.1 mit selbst signierter CA (wie Burp). Liefert Port, CA-Datei, Stopper."""
+    import shutil
+    import socket
+    import ssl
+    import subprocess
+    import threading
+
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl fehlt")
+    cert, key = tmp_path / "ca.pem", tmp_path / "ca.key"
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(cert),
+         "-days", "2", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"],
+        check=True, capture_output=True,
+    )
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(str(cert), str(key))
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(4)
+    srv.settimeout(10)
+    hits: list[bytes] = []
+    body = json.dumps(_reply()).encode()
+
+    def serve() -> None:
+        try:
+            while True:
+                raw, _ = srv.accept()
+                try:
+                    with ctx.wrap_socket(raw, server_side=True) as tls:
+                        hits.append(tls.recv(65536))
+                        tls.sendall(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                            + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
+                        )
+                except (OSError, ssl.SSLError):
+                    pass
+        except OSError:
+            return
+
+    threading.Thread(target=serve, daemon=True).start()
+    return srv.getsockname()[1], str(cert), (srv, hits)
+
+
+def test_cloud_provider_trusts_only_mozilla_list_not_system_store(tmp_path, monkeypatch):
+    """SEC4-KI-1: Eine CA im Zertifikatsspeicher des Systems (Burp, Schule) darf die Cloud-Verbindung nicht
+    aufbrechen. Der Server ist für den Systemspeicher gültig (``SSL_CERT_FILE``), nicht für certifi."""
+    import ssl
+
+    from ariadne.ai import providers
+
+    port, ca, (srv, hits) = _tls_server(tmp_path)
+    monkeypatch.setenv("SSL_CERT_FILE", ca)
+    # Gegenprobe: mit dem Systemspeicher wäre die Kette gültig
+    sys_ctx = ssl.create_default_context()
+    assert sys_ctx.cert_store_stats()["x509_ca"] >= 1
+    monkeypatch.setattr(providers, "BASE_URL", f"https://127.0.0.1:{port}")
+    prov = CloudProvider("sk-test-tls", "test-model", max_retries=0)
+    try:
+        with pytest.raises(ProviderError) as e:
+            prov.run("s", "u", {}, effort="high", max_tokens=10)
+    finally:
+        prov.close()
+        srv.close()
+    assert e.value.kind == "tls"
+    assert not any(b"sk-test-tls" in h for h in hits)  # kein Header hat den Interceptor erreicht
+
+
+def test_cloud_provider_fallback_uses_only_text_after_fallback_block():
+    """R1: Teil-Output des ablehnenden Modells vor dem ``fallback``-Block fällt weg."""
+    good = '{"anstoesse": []}'
+    content = [
+        {"type": "text", "text": '{"anstoesse": ['},
+        {"type": "fallback", "from_model": "test-model", "to_model": "test-model-b"},
+        {"type": "text", "text": good},
+    ]
+
+    def handler(req: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=_reply(content=content))
+
+    prov = CloudProvider("k", "test-model", transport=httpx2.MockTransport(handler), max_retries=0)
+    out = prov.run("s", "u", {}, effort="high", max_tokens=10)
+    assert out.status == "ok" and out.text == good
+
+
+@pytest.mark.parametrize(("status", "kind"), [(404, "model"), (429, "overloaded"), (529, "overloaded"),
+                                              (400, "internal")])
+def test_cloud_provider_status_errors_have_own_kinds(status, kind):
+    """R2: unbekannte Modell-ID und Überlast sind eigene Fehlerarten mit eigenem Text."""
+    from ariadne.ai.gateway import JOB_TEXT
+
+    def handler(req: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(status, json={"type": "error", "error": {"type": "x", "message": "m"}})
+
+    prov = CloudProvider("k", "test-model", transport=httpx2.MockTransport(handler), max_retries=0)
+    with pytest.raises(ProviderError) as e:
+        prov.run("s", "u", {}, effort="high", max_tokens=10)
+    assert e.value.kind == kind and kind in JOB_TEXT
+
+
+def test_local_provider_model_missing_and_server_error():
+    """R2: Ollama 404 heisst Modell nicht geladen, 500 ist nicht «nicht erreichbar»."""
+    from ariadne.ai.gateway import JOB_TEXT
+
+    for status, kind in ((404, "model"), (500, "internal")):
+        prov = LocalProvider("test-model", conn_factory=lambda s=status: _Conn(_Resp(s, b"{}")))
+        with pytest.raises(ProviderError) as e:
+            prov.run("s", "u", {}, effort="high", max_tokens=10)
+        assert e.value.kind == kind
+    assert "ollama pull" in JOB_TEXT["model_local"]
