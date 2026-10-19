@@ -24,7 +24,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NoReturn
 
 from ariadne import __version__
 from ariadne.cli import ai as ai_cli
@@ -709,8 +709,19 @@ def cmd_doctor(paths: Paths, args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
+class _Parser(argparse.ArgumentParser):
+    """Fehlt bei einem Befehl die Aktion (``ariadne ai``), zeigt er seine Hilfe mit allen Aktionen
+    statt nur der Fehlerzeile. Unterbefehle erben die Klasse."""
+
+    def error(self, message: str) -> NoReturn:
+        if message.endswith(("required: AKTION", "required: BEFEHL")):
+            self.print_help(sys.stderr)
+            self.exit(2)
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ariadne", description="Flugschreiber und Kartograf für Pentests.")
+    p = _Parser(prog="ariadne", description="Flugschreiber und Kartograf für Pentests.")
     p.add_argument("--version", action="version", version=f"ariadne {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="BEFEHL")
 
