@@ -170,7 +170,7 @@ Aktualisieren: zuerst `ariadne stop`, dann denselben Weg wie bei der Installatio
 
 - Installiert mit `pipx install "git+https://…"` (Weg B) bzw. `git+ssh://…` (Weg A): denselben Befehl mit `pipx install --force "…"`. Bei Weg B mit Token vorher `ariadne pause --minutes 5`, danach `ariadne resume`.
 - Installiert aus dem Ordner (Weg D): `cd ~/ariadne-src && git pull`, dann `pipx install --force ~/ariadne-src`.
-- Welcher Weg es war, zeigt `pipx list --include-injected` (Zeile `package ariadne-recon …`) bzw. ob `~/ariadne-src` existiert.
+- Welcher Weg es war, zeigt `pipx list --json | grep package_or_url` (Adresse oder Ordner der Installation).
 
 Ob die neue Version läuft, zeigt `ariadne doctor` in der Zeile «Weboberfläche vorhanden (Quellstand …)»: Die Nummer ändert sich mit jedem Update der Oberfläche. Eine fehlende oder unvollständige Weboberfläche meldet `doctor` mit dem Hinweis `pipx reinstall ariadne-recon`.
 
