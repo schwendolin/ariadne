@@ -166,7 +166,13 @@ Im Terminal: `F12 s` nimmt einen Screenshot des aktiven Fensters auf (nur X11, X
 
 ## 4 Aktualisieren und entfernen
 
-Aktualisieren: zuerst `ariadne stop`, dann denselben Weg wie oben mit `pipx install --force …` wiederholen, danach `ariadne daemon stop`, `ariadne setup` und neue Terminals öffnen. `ariadne doctor` meldet eine fehlende oder unvollständige Weboberfläche mit dem Hinweis `pipx reinstall ariadne-recon`.
+Aktualisieren: zuerst `ariadne stop`, dann denselben Weg wie bei der Installation mit `--force` wiederholen, danach `ariadne daemon stop`, `ariadne setup` und neue Terminals öffnen.
+
+- Installiert mit `pipx install "git+https://…"` (Weg B) bzw. `git+ssh://…` (Weg A): denselben Befehl mit `pipx install --force "…"`. Bei Weg B mit Token vorher `ariadne pause --minutes 5`, danach `ariadne resume`.
+- Installiert aus dem Ordner (Weg D): `cd ~/ariadne-src && git pull`, dann `pipx install --force ~/ariadne-src`.
+- Welcher Weg es war, zeigt `pipx list --include-injected` (Zeile `package ariadne-recon …`) bzw. ob `~/ariadne-src` existiert.
+
+Ob die neue Version läuft, zeigt `ariadne doctor` in der Zeile «Weboberfläche vorhanden (Quellstand …)»: Die Nummer ändert sich mit jedem Update der Oberfläche. Eine fehlende oder unvollständige Weboberfläche meldet `doctor` mit dem Hinweis `pipx reinstall ariadne-recon`.
 
 Entfernen: `ariadne setup --remove`, dann `pipx uninstall ariadne-recon`. Projekte (`~/ariadne`) und Tresor (`~/.local/share/ariadne`) bleiben liegen, bis du sie selbst löschst.
 
