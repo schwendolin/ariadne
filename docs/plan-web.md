@@ -1,6 +1,6 @@
 # Plan: Web und Browser
 
-Stand 2026-10-19. Das ist ein Vorschlag zur Bestätigung, gebaut ist noch nichts davon. Grundlage sind die Entscheide E135 bis E138 von heute. Dazu kommen die weiter gültigen Entscheide E10, E13, E33, E42, E49, E72, E97, E98, E99, E117, E126 bis E133 im [Entscheidungsprotokoll](entscheide.md), Abschnitt 4 im [Konzept Terminal und Web](konzept-terminal-und-web.md) und die [Lösungsarchitektur](architektur.md). Neue Entscheide stehen in Abschnitt 7 als Vorschläge ab E139. Sie gelten erst, wenn du sie bestätigst.
+Stand 2026-10-19. Die Entscheide E139 bis E157 hast du am 2026-10-19 bestätigt (alle Empfehlungen übernommen); gebaut ist noch nichts davon, der Bau ist noch nicht freigegeben. Grundlage sind die Entscheide E135 bis E138 von heute. Dazu kommen die weiter gültigen Entscheide E10, E13, E33, E42, E49, E72, E97, E98, E99, E117, E126 bis E133 im [Entscheidungsprotokoll](entscheide.md), Abschnitt 4 im [Konzept Terminal und Web](konzept-terminal-und-web.md) und die [Lösungsarchitektur](architektur.md). Die neuen Entscheide E139 bis E157 aus Abschnitt 7 stehen jetzt im Entscheidungsprotokoll.
 
 ## Auf einen Blick
 
@@ -836,7 +836,7 @@ In beiden Varianten vertraut der Testbrowser zwei CAs (Ariadne und Burp). Der Sc
 
 ### 7.1 Vorschläge für neue Entscheide
 
-Alle mit Datum 2026-10-19, Quelle «KI-Vorschlag», Status offen, bis du sie bestätigst.
+Alle mit Datum 2026-10-19. Am selben Tag bestätigt (alle Empfehlungen übernommen) und ins Entscheidungsprotokoll übernommen, Quelle «Nutzer + KI», Status fest.
 
 | ID | Entscheid (Vorschlag) | Begründung | Bezug |
 |---|---|---|---|
@@ -874,6 +874,8 @@ Diese Stellen widersprechen E135 bis E138. Ich führe sie gleich nach deiner Bes
 ### 7.3 Fragen an dich
 
 Jede Frage hat eine Empfehlung. «Ja» heisst, du übernimmst sie.
+
+**Antworten vom 2026-10-19:** Alle Empfehlungen übernommen (Fragen 1 bis 13 und 16 bis 19). Frage 15: Die Metasploitable2 ist deine eigene VM, ein Snapshot ist möglich. Die Formularphase des Spiders (mit Haken) ist dort also erlaubt; vor einem Lauf mit Formularen einen Snapshot anlegen. Frage 14 (Termin für W0) bleibt offen, bis du den Bau freigibst.
 
 1. **Grenze des Spiders:** nur der Start-Origin, weitere Hosts nur angekreuzt, `http` auf `https` beim selben Host erlaubt (E139)? *Empfehlung: ja.*
 2. **Formulare:** drei Klassen, Klasse A nur GET und klare Suchformulare, jedes andere POST-Formular nur mit deinem Haken, Login-, Upload-, CAPTCHA- und Zahlungsformulare nie, höchstens 10 pro Lauf (E142)? *Empfehlung: ja.* Login-Formulare mit Platzhaltern bringen kaum etwas, riskieren aber Sperren. POST bleibt damit möglich, wie in E135 verlangt, aber nie ohne Haken.
