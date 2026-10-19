@@ -64,7 +64,7 @@ def test_setup_cloud_key_via_fd_never_in_file(env, capsys):
     assert (cfg.provider, cfg.model, cfg.monthly_limit_usd) == ("cloud", "test-model", 15.0)
     text = (default_paths().config_dir / "ai.toml").read_text()
     assert KEY not in text
-    assert ("ai.key.set", {"value": KEY}) in env
+    assert ("ai.key.set", {"value": KEY, "provider": "cloud"}) in env
     out = capsys.readouterr().out
     assert KEY not in out and "allow-cloud" in out
 

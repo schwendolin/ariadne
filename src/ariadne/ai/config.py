@@ -1,12 +1,13 @@
 """Einstellungen des KI-Gateways (``~/.config/ariadne/ai.toml``, 0600, ohne Secrets).
 
-Der API-Key steht nie hier, sondern verschlüsselt im Operator-Tresor (``api_keys["anthropic"]``).
+Der API-Key steht nie hier, sondern verschlüsselt im Operator-Tresor (``api_keys["anthropic"]`` bzw.
+``api_keys["openrouter"]``, siehe :func:`key_name`).
 Die Modell-ID setzt der Nutzer mit ``ariadne ai setup``; Ariadne kennt keinen Standard. Preise sind
 Konfiguration, nicht Code (Architektur 6.2): USD pro Million Tokens.
 
 Beispiel::
 
-    provider = "cloud"           # off | cloud | local
+    provider = "cloud"           # off | cloud | openrouter | local
     model = "<Modell-ID>"
     monthly_limit_usd = 20.0
 
@@ -42,10 +43,31 @@ __all__ = [
     "save_config",
     "valid_model",
     "ConfigError",
+    "REMOTE",
+    "is_remote",
+    "key_name",
+    "api_host",
 ]
 
-Provider = Literal["off", "cloud", "local"]
-PROVIDERS: tuple[str, ...] = ("off", "cloud", "local")
+Provider = Literal["off", "cloud", "openrouter", "local"]
+PROVIDERS: tuple[str, ...] = ("off", "cloud", "openrouter", "local")
+# Anbieter im Internet: brauchen API-Key, Freigabe pro Projekt (E126) und gelten als Cloud-KI (E134)
+REMOTE: tuple[str, ...] = ("cloud", "openrouter")
+_KEY_NAMES = {"cloud": "anthropic", "openrouter": "openrouter"}
+_HOSTS = {"cloud": "api.anthropic.com", "openrouter": "openrouter.ai"}
+
+
+def is_remote(provider: str | None) -> bool:
+    return provider in REMOTE
+
+
+def key_name(provider: str | None) -> str:
+    """Name des API-Keys im Operator-Tresor; für ``cloud`` wie bisher ``anthropic``."""
+    return _KEY_NAMES.get(provider or "", "anthropic")
+
+
+def api_host(provider: str | None) -> str:
+    return _HOSTS.get(provider or "", "api.anthropic.com")
 _MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}")
 DEFAULT_LIMIT_USD = 20.0
 
@@ -110,7 +132,7 @@ def load_config(paths: Paths) -> AiConfig:
         raise ConfigError("ai.toml ist kein gültiges TOML") from exc
     provider = data.get("provider", "off")
     if provider not in PROVIDERS:
-        raise ConfigError("provider in ai.toml muss off, cloud oder local sein")
+        raise ConfigError("provider in ai.toml muss off, cloud, openrouter oder local sein")
     model = data.get("model", "")
     if not isinstance(model, str) or (model and not valid_model(model)):
         raise ConfigError("model in ai.toml enthält unzulässige Zeichen")

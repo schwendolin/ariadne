@@ -35,6 +35,7 @@ class Usage:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    billed_usd: float | None = None  # vom Anbieter gemeldete Kosten (OpenRouter), gehen vor den Preisen
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,11 @@ def month_of(ts: float | None = None) -> str:
 
 
 def cost_microusd(usage: Usage, prices: Prices) -> int:
-    """Kosten in Mikro-USD (aufgerundet), Preise in USD pro Million Tokens."""
+    """Kosten in Mikro-USD (aufgerundet), Preise in USD pro Million Tokens. Meldet der Anbieter die
+    Kosten selbst (``billed_usd``), zählen diese."""
+    b = usage.billed_usd
+    if b is not None and math.isfinite(b) and 0 <= b < 1_000_000:
+        return int(math.ceil(b * 1_000_000)) if b > 0 else 0
     total = (
         usage.input_tokens * prices.input
         + usage.output_tokens * prices.output

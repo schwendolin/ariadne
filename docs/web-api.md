@@ -300,7 +300,7 @@ interface Status {
     outage_terminals: number; outage_seconds: number;     // übernimmt start/unlock ohne Frage
   };
   presentation: boolean;
-  llm: { mode: 'off' | 'local' | 'cloud'; model: string | null; available: boolean;
+  llm: { mode: 'off' | 'local' | 'cloud'; model: string | null; available: boolean;  // openrouter erscheint als cloud
          budget: { month_limit_usd: number; month_used_usd: number } | null };   // v0.1: mode 'off'
   generation: number | null;          // Projektionsgeneration (für /changes)
   ingest: { active: boolean; last_error: string | null } | null;
@@ -1274,7 +1274,7 @@ Ausgang (Redaktor E72, zweite Schicht) wie alle anderen.
 
 ```ts
 interface AiStatus {
-  provider: 'off' | 'cloud' | 'local';
+  provider: 'off' | 'cloud' | 'openrouter' | 'local';  // openrouter ab E134
   model: string | null;                 // vom Nutzer gesetzte Modell-ID (Text, kein Zieldatum)
   ready: boolean;                       // Knopf «Denkanstoss anfordern (KI)» aktiv
   reason: null | 'off' | 'config' | 'no_model' | 'no_key' | 'locked' | 'cloud_not_allowed' | 'profile'
@@ -1306,7 +1306,7 @@ interface AiJob {
   step: 'lagebild' | 'anfrage' | 'pruefung' | 'fertig';
   message: string;                      // fester deutscher Text, nie Modell- oder Zieltext
   started_at: string; ended_at: string | null;
-  provider: 'cloud' | 'local'; model: string;
+  provider: 'cloud' | 'openrouter' | 'local'; model: string;
   tokens_in: number | null; tokens_out: number | null; tokens_estimate: number | null;
   masked: number;                       // ersetzte eigene Secrets und maskierte Werte im Lagebild
   cost_usd: number | null;              // aus Tokens mal Preisen der Konfiguration

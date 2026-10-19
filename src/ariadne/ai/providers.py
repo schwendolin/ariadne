@@ -11,6 +11,10 @@ Kein Modellaufruf bekommt Werkzeuge (Architektur 6). Ein Anbieter liefert nur Te
   Fallback bei Ablehnung. ``stop_reason`` wird vor dem Inhalt geprüft; bei ``refusal`` wird Teil-Output
   verworfen und nur die Ablehnung wörtlich übernommen. Nach einem Fallback zählt nur der Text nach dem
   letzten ``fallback``-Block (Teil-Output des ablehnenden Modells fällt weg).
+* :class:`OpenRouterProvider`: ``POST /api/v1/chat/completions`` an ``openrouter.ai`` (E134), über
+  ``http.client`` ohne Proxy, TLS wie bei ``cloud`` nur gegen die Mozilla-Liste. Strukturierte Ausgabe per
+  ``response_format`` (JSON-Schema), Kosten aus ``usage.cost``. OpenRouter wählt den Anbieter des Modells
+  frei (Nutzerentscheid E134). Der Text der Fehlerantwort geht nie weiter, nur die feste Fehlerart.
 * :class:`LocalProvider`: ``POST /api/chat`` an Ollama, nur auf ``127.0.0.1`` (ohne Proxy, über
   ``http.client``). Nicht erreichbar: klare Meldung, kein stiller Rückfall auf die Cloud. Modell nicht
   geladen (404): Fehler ``model``.
@@ -29,12 +33,18 @@ from typing import Any, Literal
 
 from ariadne.ai.budget import Usage
 
-__all__ = ["ProviderResult", "CloudProvider", "LocalProvider", "ProviderError", "API_HOST", "BASE_URL"]
+__all__ = [
+    "ProviderResult", "CloudProvider", "OpenRouterProvider", "LocalProvider", "ProviderError", "API_HOST",
+    "BASE_URL", "OPENROUTER_HOST",
+]
 
 log = logging.getLogger("ariadne.ai")
 
 API_HOST = "api.anthropic.com"
 BASE_URL = f"https://{API_HOST}"
+OPENROUTER_HOST = "openrouter.ai"
+_OPENROUTER_PATH = "/api/v1/chat/completions"
+_MAX_BODY = 8 << 20
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 _TIMEOUT_S = 300.0
 _REFUSAL_MAX = 2000
@@ -186,6 +196,124 @@ class CloudProvider:
         if stop == "max_tokens":
             return ProviderResult("truncated", None, served, usage, error="truncated")
         return ProviderResult("ok", _final_text(r.content), served, usage)
+
+
+def _strip_fence(text: str) -> str:
+    """Manche Modelle setzen JSON trotz ``response_format`` in einen Markdown-Block; nur diesen entfernen."""
+    t = text.strip()
+    if t.startswith("```") and t.endswith("```") and t.count("```") == 2:
+        first = t.find("\n")
+        if first != -1:
+            return t[first + 1 : -3].strip()
+    return text
+
+
+def _openrouter_error(status: int, raw: bytes) -> ErrorKind:
+    """HTTP-Status von OpenRouter auf eine feste Fehlerart (der Text der Antwort geht nie weiter)."""
+    if status in (401, 402, 403):  # Key falsch, Guthaben oder Limit des Keys aufgebraucht
+        return "auth"
+    if status == 404:
+        return "model"
+    if status == 400:
+        try:
+            msg = json.loads(raw).get("error", {}).get("message", "")
+        except (ValueError, AttributeError):
+            msg = ""
+        return "model" if isinstance(msg, str) and "model" in msg.lower() else "internal"
+    if status in (408, 429, 502, 503, 529):
+        return "overloaded"
+    return "internal"
+
+
+class OpenRouterProvider:
+    """OpenRouter (``openrouter.ai``), OpenAI-kompatible Schnittstelle; Modell-ID wie ``anbieter/modell``."""
+
+    name = "openrouter"
+    journal_name = "openrouter"
+
+    def __init__(self, api_key: str, model: str, *, conn_factory: Any = None) -> None:
+        self.model = model
+        self._key = api_key
+        self._conn = conn_factory or (
+            lambda: http.client.HTTPSConnection(
+                OPENROUTER_HOST, 443, timeout=_TIMEOUT_S, context=mozilla_tls_context()
+            )
+        )
+
+    def close(self) -> None:
+        self._key = ""
+
+    def run(
+        self, system: str, user: str, schema: dict[str, Any], *, effort: str, max_tokens: int
+    ) -> ProviderResult:
+        body = json.dumps(
+            {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "denkanstoss", "strict": True, "schema": schema},
+                },
+                "reasoning": {"effort": effort if effort in ("low", "medium", "high") else "high",
+                              "exclude": True},
+                "usage": {"include": True},
+            }
+        ).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._key}",
+            "X-Title": "Ariadne",
+        }
+        try:
+            c = self._conn()
+            c.request("POST", _OPENROUTER_PATH, body=body, headers=headers)
+            resp = c.getresponse()
+            raw = resp.read(_MAX_BODY)
+            status = resp.status
+            c.close()
+        except TimeoutError:
+            raise ProviderError("unreachable") from None
+        except (OSError, http.client.HTTPException) as exc:
+            raise ProviderError("tls" if _tls_failure(exc) else "unreachable") from None
+        if status != 200:
+            raise ProviderError(_openrouter_error(status, raw))
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            raise ProviderError("schema") from None
+        if not isinstance(data, dict):
+            raise ProviderError("schema")
+        if isinstance(data.get("error"), dict):  # Fehler des weitergeleiteten Anbieters mit Status 200
+            code = data["error"].get("code")
+            raise ProviderError(_openrouter_error(code if isinstance(code, int) else 500, b"{}"))
+        u = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        details = u.get("prompt_tokens_details") if isinstance(u.get("prompt_tokens_details"), dict) else {}
+        cost = u.get("cost")
+        cached = _int(details.get("cached_tokens"))
+        usage = Usage(
+            input_tokens=max(0, _int(u.get("prompt_tokens")) - cached),
+            output_tokens=_int(u.get("completion_tokens")),
+            cache_read_tokens=cached,
+            billed_usd=float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None,
+        )
+        served = data.get("model") if isinstance(data.get("model"), str) else self.model
+        choices = data.get("choices")
+        choice = choices[0] if isinstance(choices, list) and choices else None
+        if not isinstance(choice, dict):
+            raise ProviderError("schema")
+        msg = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+        finish = choice.get("finish_reason")
+        refusal = msg.get("refusal")
+        if finish == "content_filter" or (isinstance(refusal, str) and refusal):
+            text = refusal if isinstance(refusal, str) else ""
+            return ProviderResult("refused", None, served, usage, refusal_text=text[:_REFUSAL_MAX])
+        if finish == "length":
+            return ProviderResult("truncated", None, served, usage, error="truncated")
+        text = msg.get("content")
+        if not isinstance(text, str) or not text.strip():
+            raise ProviderError("schema")
+        return ProviderResult("ok", _strip_fence(text), served, usage)
 
 
 def is_loopback(host: str) -> bool:

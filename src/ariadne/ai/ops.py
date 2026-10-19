@@ -4,8 +4,9 @@
 und nutzt nur ``operator``, ``project``, ``paths``, ``submit``, ``flush`` und ``_sync_ingest``.
 
 * ``ai.status``: Einstellungen, Schlüssel vorhanden (ja/nein, nie der Wert), Budget, Freigabe des Projekts.
-* ``ai.key.set`` ``{value}``: API-Key verschlüsselt in den Operator-Tresor (nie in Datei, Log, Umgebung).
-* ``ai.key.remove``: API-Key löschen.
+* ``ai.key.set`` ``{value, provider?}``: API-Key des Anbieters (cloud oder openrouter, Standard aus
+  ``ai.toml``) verschlüsselt in den Operator-Tresor (nie in Datei, Log, Umgebung).
+* ``ai.key.remove``: alle KI-Keys löschen.
 * ``ai.allow_cloud``: Entscheid ``d.ai.allow_cloud`` im offenen Projekt (ausdrückliche Freigabe).
 """
 
@@ -16,8 +17,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ariadne.ai.budget import Ledger
-from ariadne.ai.config import ConfigError, load_config
-from ariadne.ai.gateway import KEY_NAME, REASONS, policy_reason, project_flags
+from ariadne.ai.config import REMOTE, ConfigError, is_remote, key_name, load_config
+from ariadne.ai.gateway import REASONS, policy_reason, project_flags
 from ariadne.daemon.ops_util import OpError
 from ariadne.scope.change import scope_open
 from ariadne.store.api import AppendItem
@@ -54,7 +55,7 @@ async def op_status(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     except ConfigError:
         cfg, cfg_error = None, "config"
     op = getattr(d, "operator", None)
-    key_present = bool(op is not None and op.get_api_key(KEY_NAME))
+    key_present = bool(op is not None and op.get_api_key(key_name(cfg.provider if cfg is not None else None)))
     p = getattr(d, "project", None)
     flags = None
     if p is not None:
@@ -105,7 +106,16 @@ async def op_key_set(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     value = value.strip()
     if any(ord(c) < 0x21 or ord(c) > 0x7E for c in value):
         raise OpError("invalid", "API-Key enthält unzulässige Zeichen")
-    op.set_api_key(KEY_NAME, value)
+    provider = args.get("provider")
+    if provider is None:  # ohne Angabe: Anbieter aus ai.toml, sonst wie bisher cloud
+        try:
+            provider = load_config(d.paths).provider
+        except ConfigError:
+            provider = "cloud"
+        provider = provider if is_remote(provider) else "cloud"
+    if not is_remote(provider):
+        raise OpError("invalid", "API-Key nur für die Anbieter cloud und openrouter")
+    op.set_api_key(key_name(provider), value)
     await asyncio.to_thread(op.save)
     d._update_redactor()  # der Key ist ab sofort ein eigenes Secret des Redaktors
     return {"key_present": True}
@@ -113,9 +123,11 @@ async def op_key_set(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
 
 async def op_key_remove(d: Daemon, args: dict[str, Any]) -> dict[str, Any]:
     op = _operator(d)
-    had = bool(op.get_api_key(KEY_NAME))
+    names = [key_name(p) for p in REMOTE]  # alle KI-Keys (cloud und openrouter)
+    had = any(op.get_api_key(n) for n in names)
     if had:
-        op.set_api_key(KEY_NAME, None)
+        for n in names:
+            op.set_api_key(n, None)
         await asyncio.to_thread(op.save)
         d._update_redactor()
     return {"removed": had, "key_present": False}

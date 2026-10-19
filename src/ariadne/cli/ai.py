@@ -1,8 +1,9 @@
 """``ariadne ai``: KI-Gateway einrichten und prüfen (E64 bis E66, Architektur 6.2).
 
-* ``ai setup``: Anbieter (off, cloud, local), Modell-ID, Monatslimit; der API-Key nur per ``getpass``
-  oder ``--key-fd``, verschlüsselt im Operator-Tresor (ctl ``ai.key.set``). Nie als Argument, nie in einer
-  Datei, nie in der Umgebung. Vor der Abfrage meldet die CLI ihr Terminal per ``pause_terminal`` an.
+* ``ai setup``: Anbieter (off, cloud, openrouter, local), Modell-ID, Monatslimit; der API-Key nur per
+  ``getpass`` oder ``--key-fd``, verschlüsselt im Operator-Tresor (ctl ``ai.key.set``). Nie als Argument,
+  nie in einer Datei, nie in der Umgebung. Vor der Abfrage meldet die CLI ihr Terminal per
+  ``pause_terminal`` an.
 * ``ai status``: Einstellungen, Schlüssel vorhanden, Budget, Freigabe des offenen Projekts.
 * ``ai check``: Prüfliste (ok, warn, fail), Exit 1 bei ``fail``.
 * ``ai allow-cloud``: ausdrückliche Freigabe der Cloud-KI für das offene Projekt (Entscheid im Journal).
@@ -16,7 +17,15 @@ import os
 import sys
 from typing import Any
 
-from ariadne.ai.config import PROVIDERS, AiConfig, ConfigError, load_config, save_config, valid_model
+from ariadne.ai.config import (
+    PROVIDERS,
+    AiConfig,
+    ConfigError,
+    is_remote,
+    load_config,
+    save_config,
+    valid_model,
+)
 from ariadne.cli.common import CliError, _call, _client, pause_this_terminal, read_secret, s, say
 from ariadne.paths import Paths
 
@@ -51,9 +60,9 @@ def _setup(paths: Paths, args: argparse.Namespace) -> int:
     except ConfigError:
         say("[!] ai.toml war ungültig; es wird neu geschrieben.")
         cfg = AiConfig()
-    provider = args.provider or _ask("Anbieter (off, cloud, local)", cfg.provider)
+    provider = args.provider or _ask("Anbieter (off, cloud, openrouter, local)", cfg.provider)
     if provider not in PROVIDERS:
-        raise CliError("Anbieter muss off, cloud oder local sein")
+        raise CliError("Anbieter muss off, cloud, openrouter oder local sein")
     model = (
         args.model
         if args.model is not None
@@ -66,7 +75,7 @@ def _setup(paths: Paths, args: argparse.Namespace) -> int:
     limit = cfg.monthly_limit_usd
     if args.limit is not None:
         limit = args.limit
-    elif provider == "cloud":
+    elif is_remote(provider):
         raw = _ask("Monatslimit in USD", f"{cfg.monthly_limit_usd:g}")
         try:
             limit = float(raw)
@@ -74,12 +83,12 @@ def _setup(paths: Paths, args: argparse.Namespace) -> int:
             raise CliError("Monatslimit muss eine Zahl sein") from None
     if not math.isfinite(limit) or limit < 0 or limit > 100000:
         raise CliError("Monatslimit muss zwischen 0 und 100000 USD liegen")
-    if provider == "cloud" and not args.keep_key:
+    if is_remote(provider) and not args.keep_key:
         _client(paths)  # Daemon nötig: der Schlüssel geht in den Operator-Tresor
         pause_this_terminal(paths)  # vor getpass: die Eingabe kommt sonst in den Vorlauf (E26)
         key = read_secret("API-Key (unsichtbar; leer lässt den bisherigen): ", args.key_fd)
         if key:
-            _call(paths, "ai.key.set", value=key)
+            _call(paths, "ai.key.set", value=key, provider=provider)
             say("API-Key verschlüsselt im Operator-Tresor gespeichert.")
         else:
             st = _status(paths)
@@ -89,7 +98,7 @@ def _setup(paths: Paths, args: argparse.Namespace) -> int:
         key = ""
     path = save_config(paths, cfg.with_(provider=provider, model=model, monthly_limit_usd=float(limit)))
     say(f"Einstellungen gespeichert: {s(str(path))}")
-    if provider == "cloud":
+    if is_remote(provider):
         say("Cloud-KI gilt erst nach ausdrücklicher Freigabe pro Projekt: ariadne ai allow-cloud")
     say("Preise (USD pro Million Tokens) stehen in ai.toml unter [prices]; bitte an die Preisliste anpassen.")
     return 0

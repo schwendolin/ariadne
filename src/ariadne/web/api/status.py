@@ -157,7 +157,7 @@ def _llm_view(d: Any, with_project: bool) -> dict[str, Any]:
         return {"mode": "off", "model": None, "available": False, "budget": None}
     model = cfg.model if cfg.model and valid_model(cfg.model) else None
     return {
-        "mode": cfg.provider,
+        "mode": "cloud" if cfg.provider == "openrouter" else cfg.provider,  # Oberfläche: off, local, cloud
         "model": model,
         "available": cfg.provider != "off" and model is not None,
         "budget": (

@@ -117,7 +117,7 @@ chmod 600 ~/.config/ariadne/backup-recipients.txt
 ## 2 KI (optional)
 
 ```sh
-ariadne ai setup          # Anbieter (cloud oder local), Modell-ID, Monatslimit; bei cloud API-Key ohne Echo
+ariadne ai setup          # Anbieter (cloud, openrouter oder local), Modell-ID, Monatslimit, API-Key ohne Echo
 ariadne ai check          # ok, warn oder fail: TLS ohne fremde CA, kein Proxy, Ollama erreichbar
 ariadne ai status         # Anbieter, Modell, Verbrauch des Monats, Schlüssel vorhanden
 ```
@@ -125,6 +125,7 @@ ariadne ai status         # Anbieter, Modell, Verbrauch des Monats, Schlüssel v
 Die Modell-ID setzt du selbst (aus der Liste deines Anbieters; lokal zuerst `ollama pull <ID>`); Ariadne kennt keinen Standard. Ist sie falsch, meldet das Dashboard «Modell-ID beim Anbieter unbekannt» bzw. «Modell in Ollama nicht geladen». Ohne `ai setup` läuft alles ausser den KI-Denkanstössen. Was an die KI geht, läuft vorher durch den Redaktor (E72).
 
 - **cloud:** Der API-Key liegt verschlüsselt im Operator-Tresor (darum zuerst `ariadne init`) und gilt als eigenes Secret: Steht er in einer Ausgabe, ersetzt ihn Ariadne vor Export, Dashboard und KI. TLS prüft Ariadne nur gegen die Mozilla-Liste (`certifi`), nie gegen CAs, die im System installiert sind (Burp, Schulnetz): Bei einem Aufbruch scheitert die Verbindung, statt den Key durchzureichen. Pro Projekt braucht es zusätzlich die Freigabe im Terminal: `ariadne ai allow-cloud` (nach `ariadne start`). Im Profil customer und bei öffentlichen Adressen im Scope ohne `--not-customer` bleibt die Cloud gesperrt.
+- **openrouter:** Key von openrouter.ai (beginnt mit `sk-or-v1-`), Modell-ID wie auf openrouter.ai angezeigt, z. B. `moonshotai/kimi-k3`. Es gelten dieselben Regeln wie bei cloud (Key im Tresor, TLS nur gegen die Mozilla-Liste, Freigabe pro Projekt mit `ariadne ai allow-cloud`). OpenRouter leitet an den Anbieter des Modells weiter und wählt ihn frei (E134); dort kann das Lagebild gespeichert werden. Die Kosten meldet OpenRouter selbst, die Preise in `ai.toml` gelten dann nicht. «Anmeldung beim Anbieter fehlgeschlagen» heisst bei OpenRouter auch: Guthaben oder Limit des Keys aufgebraucht.
 - **local:** Ollama auf `127.0.0.1` (`ollama serve`), Port 11434; ein anderer Port steht in `~/.config/ariadne/ai.toml` unter `[local]` als `port = …`.
 - Die Preise in `ai.toml` unter `[prices]` sind vorsichtige Platzhalter; an die Preisliste deines Modells anpassen, sonst rechnet das Budget zu hoch.
 

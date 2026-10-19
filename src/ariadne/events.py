@@ -376,7 +376,7 @@ class ClockCheck(_M):
 class AiCall(_M):
     call_id: str
     function: Literal["denkanstoss", "extraktion", "vision", "frage", "zusammenfassung"]
-    provider: Literal["claude", "ollama"]
+    provider: Literal["claude", "ollama", "openrouter"]
     model_requested: str
     model_served: str | None = None
     prompt_version: str
@@ -659,7 +659,7 @@ class DAiDenkanstoss(_M):
 
     job_id: str = Field(min_length=1, max_length=64)
     call_id: str = Field(min_length=1, max_length=64)
-    provider: Literal["cloud", "local"]
+    provider: Literal["cloud", "local", "openrouter"]
     model: str = Field(min_length=1, max_length=100)
     prompt_version: str = Field(min_length=1, max_length=64)
     items: list[DAiItem] = Field(default_factory=list, max_length=4)

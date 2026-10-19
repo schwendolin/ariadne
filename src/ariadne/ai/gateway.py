@@ -25,8 +25,14 @@ from typing import Any
 
 from ariadne.ai import schema as ai_schema
 from ariadne.ai.budget import Ledger, Usage, cost_microusd
-from ariadne.ai.config import AiConfig, ConfigError, load_config
-from ariadne.ai.providers import CloudProvider, LocalProvider, ProviderError, ProviderResult
+from ariadne.ai.config import AiConfig, ConfigError, is_remote, key_name, load_config
+from ariadne.ai.providers import (
+    CloudProvider,
+    LocalProvider,
+    OpenRouterProvider,
+    ProviderError,
+    ProviderResult,
+)
 from ariadne.ai.situation import Situation, build_situation
 from ariadne.ai.store import done_titles
 from ariadne.rules.engine import evaluate
@@ -46,7 +52,7 @@ __all__ = [
 
 log = logging.getLogger("ariadne.ai")
 
-KEY_NAME = "anthropic"  # Name des API-Keys im Operator-Tresor
+KEY_NAME = "anthropic"  # Name des API-Keys für cloud im Operator-Tresor (openrouter: config.key_name)
 EFFORT = "high"  # Denkanstösse: Effort ausdrücklich gesetzt (Architektur 6.2)
 _PROMPT_OVERHEAD_TOKENS = 1500  # System-Prompt, Listen
 _PUBLIC_TLD_OK = ("htb", "local", "lab", "internal", "test", "localdomain", "home", "lan")
@@ -144,7 +150,7 @@ def policy_reason(
         return "off"
     if not cfg.model:
         return "no_model"
-    if cfg.provider == "cloud":
+    if is_remote(cfg.provider):  # cloud und openrouter (E134)
         if profile != "lab":
             return "profile"
         if not operator_unlocked:
@@ -235,9 +241,11 @@ ProviderFactory = Callable[[AiConfig, "str | None"], Any]
 
 
 def default_factory(cfg: AiConfig, key: str | None) -> Any:
-    if cfg.provider == "cloud":
+    if is_remote(cfg.provider):
         if not key:
             raise ProviderError("auth")
+        if cfg.provider == "openrouter":
+            return OpenRouterProvider(key, cfg.model)
         return CloudProvider(key, cfg.model)
     return LocalProvider(cfg.model, port=cfg.local_port)
 
@@ -274,9 +282,13 @@ class Gateway:
     def ledger(self) -> Ledger:
         return Ledger(self.daemon.paths)
 
-    def key(self) -> str | None:
+    def key(self, cfg: AiConfig | None = None) -> str | None:
+        """API-Key des eingestellten Anbieters (``cfg`` fehlt: aus ``ai.toml``)."""
         op = getattr(self.daemon, "operator", None)
-        return op.get_api_key(KEY_NAME) if op is not None else None
+        if op is None:
+            return None
+        cfg = cfg if cfg is not None else self.config()
+        return op.get_api_key(key_name(cfg.provider if cfg is not None else None))
 
     def busy(self) -> bool:
         return self.current is not None and self.current.status in ("queued", "running")
@@ -293,7 +305,7 @@ class Gateway:
         op = getattr(self.daemon, "operator", None)
         reason = policy_reason(
             cfg,
-            key_present=bool(self.key()),
+            key_present=bool(self.key(cfg)),
             operator_unlocked=op is not None,
             profile=p.info.profile,
             flags=flags,
@@ -323,7 +335,7 @@ class Gateway:
         self.api.same(p)
         reason = policy_reason(
             cfg,
-            key_present=bool(self.key()),
+            key_present=bool(self.key(cfg)),
             operator_unlocked=getattr(self.daemon, "operator", None) is not None,
             profile=p.info.profile,
             flags=flags,
@@ -398,7 +410,7 @@ class Gateway:
         job.tokens_estimate = sit.tokens_estimate + _PROMPT_OVERHEAD_TOKENS
         job.step, job.message = "anfrage", JOB_TEXT["anfrage"]
         self._publish(job)
-        key = self.key() if cfg.provider == "cloud" else None
+        key = self.key(cfg) if is_remote(cfg.provider) else None
         call_id = _secrets.token_hex(8)
         try:
             result: ProviderResult = await asyncio.to_thread(self._call, cfg, key, user)
@@ -496,7 +508,7 @@ class Gateway:
         header: dict[str, Any] = {
             "call_id": call_id,
             "function": "denkanstoss",
-            "provider": "claude" if cfg.provider == "cloud" else "ollama",
+            "provider": {"cloud": "claude", "openrouter": "openrouter"}.get(cfg.provider, "ollama"),
             "model_requested": cfg.model,
             "model_served": (result.model if result is not None else None),
             "prompt_version": ai_schema.PROMPT_VERSION,

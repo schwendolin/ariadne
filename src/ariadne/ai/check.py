@@ -20,8 +20,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from ariadne.ai.config import AiConfig
-from ariadne.ai.providers import API_HOST, LocalProvider
+from ariadne.ai.config import AiConfig, api_host
+from ariadne.ai.providers import LocalProvider
 
 __all__ = ["Check", "Probe", "tls_probe", "run_checks", "worst", "PROXY_VARS"]
 
@@ -136,26 +136,27 @@ def run_checks(
         )
     else:
         out.append(Check("ok", "Proxy", "kein Proxy in der Umgebung"))
+    host = api_host(cfg.provider)
     moz = _mozilla_cafile()
-    p_moz = probe(API_HOST, 443, moz) if moz else None
+    p_moz = probe(host, 443, moz) if moz else None
     if p_moz is not None and not p_moz.reachable:
-        out.append(Check("fail", "Erreichbar", f"{API_HOST}:443 nicht erreichbar (Netz, DNS oder Filter)"))
+        out.append(Check("fail", "Erreichbar", f"{host}:443 nicht erreichbar (Netz, DNS oder Filter)"))
         return out
     if p_moz is not None and p_moz.verified:
         out.append(
             Check(
                 "ok",
                 "Erreichbar",
-                f"{API_HOST} antwortet" + (f" (HTTP {p_moz.http_status})" if p_moz.http_status else ""),
+                f"{host} antwortet" + (f" (HTTP {p_moz.http_status})" if p_moz.http_status else ""),
             )
         )
         out.append(
             Check("ok", "TLS", "Zertifikatskette gültig gegen die Mozilla-Liste, kein Aufbruch erkannt")
         )
         return out
-    p_sys = probe(API_HOST, 443, None)
+    p_sys = probe(host, 443, None)
     if not p_sys.reachable:
-        out.append(Check("fail", "Erreichbar", f"{API_HOST}:443 nicht erreichbar"))
+        out.append(Check("fail", "Erreichbar", f"{host}:443 nicht erreichbar"))
         return out
     if p_moz is None:
         out.append(
